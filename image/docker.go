@@ -81,10 +81,13 @@ func (r *DockerResolver) ensureImage(ctx context.Context, imageRef string) error
 	return nil
 }
 
-// parseLayers reads a Docker image tar archive and returns the layer list.
+// parseLayers reads a Docker image tar archive and returns the layer list
+// with ID, Size, and Command populated.
 func parseLayers(r io.Reader) ([]Layer, error) {
 	tr := tar.NewReader(r)
-	var manifestData []byte
+
+	contents := make(map[string][]byte)
+	headers := make(map[string]int64)
 
 	for {
 		hdr, err := tr.Next()
@@ -94,15 +97,20 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading image archive: %w", err)
 		}
-		if hdr.Name == "manifest.json" {
-			manifestData, err = io.ReadAll(tr)
+
+		headers[hdr.Name] = hdr.Size
+
+		if hdr.Name == "manifest.json" ||
+			strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/") {
+			data, err := io.ReadAll(tr)
 			if err != nil {
-				return nil, fmt.Errorf("reading manifest.json: %w", err)
+				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
 			}
-			break
+			contents[hdr.Name] = data
 		}
 	}
 
+	manifestData := contents["manifest.json"]
 	if manifestData == nil {
 		return nil, fmt.Errorf("invalid image archive: manifest.json not found")
 	}
@@ -111,24 +119,63 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 	if err := json.Unmarshal(manifestData, &manifests); err != nil {
 		return nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
 	}
-
 	if len(manifests) == 0 {
 		return nil, fmt.Errorf("invalid image archive: empty manifest")
 	}
 
-	layers := make([]Layer, len(manifests[0].Layers))
-	for i, layerPath := range manifests[0].Layers {
+	manifest := manifests[0]
+
+	configData := contents[manifest.Config]
+	if configData == nil {
+		return nil, fmt.Errorf("invalid image archive: config %s not found", manifest.Config)
+	}
+
+	var config imageConfig
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return nil, fmt.Errorf("invalid image archive: cannot parse config: %w", err)
+	}
+
+	layerSizes := make(map[string]int64)
+	for _, layerPath := range manifest.Layers {
+		if size, ok := headers[layerPath]; ok {
+			layerSizes[layerPath] = size
+		}
+	}
+
+	var commands []string
+	for _, entry := range config.History {
+		if !entry.EmptyLayer {
+			commands = append(commands, entry.CreatedBy)
+		}
+	}
+
+	layers := make([]Layer, len(manifest.Layers))
+	for i, layerPath := range manifest.Layers {
 		layers[i] = Layer{
 			Index: i,
 			ID:    extractShortID(layerPath),
+			Size:  layerSizes[layerPath],
+		}
+		if i < len(commands) {
+			layers[i].Command = commands[i]
 		}
 	}
+
 	return layers, nil
 }
 
 type dockerManifest struct {
 	Config string   `json:"Config"`
 	Layers []string `json:"Layers"`
+}
+
+type imageConfig struct {
+	History []configHistoryEntry `json:"history"`
+}
+
+type configHistoryEntry struct {
+	CreatedBy  string `json:"created_by"`
+	EmptyLayer bool   `json:"empty_layer"`
 }
 
 // extractShortID derives a 12-char short ID from a layer tar path.
