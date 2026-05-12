@@ -259,3 +259,50 @@ func TestExtractShortID_ExactlyTwelve(t *testing.T) {
 	id := extractShortID("123456789012/layer.tar")
 	assert.Equal(t, "123456789012", id)
 }
+
+func TestExtractShortID_OCIFormat(t *testing.T) {
+	id := extractShortID("blobs/sha256/aabbccddee112233445566778899aabbccddeeff00112233445566778899aabb")
+	assert.Equal(t, "aabbccddee11", id)
+}
+
+func TestParseLayers_OCIFormat(t *testing.T) {
+	configDigest := "aabbccddee112233445566778899aabbccddeeff00112233445566778899aa00"
+	layerDigest1 := "1111111111111111111111111111111111111111111111111111111111111111"
+	layerDigest2 := "2222222222222222222222222222222222222222222222222222222222222222"
+
+	manifest := []dockerManifest{{
+		Config: "blobs/sha256/" + configDigest,
+		Layers: []string{
+			"blobs/sha256/" + layerDigest1,
+			"blobs/sha256/" + layerDigest2,
+		},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	configData := buildConfig(t, []string{
+		"/bin/sh -c apt-get update",
+		"/bin/sh -c #(nop)  CMD [\"nginx\"]",
+	})
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json":                    manifestData,
+		"blobs/sha256/" + configDigest:     configData,
+		"blobs/sha256/" + layerDigest1:     make([]byte, 4096),
+		"blobs/sha256/" + layerDigest2:     make([]byte, 2048),
+	})
+
+	layers, err := parseLayers(tarBuf)
+	require.NoError(t, err)
+	assert.Len(t, layers, 2)
+
+	assert.Equal(t, 0, layers[0].Index)
+	assert.Equal(t, "111111111111", layers[0].ID)
+	assert.Equal(t, int64(4096), layers[0].Size)
+	assert.Equal(t, "/bin/sh -c apt-get update", layers[0].Command)
+
+	assert.Equal(t, 1, layers[1].Index)
+	assert.Equal(t, "222222222222", layers[1].ID)
+	assert.Equal(t, int64(2048), layers[1].Size)
+	assert.Equal(t, "/bin/sh -c #(nop)  CMD [\"nginx\"]", layers[1].Command)
+}

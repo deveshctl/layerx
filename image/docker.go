@@ -83,6 +83,8 @@ func (r *DockerResolver) ensureImage(ctx context.Context, imageRef string) error
 
 // parseLayers reads a Docker image tar archive and returns the layer list
 // with ID, Size, and Command populated.
+// Supports both legacy Docker format (config as <sha>.json at root) and
+// OCI format (config as blobs/sha256/<digest>).
 func parseLayers(r io.Reader) ([]Layer, error) {
 	tr := tar.NewReader(r)
 
@@ -100,8 +102,7 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 
 		headers[hdr.Name] = hdr.Size
 
-		if hdr.Name == "manifest.json" ||
-			strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/") {
+		if isMetadataFile(hdr.Name, hdr.Size) {
 			data, err := io.ReadAll(tr)
 			if err != nil {
 				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
@@ -178,11 +179,37 @@ type configHistoryEntry struct {
 	EmptyLayer bool   `json:"empty_layer"`
 }
 
-// extractShortID derives a 12-char short ID from a layer tar path.
+// extractShortID derives a 12-char short ID from a layer path.
+// Handles both legacy format ("aabbcc.../layer.tar") and
+// OCI format ("blobs/sha256/aabbcc...").
 func extractShortID(layerPath string) string {
-	dir := strings.Split(layerPath, "/")[0]
-	if len(dir) > 12 {
-		return dir[:12]
+	parts := strings.Split(layerPath, "/")
+	var id string
+	if len(parts) >= 3 && parts[0] == "blobs" {
+		id = parts[2]
+	} else {
+		id = parts[0]
 	}
-	return dir
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+const metadataSizeLimit = 1 << 20 // 1 MB — config/manifest files are small
+
+// isMetadataFile returns true for files that could be image config or manifest
+// entries. This covers both legacy Docker format (root-level .json files) and
+// OCI format (blobs/sha256/<digest> entries which are small JSON blobs).
+func isMetadataFile(name string, size int64) bool {
+	if name == "manifest.json" {
+		return true
+	}
+	if strings.HasSuffix(name, ".json") && !strings.Contains(name, "/") {
+		return true
+	}
+	if strings.HasPrefix(name, "blobs/sha256/") && size < metadataSizeLimit {
+		return true
+	}
+	return false
 }
