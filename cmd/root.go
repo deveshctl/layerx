@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/deveshpharswan/layerx/image"
 	"github.com/spf13/cobra"
@@ -32,6 +33,21 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Found %d layers\n", len(layers))
+	printLayerTable(cmd.OutOrStdout(), layers)
 	return nil
+}
+
+func printLayerTable(w io.Writer, layers []image.Layer) {
+	fmt.Fprintf(w, "%-4s %-14s %10s  %s\n", "#", "ID", "SIZE", "COMMAND")
+	for _, l := range layers {
+		cmd := truncateCommand(l.Command, 72)
+		fmt.Fprintf(w, "%-4d %-14s %10s  %s\n", l.Index, l.ID, image.FormatBytes(l.Size), cmd)
+	}
+}
+
+func truncateCommand(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
