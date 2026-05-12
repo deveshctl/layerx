@@ -31,7 +31,10 @@ Thumbs.db
 
 # Project-specific
 .layerx.yaml
-.claude/settings.local.json
+.claude/
+layerx.md
+layerx_guide.md
+CLAUDE.md
 
 # Vendor (we use modules, not vendoring)
 /vendor/
