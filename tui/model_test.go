@@ -600,11 +600,11 @@ func TestDiffToggleOff(t *testing.T) {
 	assert.False(t, m.diffOnly)
 }
 
-func TestDiffToggleOnlyWorksInTreePanel(t *testing.T) {
+func TestDiffToggleWorksFromLayersPanel(t *testing.T) {
 	m := setupModelWithDiffs()
 	m.focus = focusLayers
 	m = send(m, keyPress('d'))
-	assert.False(t, m.diffOnly)
+	assert.True(t, m.diffOnly)
 }
 
 func TestDiffToggleResetsCursor(t *testing.T) {
@@ -699,11 +699,11 @@ func TestSortCyclesThreeStates(t *testing.T) {
 	assert.Equal(t, sortNone, m.sortMode)
 }
 
-func TestSortOnlyWorksInTreePanel(t *testing.T) {
+func TestSortWorksFromLayersPanel(t *testing.T) {
 	m := setupModelWithDiffs()
 	m.focus = focusLayers
 	m = send(m, keyPress('s'))
-	assert.Equal(t, sortNone, m.sortMode)
+	assert.Equal(t, sortDesc, m.sortMode)
 }
 
 func TestSortDescLargestFirst(t *testing.T) {

@@ -286,28 +286,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, keys.DiffOnly):
-			if m.focus == focusTree {
-				m.diffOnly = !m.diffOnly
-				m.treeCursor = 0
-				m.treeOffset = 0
-				return m, nil
-			}
+			m.diffOnly = !m.diffOnly
+			m.treeCursor = 0
+			m.treeOffset = 0
 			return m, nil
 
 		case key.Matches(msg, keys.Sort):
-			if m.focus == focusTree {
-				switch m.sortMode {
-				case sortNone:
-					m.sortMode = sortDesc
-				case sortDesc:
-					m.sortMode = sortAsc
-				case sortAsc:
-					m.sortMode = sortNone
-				}
-				m.treeCursor = 0
-				m.treeOffset = 0
-				return m, nil
+			switch m.sortMode {
+			case sortNone:
+				m.sortMode = sortDesc
+			case sortDesc:
+				m.sortMode = sortAsc
+			case sortAsc:
+				m.sortMode = sortNone
 			}
+			m.treeCursor = 0
+			m.treeOffset = 0
 			return m, nil
 		}
 	}
