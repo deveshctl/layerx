@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M06+M07] — 2026-05-13
+
+File tree filter, diff-only toggle, and sort-by-size.
+
+### Added
+- `/` opens substring filter input; `Esc` clears, `Enter` keeps filter active
+- `d` toggles diff-only mode (hides unchanged files, shows only added/modified/removed)
+- `s` cycles sort: default tree order → largest first → smallest first → default
+- All three compose together (filter + diff + sort simultaneously)
+- Status bar shows `[diff]` and `[↓size]`/`[↑size]` indicators when active
+- Help overlay updated with new File Tree section
+
+### Changed
+- Esc key now has precedence: closes filter → closes help → quits
+- Sort resets to default on layer switch; filter and diff-only persist
+- File tree displays flat paths (no indentation) when sort is active
+- Panel title shows active filter query: `FILE TREE [3/12] "nginx"`
+
+### Technical
+- Pure-function pipeline: `displayTree()` = `currentFlatTree()` → `applyDiffFilter()` → `applySubstringFilter()` → `applySortBySize()`
+- No changes to `image/` package — all transformations are view-layer only
+- Gate C pending: Verify filter/diff/sort interactions on nginx:latest and ubuntu:latest
+
 ## [M04+M05] — 2026-05-13
 
 Live Docker data in TUI + file tree with layer stacking and whiteout handling.
