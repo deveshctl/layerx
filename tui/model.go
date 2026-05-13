@@ -35,6 +35,14 @@ const (
 	stateError
 )
 
+type sortMode int
+
+const (
+	sortNone sortMode = iota
+	sortDesc
+	sortAsc
+)
+
 // analysisMsg is sent when the background fetch completes.
 type analysisMsg struct {
 	analysis *image.Analysis
@@ -84,6 +92,10 @@ type model struct {
 	progressCh   chan image.ProgressEvent
 	copyConfirm  bool
 	showHelp     bool
+	filterActive bool
+	filterQuery  string
+	diffOnly     bool
+	sortMode     sortMode
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -183,14 +195,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		// Quit always works regardless of state.
-		if key.Matches(msg, keys.Quit) {
+		// Esc has precedence: filter → help → quit
+		if msg.Code == tea.KeyEscape {
+			if m.filterActive {
+				m.filterActive = false
+				m.filterQuery = ""
+				m.treeCursor = 0
+				m.treeOffset = 0
+				return m, nil
+			}
 			if m.showHelp {
 				m.showHelp = false
 				return m, nil
 			}
 			m.quitting = true
 			return m, tea.Quit
+		}
+
+		// Quit via q or ctrl+c always works.
+		if key.Matches(msg, keys.Quit) {
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+		// When filter input is active, capture all keys for text editing.
+		if m.filterActive {
+			return m.handleFilterInput(msg)
 		}
 
 		// Help toggle works when ready.
@@ -247,10 +277,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 			}
 			return m, nil
+
+		case key.Matches(msg, keys.Filter):
+			if m.focus == focusTree {
+				m.filterActive = true
+				return m, nil
+			}
+			return m, nil
+
+		case key.Matches(msg, keys.DiffOnly):
+			m.diffOnly = !m.diffOnly
+			m.treeCursor = 0
+			m.treeOffset = 0
+			return m, nil
+
+		case key.Matches(msg, keys.Sort):
+			switch m.sortMode {
+			case sortNone:
+				m.sortMode = sortDesc
+			case sortDesc:
+				m.sortMode = sortAsc
+			case sortAsc:
+				m.sortMode = sortNone
+			}
+			m.treeCursor = 0
+			m.treeOffset = 0
+			return m, nil
 		}
 	}
 
 	return m, nil
+}
+
+func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEnter:
+		m.filterActive = false
+		m.treeCursor = 0
+		m.treeOffset = 0
+		return m, nil
+	case msg.Code == tea.KeyBackspace:
+		if len(m.filterQuery) > 0 {
+			m.filterQuery = m.filterQuery[:len(m.filterQuery)-1]
+			m.treeCursor = 0
+			m.treeOffset = 0
+		}
+		return m, nil
+	default:
+		if msg.Text != "" {
+			m.filterQuery += msg.Text
+			m.treeCursor = 0
+			m.treeOffset = 0
+		}
+		return m, nil
+	}
 }
 
 func (m model) layers() []image.Layer {
@@ -272,6 +352,18 @@ func (m model) currentFlatTree() []*image.FileNode {
 		return nil
 	}
 	return flattenTree(tree.Root)
+}
+
+func (m model) displayTree() []*image.FileNode {
+	files := m.currentFlatTree()
+	if m.diffOnly {
+		files = applyDiffFilter(files)
+	}
+	if m.filterQuery != "" {
+		files = applySubstringFilter(files, m.filterQuery)
+	}
+	files = applySortBySize(files, m.sortMode)
+	return files
 }
 
 func flattenTree(root *image.FileNode) []*image.FileNode {
@@ -305,10 +397,11 @@ func (m *model) moveDown() {
 			m.layerCursor++
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.sortMode = sortNone
 			m.adjustLayerScroll()
 		}
 	case focusTree:
-		files := m.currentFlatTree()
+		files := m.displayTree()
 		if m.treeCursor < len(files)-1 {
 			m.treeCursor++
 			m.adjustTreeScroll()
@@ -323,6 +416,7 @@ func (m *model) moveUp() {
 			m.layerCursor--
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.sortMode = sortNone
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -340,6 +434,7 @@ func (m *model) moveToTop() {
 		m.layerOffset = 0
 		m.treeCursor = 0
 		m.treeOffset = 0
+		m.sortMode = sortNone
 	case focusTree:
 		m.treeCursor = 0
 		m.treeOffset = 0
@@ -354,10 +449,11 @@ func (m *model) moveToBottom() {
 			m.layerCursor = len(layers) - 1
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.sortMode = sortNone
 			m.adjustLayerScroll()
 		}
 	case focusTree:
-		files := m.currentFlatTree()
+		files := m.displayTree()
 		if len(files) > 0 {
 			m.treeCursor = len(files) - 1
 			m.adjustTreeScroll()
@@ -412,7 +508,7 @@ func (m *model) clampCursors() {
 		m.layerCursor = 0
 	}
 	m.adjustLayerScroll()
-	files := m.currentFlatTree()
+	files := m.displayTree()
 	if len(files) == 0 {
 		m.treeCursor = 0
 		m.treeOffset = 0
@@ -535,7 +631,7 @@ func (m model) viewReady() tea.View {
 
 	header := m.renderHeader()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers)
-	right := renderFileTree(m.currentFlatTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree)
+	right := renderFileTree(m.displayTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.sortMode)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
@@ -595,18 +691,22 @@ func (m model) renderStatusBar() string {
 	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
 	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
 
-	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
+	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
 		keyStyle.Render("Tab"), descStyle.Render("switch"),
 		sepStyle.Render("·"),
 		keyStyle.Render("j/k"), descStyle.Render("navigate"),
 		sepStyle.Render("·"),
-		keyStyle.Render("g/G"), descStyle.Render("top/bottom"),
+		keyStyle.Render("/"), descStyle.Render("filter"),
 		sepStyle.Render("·"),
-		keyStyle.Render("c"), descStyle.Render("copy cmd"),
+		keyStyle.Render("d"), descStyle.Render("diff"),
+		sepStyle.Render("·"),
+		keyStyle.Render("s"), descStyle.Render("sort"),
+		sepStyle.Render("·"),
+		keyStyle.Render("c"), descStyle.Render("copy"),
 		sepStyle.Render("·"),
 		keyStyle.Render("?"), descStyle.Render("help"),
 		sepStyle.Render("·"),
-		keyStyle.Render("q/Esc"), descStyle.Render("quit"),
+		keyStyle.Render("q"), descStyle.Render("quit"),
 	)
 
 	layers := m.layers()
@@ -615,6 +715,17 @@ func (m model) renderStatusBar() string {
 		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
 		right = copiedStyle.Render("Copied!") + " "
 	} else {
+		badges := ""
+		if m.diffOnly {
+			badges += lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Render("[diff]") + " "
+		}
+		switch m.sortMode {
+		case sortDesc:
+			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[↓size]") + " "
+		case sortAsc:
+			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[↑size]") + " "
+		}
+
 		layerNum := fmt.Sprintf("%d", m.layerCursor+1)
 		layerTotal := fmt.Sprintf("%d", len(layers))
 		size := ""
@@ -623,7 +734,7 @@ func (m model) renderStatusBar() string {
 		}
 		rightHighlight := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Bold(true).Render("Layer " + layerNum)
 		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor).Render("/" + layerTotal + " · " + size)
-		right = rightHighlight + rightDim + " "
+		right = badges + rightHighlight + rightDim + " "
 	}
 
 	gap := m.width - lipgloss.Width(hints) - lipgloss.Width(right)
@@ -649,18 +760,25 @@ func (m model) overlayHelp() string {
 		"  " + keyStyle.Render("g/G") + "           " + descStyle.Render("Jump to top/bottom"),
 		"  " + keyStyle.Render("Tab") + "           " + descStyle.Render("Switch panel focus"),
 		"",
+		dimStyle.Render("  File Tree"),
+		"  " + keyStyle.Render("/") + "             " + descStyle.Render("Open filter (substring)"),
+		"  " + keyStyle.Render("Esc") + "           " + descStyle.Render("Clear filter / close / quit"),
+		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("Keep filter, close input"),
+		"  " + keyStyle.Render("d") + "             " + descStyle.Render("Toggle diff-only (changed files)"),
+		"  " + keyStyle.Render("s") + "             " + descStyle.Render("Cycle sort: none → ↓size → ↑size"),
+		"",
 		dimStyle.Render("  Actions"),
 		"  " + keyStyle.Render("c") + "             " + descStyle.Render("Copy command to clipboard"),
 		"",
 		dimStyle.Render("  General"),
 		"  " + keyStyle.Render("?") + "             " + descStyle.Render("Toggle this help"),
-		"  " + keyStyle.Render("q / Esc") + "       " + descStyle.Render("Quit (or close help)"),
+		"  " + keyStyle.Render("q / Ctrl+C") + "    " + descStyle.Render("Quit"),
 		"",
 	}
 
 	body := strings.Join(lines, "\n")
 
-	boxWidth := 50
+	boxWidth := 54
 	boxHeight := len(lines) + 2
 
 	borderStyle := lipgloss.NewStyle().
