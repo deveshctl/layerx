@@ -732,6 +732,7 @@ func TestSortResetsOnLayerSwitch(t *testing.T) {
 	m := setupModelWithDiffs()
 	m.sortMode = sortDesc
 	m.focus = focusLayers
+	m.layerCursor = 0
 	m = send(m, keyPress('j'))
 	assert.Equal(t, sortNone, m.sortMode)
 }
