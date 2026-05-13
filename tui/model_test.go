@@ -512,3 +512,264 @@ func TestWrapCommandLinesExactWidthFitsOnOneLine(t *testing.T) {
 	assert.Equal(t, cmd, lines[0])
 	assert.Empty(t, lines[1])
 }
+
+// --- M06+M07 test fixtures ---------------------------------------------------
+
+func testAnalysisWithDiffs() *image.Analysis {
+	layers := []image.Layer{
+		{
+			Index:   0,
+			ID:      "a1b2c3d4e5f6",
+			Size:    10000000,
+			Command: "FROM ubuntu:22.04",
+			Tree:    image.NewFileTree(),
+		},
+		{
+			Index:   1,
+			ID:      "f7e8d9c0b1a2",
+			Size:    5000000,
+			Command: "RUN apt-get install -y nginx",
+			Tree:    image.NewFileTree(),
+		},
+	}
+
+	// Layer 0: base layer
+	etc := &image.FileNode{Name: "etc", Path: "/etc", IsDir: true}
+	etc.AddChild(&image.FileNode{Name: "passwd", Path: "/etc/passwd", Size: 2048})
+	etc.AddChild(&image.FileNode{Name: "hostname", Path: "/etc/hostname", Size: 128})
+	usr := &image.FileNode{Name: "usr", Path: "/usr", IsDir: true}
+	bin := &image.FileNode{Name: "bin", Path: "/usr/bin", IsDir: true}
+	bin.AddChild(&image.FileNode{Name: "bash", Path: "/usr/bin/bash", Size: 1200000})
+	usr.AddChild(bin)
+	layers[0].Tree.Root.AddChild(etc)
+	layers[0].Tree.Root.AddChild(usr)
+
+	// Layer 1: installs nginx
+	nginxBin := &image.FileNode{Name: "nginx", Path: "/usr/bin/nginx", Size: 800000}
+	nginxConf := &image.FileNode{Name: "nginx.conf", Path: "/etc/nginx.conf", Size: 4096}
+	binL1 := &image.FileNode{Name: "bin", Path: "/usr/bin", IsDir: true}
+	binL1.AddChild(nginxBin)
+	usrL1 := &image.FileNode{Name: "usr", Path: "/usr", IsDir: true}
+	usrL1.AddChild(binL1)
+	etcL1 := &image.FileNode{Name: "etc", Path: "/etc", IsDir: true}
+	etcL1.AddChild(nginxConf)
+	layers[1].Tree.Root.AddChild(usrL1)
+	layers[1].Tree.Root.AddChild(etcL1)
+
+	stacked := image.Stack(layers)
+
+	return &image.Analysis{
+		ImageRef:     "test-diffs:latest",
+		Layers:       layers,
+		StackedTrees: stacked,
+		TotalSize:    15000000,
+	}
+}
+
+func setupModelWithDiffs() model {
+	m := NewModel(Config{ImageRef: "test-diffs:latest"})
+	m.width = 120
+	m.height = 40
+	m.state = stateReady
+	m.analysis = testAnalysisWithDiffs()
+	m.layerCursor = 1
+	m.focus = focusTree
+	return m
+}
+
+// --- Diff-only toggle --------------------------------------------------------
+
+func TestDiffToggleFiltersDiffType(t *testing.T) {
+	m := setupModelWithDiffs()
+	allFiles := m.displayTree()
+
+	m = send(m, keyPress('d'))
+	assert.True(t, m.diffOnly)
+
+	filtered := m.displayTree()
+	assert.Less(t, len(filtered), len(allFiles))
+	for _, f := range filtered {
+		assert.NotEqual(t, image.Unchanged, f.DiffType)
+	}
+}
+
+func TestDiffToggleOff(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('d'))
+	m = send(m, keyPress('d'))
+	assert.False(t, m.diffOnly)
+}
+
+func TestDiffToggleOnlyWorksInTreePanel(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus = focusLayers
+	m = send(m, keyPress('d'))
+	assert.False(t, m.diffOnly)
+}
+
+func TestDiffToggleResetsCursor(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.treeCursor = 3
+	m = send(m, keyPress('d'))
+	assert.Equal(t, 0, m.treeCursor)
+	assert.Equal(t, 0, m.treeOffset)
+}
+
+// --- Filter ------------------------------------------------------------------
+
+func TestFilterActivation(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	assert.True(t, m.filterActive)
+}
+
+func TestFilterOnlyActivatesInTreePanel(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus = focusLayers
+	m = send(m, keyPress('/'))
+	assert.False(t, m.filterActive)
+}
+
+func TestFilterTypingUpdatesQuery(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	m = send(m, keyPress('n'))
+	m = send(m, keyPress('g'))
+	assert.Equal(t, "ng", m.filterQuery)
+}
+
+func TestFilterEscClearsQuery(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	m = send(m, keyPress('n'))
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.False(t, m.filterActive)
+	assert.Equal(t, "", m.filterQuery)
+}
+
+func TestFilterEnterKeepsQuery(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	m = send(m, keyPress('n'))
+	m = send(m, keyPressSpecial(tea.KeyEnter))
+	assert.False(t, m.filterActive)
+	assert.Equal(t, "n", m.filterQuery)
+}
+
+func TestFilterBackspaceRemovesChar(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	m = send(m, keyPress('a'))
+	m = send(m, keyPress('b'))
+	m = send(m, keyPressSpecial(tea.KeyBackspace))
+	assert.Equal(t, "a", m.filterQuery)
+}
+
+func TestFilterSubstringMatchesCaseInsensitive(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterQuery = "NGINX"
+	files := m.displayTree()
+	for _, f := range files {
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
+}
+
+func TestFilterSwallowsNavKeysWhenActive(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	cursorBefore := m.treeCursor
+	m = send(m, keyPress('j'))
+	assert.Equal(t, cursorBefore, m.treeCursor)
+	assert.Contains(t, m.filterQuery, "j")
+}
+
+// --- Sort by size ------------------------------------------------------------
+
+func TestSortCyclesThreeStates(t *testing.T) {
+	m := setupModelWithDiffs()
+	assert.Equal(t, sortNone, m.sortMode)
+
+	m = send(m, keyPress('s'))
+	assert.Equal(t, sortDesc, m.sortMode)
+
+	m = send(m, keyPress('s'))
+	assert.Equal(t, sortAsc, m.sortMode)
+
+	m = send(m, keyPress('s'))
+	assert.Equal(t, sortNone, m.sortMode)
+}
+
+func TestSortOnlyWorksInTreePanel(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus = focusLayers
+	m = send(m, keyPress('s'))
+	assert.Equal(t, sortNone, m.sortMode)
+}
+
+func TestSortDescLargestFirst(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.sortMode = sortDesc
+	files := m.displayTree()
+	if len(files) >= 2 {
+		for i := 0; i < len(files)-1; i++ {
+			assert.GreaterOrEqual(t, nodeEffectiveSize(files[i]), nodeEffectiveSize(files[i+1]))
+		}
+	}
+}
+
+func TestSortAscSmallestFirst(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.sortMode = sortAsc
+	files := m.displayTree()
+	if len(files) >= 2 {
+		for i := 0; i < len(files)-1; i++ {
+			assert.LessOrEqual(t, nodeEffectiveSize(files[i]), nodeEffectiveSize(files[i+1]))
+		}
+	}
+}
+
+func TestSortResetsOnLayerSwitch(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.sortMode = sortDesc
+	m.focus = focusLayers
+	m = send(m, keyPress('j'))
+	assert.Equal(t, sortNone, m.sortMode)
+}
+
+func TestSortResetsCursor(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.treeCursor = 3
+	m = send(m, keyPress('s'))
+	assert.Equal(t, 0, m.treeCursor)
+}
+
+// --- Composability -----------------------------------------------------------
+
+func TestDiffPlusFilterCompose(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.diffOnly = true
+	m.filterQuery = "nginx"
+	files := m.displayTree()
+	for _, f := range files {
+		assert.NotEqual(t, image.Unchanged, f.DiffType)
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
+}
+
+// --- Esc precedence ----------------------------------------------------------
+
+func TestEscQuitsWhenFilterNotActive(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterActive = false
+	m.showHelp = false
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.True(t, m.quitting)
+}
+
+func TestEscClosesHelpBeforeQuit(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.showHelp = true
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.False(t, m.showHelp)
+	assert.False(t, m.quitting)
+}
