@@ -2,6 +2,68 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M04+M05] — 2026-05-13
+
+Live Docker data in TUI + file tree with layer stacking and whiteout handling.
+
+### Added
+- Real image layers shown in TUI (replacing hardcoded fake data)
+- Async loading with spinner, friendly error messages for daemon/pull failures
+- Full file tree parsing from layer tars (`ParseLayerTar`)
+- Layer stacking with `.wh.<name>` and `.wh..wh..opq` whiteout support (`Stack`)
+- DiffType colouring: green=Added, yellow=Modified, red=Removed, grey=Unchanged
+- `Analyze()` orchestrator as single entry point for TUI and CI
+- Structured error types: `ErrDaemonNotRunning`, `ErrPullFailed`, `ErrImageNotFound`
+- `FileNode` helpers: `FindChild`, `AddChild`, `RemoveChild`, `Walk`, `NewFileTree`
+
+### Changed
+- `cmd/root.go`: creates resolver, passes image ref + resolver into TUI
+- `tui/model.go`: state machine (loading/ready/error), async fetch via `tea.Cmd`
+- `tui/layers.go`: renders real `image.Layer` data with `FormatBytes` sizes
+- `tui/filetree.go`: renders real `image.FileNode` with depth-first flattening
+
+### Technical
+- Domain layer (`image/`) has zero UI imports — fully testable in isolation
+- Whiteout handling: regular (`.wh.<name>`) and opaque (`.wh..wh..opq`) both implemented
+- Non-fatal layer tar parsing: invalid/empty tars leave `Layer.Tree` as nil
+- Gate C pending: Verify on second machine against nginx:latest, alpine:latest, ubuntu:latest
+
+## [M03] — 2026-05-12
+
+Bubbletea layout proof. `layerx <any-image>` launches interactive TUI with fake data.
+
+### Added
+- `tui/` package: bubbletea v2 Model with 2-panel layout (layers + file tree)
+- Responsive layout: adapts to terminal resize, minimum 50x10 enforced
+- Navigation: Tab switches panels, j/k moves cursor, g/G jump to top/bottom
+- Adaptive styling: lipgloss v2 with rounded borders, diff colouring
+- Hardcoded fake data: 6-layer Go multi-stage build with per-layer file trees
+- Diff colouring: green (added), yellow (modified), red (removed), gray (unchanged)
+- Command preview: bottom of left panel shows full Dockerfile instruction
+
+### Changed
+- `cmd/root.go`: launches TUI instead of printing table to stdout
+
+### Technical
+- Import: `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`
+- Viewport scroll logic for file trees exceeding panel height
+- Focus management with visual border colour indicator (purple focused, gray unfocused)
+
+## [M02] — 2026-05-12
+
+Layer metadata table. `layerx nginx:latest` prints layer table with index, ID, size, and command.
+
+### Added
+- Layer size parsing from tar entry headers
+- Dockerfile command correlation from image config history
+- Human-readable byte formatting (`FormatBytes`)
+- Formatted table output with aligned columns
+- OCI format support (Docker 25+ `blobs/sha256/` layout)
+
+### Technical
+- Single-pass tar scan: manifest + config + layer sizes in one read
+- Empty layer filtering for correct command-to-layer correlation
+
 ## [M01] — 2026-05-12
 
 Docker plumbing proof. `layerx nginx:latest` prints layer count to stdout.

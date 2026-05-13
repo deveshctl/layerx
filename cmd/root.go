@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshpharswan/layerx/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -25,29 +25,11 @@ func runInspect(cmd *cobra.Command, args []string) error {
 
 	resolver, err := image.NewDockerResolver()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
-	layers, err := resolver.Resolve(cmd.Context(), imageRef)
-	if err != nil {
-		return err
-	}
-
-	printLayerTable(cmd.OutOrStdout(), layers)
-	return nil
-}
-
-func printLayerTable(w io.Writer, layers []image.Layer) {
-	fmt.Fprintf(w, "%-4s %-14s %10s  %s\n", "#", "ID", "SIZE", "COMMAND")
-	for _, l := range layers {
-		cmd := truncateCommand(l.Command, 72)
-		fmt.Fprintf(w, "%-4d %-14s %10s  %s\n", l.Index, l.ID, image.FormatBytes(l.Size), cmd)
-	}
-}
-
-func truncateCommand(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
+	return tui.Run(tui.Config{
+		ImageRef: imageRef,
+		Resolver: resolver,
+	})
 }
