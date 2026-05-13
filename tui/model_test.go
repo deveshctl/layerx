@@ -480,12 +480,12 @@ func TestRenderFileTreeDoesNotPanic(t *testing.T) {
 	m := setupModel()
 	files := m.currentFlatTree()
 	assert.NotPanics(t, func() {
-		renderFileTree(files, 0, 0, 60, 20, true)
+		renderFileTree(files, 0, 0, 60, 20, true, false, "", sortNone)
 	})
 }
 
 func TestRenderFileTreeEmptyShowsPlaceholder(t *testing.T) {
-	output := renderFileTree(nil, 0, 0, 60, 20, false)
+	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", sortNone)
 	assert.Contains(t, output, "no filesystem changes")
 }
 

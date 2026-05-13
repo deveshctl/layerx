@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -9,14 +10,25 @@ import (
 	"github.com/deveshpharswan/layerx/image"
 )
 
-func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool) string {
+func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, sm sortMode) string {
 	contentWidth := width - 2
 	contentHeight := height
+
+	filterLine := ""
+	if filterActive {
+		contentHeight--
+		prefix := styleWithFg(accentColor).Render("/ ")
+		query := filterQuery + "█"
+		filterLine = prefix + query
+	}
 
 	var sb strings.Builder
 
 	if len(files) == 0 {
 		msg := "(no filesystem changes)"
+		if filterQuery != "" {
+			msg = "(no matches)"
+		}
 		pad := ""
 		if contentWidth > len(msg) {
 			pad = strings.Repeat(" ", (contentWidth-len(msg))/2)
@@ -38,7 +50,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		visible := files[offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, offset+i == cursor, contentWidth)
+			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, sm != sortNone)
 			sb.WriteString(line)
 			if i < contentHeight-1 {
 				sb.WriteString("\n")
@@ -51,36 +63,61 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		}
 	}
 
+	if filterActive {
+		sb.WriteString("\n")
+		sb.WriteString(filterLine)
+	}
+
 	title := "FILE TREE"
 	if len(files) > 0 {
 		title = fmt.Sprintf("FILE TREE [%d/%d]", cursor+1, len(files))
+	} else if filterQuery != "" {
+		title = "FILE TREE [0/0]"
+	}
+	if filterQuery != "" && !filterActive {
+		title += fmt.Sprintf(" \"%s\"", filterQuery)
 	}
 
 	content := sb.String()
-	return renderPanel(content, title, focused, contentWidth, contentHeight)
+	return renderPanel(content, title, focused, contentWidth, height)
 }
 
-func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int) string {
-	indent := strings.Repeat("  ", nodeIndent(f))
+func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool) string {
+	indentLevel := 0
+	displayName := f.Name
+	if flat {
+		displayName = f.Path
+		if len(displayName) > 1 && displayName[0] == '/' {
+			displayName = displayName[1:]
+		}
+	} else {
+		indentLevel = nodeIndent(f)
+	}
+	indent := strings.Repeat("  ", indentLevel)
+
+	if f.IsDir && !flat {
+		displayName += "/"
+	}
 
 	prefixWidth := 2
 	rightPart := ""
 	if !f.IsDir && f.Size > 0 {
 		rightPart = image.FormatBytes(f.Size)
+	} else if f.IsDir && flat {
+		sz := nodeEffectiveSize(f)
+		if sz > 0 {
+			rightPart = image.FormatBytes(sz)
+		}
 	}
 	rightLen := len(rightPart)
 
 	nameSpace := maxWidth - prefixWidth - len(indent) - 1 - rightLen
-	name := f.Name
-	if f.IsDir {
-		name += "/"
-	}
 	if nameSpace < 4 {
 		nameSpace = 4
 	}
-	nameRunes := []rune(name)
+	nameRunes := []rune(displayName)
 	if len(nameRunes) > nameSpace {
-		name = string(nameRunes[:nameSpace-2]) + ".."
+		displayName = string(nameRunes[:nameSpace-2]) + ".."
 	}
 
 	var prefix string
@@ -106,8 +143,8 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int) string {
 		prefix = "  "
 	}
 
-	leftPart := prefix + indent + name
-	leftLen := prefixWidth + len(indent) + len([]rune(name))
+	leftPart := prefix + indent + displayName
+	leftLen := prefixWidth + len(indent) + len([]rune(displayName))
 	gap := maxWidth - leftLen - rightLen
 	if gap < 1 {
 		gap = 1
@@ -129,4 +166,63 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int) string {
 	default:
 		return styleWithFg(fileNameColor).Render(fullLine)
 	}
+}
+
+func applyDiffFilter(files []*image.FileNode) []*image.FileNode {
+	var result []*image.FileNode
+	for _, f := range files {
+		if f.DiffType != image.Unchanged {
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+func applySubstringFilter(files []*image.FileNode, query string) []*image.FileNode {
+	if query == "" {
+		return files
+	}
+	lower := strings.ToLower(query)
+	var result []*image.FileNode
+	for _, f := range files {
+		if strings.Contains(strings.ToLower(f.Path), lower) {
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+func applySortBySize(files []*image.FileNode, mode sortMode) []*image.FileNode {
+	if mode == sortNone {
+		return files
+	}
+	sorted := make([]*image.FileNode, len(files))
+	copy(sorted, files)
+	sort.Slice(sorted, func(i, j int) bool {
+		si := nodeEffectiveSize(sorted[i])
+		sj := nodeEffectiveSize(sorted[j])
+		if mode == sortDesc {
+			return si > sj
+		}
+		return si < sj
+	})
+	return sorted
+}
+
+func nodeEffectiveSize(n *image.FileNode) int64 {
+	if !n.IsDir {
+		return n.Size
+	}
+	var total int64
+	var walk func(*image.FileNode)
+	walk = func(node *image.FileNode) {
+		if !node.IsDir {
+			total += node.Size
+		}
+		for _, c := range node.Children {
+			walk(c)
+		}
+	}
+	walk(n)
+	return total
 }
