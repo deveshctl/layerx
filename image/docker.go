@@ -2,6 +2,7 @@ package image
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,10 +44,30 @@ func NewDockerResolver(opts ...Option) (Resolver, error) {
 	return r, nil
 }
 
+// Inspect returns lightweight image metadata without exporting the full tar.
+// It does not pull the image — if the image is not local, it returns an error.
+func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMeta, error) {
+	inspect, err := r.cli.ImageInspect(ctx, imageRef)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
+	}
+
+	return &ImageMeta{Size: inspect.Size}, nil
+}
+
 // Resolve fetches the image, exports it as a tar, and parses the layer list.
 func (r *DockerResolver) Resolve(ctx context.Context, imageRef string) ([]Layer, error) {
-	if err := r.ensureImage(ctx, imageRef); err != nil {
+	return r.ResolveWithProgress(ctx, imageRef, nil)
+}
+
+// ResolveWithProgress fetches the image with progress reporting via the channel.
+func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef string, progress chan<- ProgressEvent) ([]Layer, error) {
+	if err := r.ensureImageWithProgress(ctx, imageRef, progress); err != nil {
 		return nil, err
+	}
+
+	if progress != nil {
+		progress <- ProgressEvent{Phase: PhaseExporting}
 	}
 
 	rc, err := r.cli.ImageSave(ctx, []string{imageRef})
@@ -55,40 +76,112 @@ func (r *DockerResolver) Resolve(ctx context.Context, imageRef string) ([]Layer,
 	}
 	defer rc.Close()
 
+	if progress != nil {
+		progress <- ProgressEvent{Phase: PhaseParsing}
+	}
+
 	return parseLayers(rc)
 }
 
-// ensureImage checks if the image exists locally; if not, pulls it.
-func (r *DockerResolver) ensureImage(ctx context.Context, imageRef string) error {
+// ensureImageWithProgress checks if the image exists locally; if not, pulls it with progress.
+func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef string, progress chan<- ProgressEvent) error {
 	f := make(client.Filters).Add("reference", imageRef)
 	result, err := r.cli.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
-		return fmt.Errorf("cannot connect to Docker daemon: is Docker running? %w", err)
+		return &ErrDaemonNotRunning{Cause: err}
 	}
 
 	if len(result.Items) > 0 {
 		return nil
 	}
 
+	if progress != nil {
+		progress <- ProgressEvent{Phase: PhasePulling}
+	}
+
 	rc, err := r.cli.ImagePull(ctx, imageRef, client.ImagePullOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to pull image %s: %w", imageRef, err)
+		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
 	defer rc.Close()
-	if _, err := io.Copy(io.Discard, rc); err != nil {
-		return fmt.Errorf("failed to complete pull of %s: %w", imageRef, err)
+
+	if progress != nil {
+		r.streamPullProgress(ctx, rc, progress)
+	} else {
+		if _, err := io.Copy(io.Discard, rc); err != nil {
+			return &ErrPullFailed{Ref: imageRef, Cause: err}
+		}
 	}
 	return nil
 }
 
+// streamPullProgress reads JSON pull events and sends progress updates.
+func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.ImagePullResponse, progress chan<- ProgressEvent) {
+	type layerProgress struct {
+		current int64
+		total   int64
+		done    bool
+	}
+	layers := make(map[string]*layerProgress)
+
+	for msg, err := range rc.JSONMessages(ctx) {
+		if err != nil {
+			break
+		}
+		if msg.ID == "" {
+			continue
+		}
+
+		lp, exists := layers[msg.ID]
+		if !exists {
+			lp = &layerProgress{}
+			layers[msg.ID] = lp
+		}
+
+		switch msg.Status {
+		case "Download complete", "Pull complete":
+			lp.done = true
+			if lp.total > 0 {
+				lp.current = lp.total
+			}
+		case "Downloading":
+			if msg.Progress != nil {
+				lp.current = msg.Progress.Current
+				lp.total = msg.Progress.Total
+			}
+		}
+
+		var totalBytes, currentBytes int64
+		done := 0
+		for _, l := range layers {
+			currentBytes += l.current
+			totalBytes += l.total
+			if l.done {
+				done++
+			}
+		}
+
+		progress <- ProgressEvent{
+			Phase:       PhasePulling,
+			LayersDone:  done,
+			LayersTotal: len(layers),
+			BytesCurr:   currentBytes,
+			BytesTotal:  totalBytes,
+		}
+	}
+}
+
 // parseLayers reads a Docker image tar archive and returns the layer list
-// with ID, Size, and Command populated.
+// with ID, Size, Command, and Tree populated.
 // Supports both legacy Docker format (config as <sha>.json at root) and
 // OCI format (config as blobs/sha256/<digest>).
 func parseLayers(r io.Reader) ([]Layer, error) {
 	tr := tar.NewReader(r)
 
+	// Buffer all entries: metadata goes to contents, potential layer/blob data
+	// goes to blobs. After manifest is parsed, blobs are resolved by reference.
 	contents := make(map[string][]byte)
+	blobs := make(map[string][]byte)
 	headers := make(map[string]int64)
 
 	for {
@@ -102,12 +195,31 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 
 		headers[hdr.Name] = hdr.Size
 
-		if isMetadataFile(hdr.Name, hdr.Size) {
+		switch {
+		case hdr.Name == "manifest.json":
 			data, err := io.ReadAll(tr)
 			if err != nil {
 				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
 			}
 			contents[hdr.Name] = data
+		case strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/"):
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+			}
+			contents[hdr.Name] = data
+		case strings.HasPrefix(hdr.Name, "blobs/sha256/"):
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+			}
+			blobs[hdr.Name] = data
+		case strings.HasSuffix(hdr.Name, "/layer.tar"):
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+			}
+			blobs[hdr.Name] = data
 		}
 	}
 
@@ -126,7 +238,11 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 
 	manifest := manifests[0]
 
+	// Resolve config: check both contents (legacy .json) and blobs (OCI).
 	configData := contents[manifest.Config]
+	if configData == nil {
+		configData = blobs[manifest.Config]
+	}
 	if configData == nil {
 		return nil, fmt.Errorf("invalid image archive: config %s not found", manifest.Config)
 	}
@@ -159,6 +275,10 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		}
 		if i < len(commands) {
 			layers[i].Command = commands[i]
+		}
+		if tarData, ok := blobs[layerPath]; ok && len(tarData) > 0 {
+			tree, _ := ParseLayerTar(bytes.NewReader(tarData))
+			layers[i].Tree = tree
 		}
 	}
 
@@ -196,20 +316,3 @@ func extractShortID(layerPath string) string {
 	return id
 }
 
-const metadataSizeLimit = 1 << 20 // 1 MB — config/manifest files are small
-
-// isMetadataFile returns true for files that could be image config or manifest
-// entries. This covers both legacy Docker format (root-level .json files) and
-// OCI format (blobs/sha256/<digest> entries which are small JSON blobs).
-func isMetadataFile(name string, size int64) bool {
-	if name == "manifest.json" {
-		return true
-	}
-	if strings.HasSuffix(name, ".json") && !strings.Contains(name, "/") {
-		return true
-	}
-	if strings.HasPrefix(name, "blobs/sha256/") && size < metadataSizeLimit {
-		return true
-	}
-	return false
-}
