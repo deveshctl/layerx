@@ -80,6 +80,9 @@ type spinnerTickMsg struct{}
 // clearCopyMsg clears the "Copied!" confirmation after a timeout.
 type clearCopyMsg struct{}
 
+// clearStatusMsg clears the transient status bar message after a timeout.
+type clearStatusMsg struct{}
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type model struct {
@@ -105,6 +108,7 @@ type model struct {
 	pullBytesMax int64
 	progressCh   chan image.ProgressEvent
 	copyConfirm  bool
+	statusMsg    string
 	showHelp     bool
 	filterActive bool
 	filterQuery  string
@@ -213,6 +217,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clearCopyMsg:
 		m.copyConfirm = false
+		return m, nil
+
+	case clearStatusMsg:
+		m.statusMsg = ""
 		return m, nil
 
 	case fileContentMsg:
@@ -357,14 +365,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.treeOffset = 0
 				return m, nil
 			}
-			if m.focus == focusTree && m.extractor != nil {
+			if m.focus == focusTree {
 				files := m.displayTree()
 				if m.treeCursor < len(files) {
 					f := files[m.treeCursor]
-					if !f.IsDir {
-						m.viewState = viewLoading
-						return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
+					if f.IsDir {
+						m.statusMsg = "Cannot view directory"
+						return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+							return clearStatusMsg{}
+						})
 					}
+					if f.DiffType == image.Removed {
+						m.statusMsg = "File removed in this layer"
+						return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+							return clearStatusMsg{}
+						})
+					}
+					if m.extractor == nil {
+						m.statusMsg = "Extractor unavailable"
+						return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+							return clearStatusMsg{}
+						})
+					}
+					m.viewState = viewLoading
+					return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
 				}
 			}
 			return m, nil
@@ -796,7 +820,7 @@ func (m model) renderStatusBar() string {
 		sepStyle.Render("·"),
 		keyStyle.Render("c"), descStyle.Render("copy"),
 		sepStyle.Render("·"),
-		keyStyle.Render("↵"), descStyle.Render("view"),
+		keyStyle.Render("Enter"), descStyle.Render("view"),
 		sepStyle.Render("·"),
 		keyStyle.Render("?"), descStyle.Render("help"),
 		sepStyle.Render("·"),
@@ -805,7 +829,10 @@ func (m model) renderStatusBar() string {
 
 	layers := m.layers()
 	var right string
-	if m.copyConfirm {
+	if m.statusMsg != "" {
+		msgStyle := lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Bold(true)
+		right = msgStyle.Render(m.statusMsg) + " "
+	} else if m.copyConfirm {
 		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
 		right = copiedStyle.Render("Copied!") + " "
 	} else {
@@ -880,40 +907,41 @@ func (m model) overlayHelp() string {
 	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor)
 	descStyle := lipgloss.NewStyle().Foreground(fileNameColor)
 	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	sectionStyle := lipgloss.NewStyle().Foreground(modifiedColor).Bold(true)
 
 	lines := []string{
-		titleStyle.Render("  Keybindings"),
 		"",
-		dimStyle.Render("  Navigation"),
-		"  " + keyStyle.Render("j/k, Up/Down") + "  " + descStyle.Render("Move down/up"),
-		"  " + keyStyle.Render("g/G") + "           " + descStyle.Render("Jump to top/bottom"),
-		"  " + keyStyle.Render("Tab") + "           " + descStyle.Render("Switch panel focus"),
+		"  " + titleStyle.Render("layerx — Keyboard Shortcuts"),
 		"",
-		dimStyle.Render("  File Tree"),
-		"  " + keyStyle.Render("/") + "             " + descStyle.Render("Open filter (substring)"),
-		"  " + keyStyle.Render("Esc") + "           " + descStyle.Render("Clear filter / close / quit"),
-		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("Confirm filter / clear filter"),
-		"  " + keyStyle.Render("d") + "             " + descStyle.Render("Toggle diff-only (changed files)"),
-		"  " + keyStyle.Render("s") + "             " + descStyle.Render("Cycle sort: none → ↓size → ↑size"),
+		"  " + sectionStyle.Render("Navigation"),
+		"  " + keyStyle.Render("j / k       ") + descStyle.Render("Move cursor down / up"),
+		"  " + keyStyle.Render("g / G       ") + descStyle.Render("Jump to first / last item"),
+		"  " + keyStyle.Render("Tab         ") + descStyle.Render("Switch panel (layers ↔ tree)"),
 		"",
-		dimStyle.Render("  File Viewer"),
-		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("View selected file content"),
-		"  " + keyStyle.Render("j/k") + "           " + descStyle.Render("Scroll up/down"),
-		"  " + keyStyle.Render("g/G") + "           " + descStyle.Render("Jump to top/bottom"),
-		"  " + keyStyle.Render("Esc") + "           " + descStyle.Render("Close viewer"),
+		"  " + sectionStyle.Render("File Tree"),
+		"  " + keyStyle.Render("/           ") + descStyle.Render("Search files (substring filter)"),
+		"  " + keyStyle.Render("Enter       ") + descStyle.Render("View file content"),
+		"  " + keyStyle.Render("d           ") + descStyle.Render("Show only changed files"),
+		"  " + keyStyle.Render("s           ") + descStyle.Render("Sort by size (↓ → ↑ → off)"),
+		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Clear filter / close viewer"),
 		"",
-		dimStyle.Render("  Actions"),
-		"  " + keyStyle.Render("c") + "             " + descStyle.Render("Copy command to clipboard"),
+		"  " + sectionStyle.Render("File Viewer"),
+		"  " + keyStyle.Render("j / k       ") + descStyle.Render("Scroll down / up"),
+		"  " + keyStyle.Render("g / G       ") + descStyle.Render("Jump to top / bottom"),
+		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Return to file tree"),
 		"",
-		dimStyle.Render("  General"),
-		"  " + keyStyle.Render("?") + "             " + descStyle.Render("Toggle this help"),
-		"  " + keyStyle.Render("q / Ctrl+C") + "    " + descStyle.Render("Quit"),
+		"  " + sectionStyle.Render("Other"),
+		"  " + keyStyle.Render("c           ") + descStyle.Render("Copy layer command to clipboard"),
+		"  " + keyStyle.Render("?           ") + descStyle.Render("Toggle this help"),
+		"  " + keyStyle.Render("q / Ctrl+C  ") + descStyle.Render("Quit"),
+		"",
+		"  " + dimStyle.Render("Tip: directories and removed files cannot be viewed."),
 		"",
 	}
 
 	body := strings.Join(lines, "\n")
 
-	boxWidth := 54
+	boxWidth := 56
 	boxHeight := len(lines) + 2
 
 	borderStyle := lipgloss.NewStyle().

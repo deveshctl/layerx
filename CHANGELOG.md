@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M08] — 2026-05-14
+
+File content viewer — the #1 most-requested feature dive has never shipped.
+
+### Added
+- `Enter` on any file in the tree opens an inline content viewer
+- Scrollable text with line numbers (j/k, g/G navigation)
+- Binary file detection with notice (ELF, images, archives, etc.)
+- Empty file notice for 0-byte files
+- 1 MB size limit with truncation notice for large files
+- Async extraction with loading spinner (no TUI freeze)
+- `Esc` returns to file tree from viewer
+- Status bar shows line position and scroll percentage in viewer mode
+- Help overlay updated with File Viewer section
+
+### Technical
+- `image/extractor.go`: Extractor interface + DockerExtractor (container create → CopyFromContainer → remove)
+- `tui/fileview.go`: viewer panel with line numbers, notices, scrolling
+- Binary detection: net/http.DetectContentType + null-byte scan (matches Git's heuristic)
+- Container cleanup guaranteed via defer (no orphan containers on error)
+
 ## [M06+M07] — 2026-05-13
 
 File tree filter, diff-only toggle, and sort-by-size.

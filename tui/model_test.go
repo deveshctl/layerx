@@ -823,6 +823,35 @@ func TestEnterOnDirIsNoop(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
 	assert.Equal(t, viewNone, um.viewState)
+	assert.Equal(t, "Cannot view directory", um.statusMsg)
+}
+
+func TestEnterOnRemovedFileShowsStatusMsg(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+
+	// Inject a removed file into the tree for this test.
+	removedNode := &image.FileNode{
+		Name:     "old.conf",
+		Path:     "/etc/old.conf",
+		Size:     256,
+		DiffType: image.Removed,
+	}
+	m.analysis.StackedTrees[m.layerCursor].Root.AddChild(removedNode)
+
+	files := m.displayTree()
+	for i, f := range files {
+		if f.DiffType == image.Removed {
+			m.treeCursor = i
+			break
+		}
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, viewNone, um.viewState)
+	assert.Equal(t, "File removed in this layer", um.statusMsg)
 }
 
 func TestEscClosesFileViewer(t *testing.T) {
