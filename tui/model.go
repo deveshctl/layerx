@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -83,6 +85,13 @@ type clearCopyMsg struct{}
 // clearStatusMsg clears the transient status bar message after a timeout.
 type clearStatusMsg struct{}
 
+// fileSaveMsg is sent when async file extraction for save-to-disk completes.
+type fileSaveMsg struct {
+	filename string
+	data     []byte
+	err      error
+}
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type model struct {
@@ -118,6 +127,8 @@ type model struct {
 	viewContent  *image.FileContent
 	viewOffset   int
 	extractor    image.Extractor
+	efficiency   *image.EfficiencyResult
+	writeFile    func(string, []byte, os.FileMode) error
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -128,6 +139,7 @@ func NewModel(cfg Config) model {
 		imageRef:   cfg.ImageRef,
 		resolver:   cfg.Resolver,
 		progressCh: ch,
+		writeFile:  os.WriteFile,
 	}
 }
 
@@ -209,6 +221,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = stateReady
 		m.analysis = msg.analysis
+		m.efficiency = image.Efficiency(msg.analysis.Layers)
 		if src, ok := m.resolver.(image.ExtractorSource); ok {
 			m.extractor = src.NewExtractor()
 		}
@@ -232,6 +245,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewContent = msg.content
 		m.viewOffset = 0
 		return m, nil
+
+	case fileSaveMsg:
+		if msg.err != nil {
+			m.statusMsg = "Error: " + msg.err.Error()
+			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+				return clearStatusMsg{}
+			})
+		}
+		err := m.writeFile(msg.filename, msg.data, 0644)
+		if err != nil {
+			m.statusMsg = "Error: " + err.Error()
+			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+				return clearStatusMsg{}
+			})
+		}
+		m.statusMsg = "Saved: " + msg.filename
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
 
 	case tea.KeyPressMsg:
 		// Esc has precedence: viewer → filter (active) → filter (confirmed) → help → quit
@@ -411,6 +443,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.treeCursor = 0
 			m.treeOffset = 0
 			return m, nil
+
+		case key.Matches(msg, keys.ExtractFile):
+			if m.focus != focusTree {
+				return m, nil
+			}
+			files := m.displayTree()
+			if m.treeCursor >= len(files) {
+				return m, nil
+			}
+			f := files[m.treeCursor]
+			if f.IsDir {
+				m.statusMsg = "Cannot extract directory"
+				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+					return clearStatusMsg{}
+				})
+			}
+			if f.DiffType == image.Removed {
+				m.statusMsg = "File removed in this layer"
+				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+					return clearStatusMsg{}
+				})
+			}
+			if m.extractor == nil {
+				m.statusMsg = "Extractor unavailable"
+				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+					return clearStatusMsg{}
+				})
+			}
+			m.statusMsg = "Extracting..."
+			return m, m.fetchFileRaw(f.Path)
 		}
 	}
 
@@ -807,7 +869,7 @@ func (m model) renderStatusBar() string {
 	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
 	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
 
-	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
+	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
 		keyStyle.Render("Tab"), descStyle.Render("switch"),
 		sepStyle.Render("·"),
 		keyStyle.Render("j/k"), descStyle.Render("navigate"),
@@ -821,6 +883,8 @@ func (m model) renderStatusBar() string {
 		keyStyle.Render("c"), descStyle.Render("copy"),
 		sepStyle.Render("·"),
 		keyStyle.Render("Enter"), descStyle.Render("view"),
+		sepStyle.Render("·"),
+		keyStyle.Render("x"), descStyle.Render("save"),
 		sepStyle.Render("·"),
 		keyStyle.Render("?"), descStyle.Render("help"),
 		sepStyle.Render("·"),
@@ -837,6 +901,14 @@ func (m model) renderStatusBar() string {
 		right = copiedStyle.Render("Copied!") + " "
 	} else {
 		badges := ""
+		if m.efficiency != nil {
+			pct := int(m.efficiency.Score * 100)
+			effStr := fmt.Sprintf("Eff: %d%%", pct)
+			if m.efficiency.WastedBytes > 0 {
+				effStr += " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
+			}
+			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("["+effStr+"]") + " "
+		}
 		if m.diffOnly {
 			badges += lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Render("[diff]") + " "
 		}
@@ -923,6 +995,7 @@ func (m model) overlayHelp() string {
 		"  " + keyStyle.Render("Enter       ") + descStyle.Render("View file content"),
 		"  " + keyStyle.Render("d           ") + descStyle.Render("Show only changed files"),
 		"  " + keyStyle.Render("s           ") + descStyle.Render("Sort by size (↓ → ↑ → off)"),
+		"  " + keyStyle.Render("x           ") + descStyle.Render("Save file to current directory"),
 		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Clear filter / close viewer"),
 		"",
 		"  " + sectionStyle.Render("File Viewer"),
@@ -961,6 +1034,15 @@ func (m model) fetchFileContent(path string) tea.Cmd {
 	return func() tea.Msg {
 		content, err := extractor.Extract(context.Background(), imageRef, path)
 		return fileContentMsg{content: content, err: err}
+	}
+}
+
+func (m model) fetchFileRaw(path string) tea.Cmd {
+	extractor := m.extractor
+	imageRef := m.imageRef
+	return func() tea.Msg {
+		data, err := extractor.ExtractRaw(context.Background(), imageRef, path)
+		return fileSaveMsg{filename: filepath.Base(path), data: data, err: err}
 	}
 }
 

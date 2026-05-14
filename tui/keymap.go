@@ -3,17 +3,18 @@ package tui
 import "charm.land/bubbles/v2/key"
 
 type keyMap struct {
-	Quit     key.Binding
-	Up       key.Binding
-	Down     key.Binding
-	Top      key.Binding
-	Bottom   key.Binding
-	Switch   key.Binding
-	Copy     key.Binding
-	Help     key.Binding
-	Filter   key.Binding
-	DiffOnly key.Binding
-	Sort     key.Binding
+	Quit        key.Binding
+	Up          key.Binding
+	Down        key.Binding
+	Top         key.Binding
+	Bottom      key.Binding
+	Switch      key.Binding
+	Copy        key.Binding
+	Help        key.Binding
+	Filter      key.Binding
+	DiffOnly    key.Binding
+	Sort        key.Binding
+	ExtractFile key.Binding
 }
 
 var keys = keyMap{
@@ -60,5 +61,9 @@ var keys = keyMap{
 	Sort: key.NewBinding(
 		key.WithKeys("s"),
 		key.WithHelp("s", "sort size"),
+	),
+	ExtractFile: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "save file"),
 	),
 }

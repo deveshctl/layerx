@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M09+M10] — 2026-05-14
+Efficiency analysis and file extraction to disk.
+
+### M09 — Efficiency Score + Wasted Bytes
+- `image/efficiency.go`: Detects files duplicated across layers.
+- Algorithm: file at same path in N layers → N-1 occurrences are waste.
+- Score displayed as percentage badge in status bar.
+- Wasted bytes shown alongside score when > 0.
+- Gate C: Test against image with known waste (apt-get install in separate RUN steps).
+
+### M10 — File Extraction to Disk
+- `x` key saves focused file to current working directory.
+- Reuses Docker CopyFromContainer via `ExtractRaw` (no 1MB truncation).
+- Status bar confirmation: "Saved: filename" or error message.
+- Works for binary files (raw bytes, no truncation).
+- Gate C: Extract a file, verify it appears on disk with correct bytes.
+
 ## [M08] — 2026-05-14
 
 File content viewer — the #1 most-requested feature dive has never shipped.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -779,7 +780,10 @@ func TestEscClosesHelpBeforeQuit(t *testing.T) {
 
 // --- File Viewer (M08) -------------------------------------------------------
 
-type mockExtractor struct{}
+type mockExtractor struct {
+	extractRawData []byte
+	extractRawErr  error
+}
 
 func (e *mockExtractor) Extract(_ context.Context, _ string, path string) (*image.FileContent, error) {
 	return &image.FileContent{
@@ -787,6 +791,16 @@ func (e *mockExtractor) Extract(_ context.Context, _ string, path string) (*imag
 		Data: []byte("mock content"),
 		Size: 12,
 	}, nil
+}
+
+func (e *mockExtractor) ExtractRaw(_ context.Context, _ string, _ string) ([]byte, error) {
+	if e.extractRawErr != nil {
+		return nil, e.extractRawErr
+	}
+	if e.extractRawData != nil {
+		return e.extractRawData, nil
+	}
+	return []byte("mock raw content"), nil
 }
 
 func TestEnterOnFileTriggersViewing(t *testing.T) {
@@ -936,4 +950,135 @@ func TestViewLoadingBlocksAllKeys(t *testing.T) {
 	updated, _ := m.Update(keyPress('j'))
 	um := updated.(model)
 	assert.Equal(t, viewLoading, um.viewState)
+}
+
+// --- Efficiency (M09) --------------------------------------------------------
+
+func TestEfficiencyComputedOnAnalysisLoad(t *testing.T) {
+	m := setupModel()
+	m.efficiency = image.Efficiency(m.analysis.Layers)
+	assert.NotNil(t, m.efficiency)
+	assert.Equal(t, 1.0, m.efficiency.Score)
+}
+
+func TestEfficiencyBadgeInStatusBar(t *testing.T) {
+	m := setupModel()
+	m.efficiency = &image.EfficiencyResult{Score: 0.85, WastedBytes: 1500000}
+	view := m.View()
+	content := viewContent(view)
+	assert.Contains(t, content, "Eff: 85%")
+	assert.Contains(t, content, "wasted")
+}
+
+// --- File Extraction to Disk (M10) -------------------------------------------
+
+func TestExtractKeyOnDirectoryShowsStatus(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+
+	files := m.displayTree()
+	for i, f := range files {
+		if f.IsDir {
+			m.treeCursor = i
+			break
+		}
+	}
+
+	updated, _ := m.Update(keyPress('x'))
+	um := updated.(model)
+	assert.Equal(t, "Cannot extract directory", um.statusMsg)
+}
+
+func TestExtractKeyOnFileTriggersExtraction(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+
+	files := m.displayTree()
+	for i, f := range files {
+		if !f.IsDir {
+			m.treeCursor = i
+			break
+		}
+	}
+
+	updated, cmd := m.Update(keyPress('x'))
+	um := updated.(model)
+	assert.Equal(t, "Extracting...", um.statusMsg)
+	assert.NotNil(t, cmd)
+}
+
+func TestExtractKeyFromLayersPanelIsNoop(t *testing.T) {
+	m := setupModel()
+	m.focus = focusLayers
+	m.extractor = &mockExtractor{}
+
+	updated, cmd := m.Update(keyPress('x'))
+	um := updated.(model)
+	assert.Equal(t, "", um.statusMsg)
+	assert.Nil(t, cmd)
+}
+
+func TestExtractKeyOnRemovedFile(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+
+	removedNode := &image.FileNode{
+		Name:     "old.conf",
+		Path:     "/etc/old.conf",
+		Size:     256,
+		DiffType: image.Removed,
+	}
+	m.analysis.StackedTrees[m.layerCursor].Root.AddChild(removedNode)
+
+	files := m.displayTree()
+	for i, f := range files {
+		if f.DiffType == image.Removed {
+			m.treeCursor = i
+			break
+		}
+	}
+
+	updated, _ := m.Update(keyPress('x'))
+	um := updated.(model)
+	assert.Equal(t, "File removed in this layer", um.statusMsg)
+}
+
+func TestFileSaveMsgSuccess(t *testing.T) {
+	m := setupModel()
+	var savedName string
+	var savedData []byte
+	m.writeFile = func(name string, data []byte, _ os.FileMode) error {
+		savedName = name
+		savedData = data
+		return nil
+	}
+
+	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", data: []byte("hello")})
+	um := updated.(model)
+	assert.Equal(t, "Saved: test.txt", um.statusMsg)
+	assert.Equal(t, "test.txt", savedName)
+	assert.Equal(t, []byte("hello"), savedData)
+}
+
+func TestFileSaveMsgExtractError(t *testing.T) {
+	m := setupModel()
+	m.writeFile = os.WriteFile
+
+	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", err: errors.New("connection refused")})
+	um := updated.(model)
+	assert.Equal(t, "Error: connection refused", um.statusMsg)
+}
+
+func TestFileSaveMsgWriteError(t *testing.T) {
+	m := setupModel()
+	m.writeFile = func(_ string, _ []byte, _ os.FileMode) error {
+		return errors.New("permission denied")
+	}
+
+	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", data: []byte("hello")})
+	um := updated.(model)
+	assert.Equal(t, "Error: permission denied", um.statusMsg)
 }

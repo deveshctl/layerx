@@ -25,6 +25,7 @@ type FileContent struct {
 // Extractor retrieves file contents from a container image.
 type Extractor interface {
 	Extract(ctx context.Context, imageRef string, filePath string) (*FileContent, error)
+	ExtractRaw(ctx context.Context, imageRef string, filePath string) ([]byte, error)
 }
 
 // IsBinary reports whether data appears to be binary content.
@@ -117,6 +118,32 @@ func (e *DockerExtractor) Extract(ctx context.Context, imageRef string, filePath
 	return processContent(filePath, data, totalSize), nil
 }
 
+// ExtractRaw extracts a file's raw bytes without truncation or binary detection.
+func (e *DockerExtractor) ExtractRaw(ctx context.Context, imageRef string, filePath string) ([]byte, error) {
+	createResult, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Image: imageRef,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container for extraction: %w", err)
+	}
+	containerID := createResult.ID
+
+	defer func() {
+		removeCtx := context.WithoutCancel(ctx)
+		_, _ = e.cli.ContainerRemove(removeCtx, containerID, client.ContainerRemoveOptions{Force: true})
+	}()
+
+	copyResult, err := e.cli.CopyFromContainer(ctx, containerID, client.CopyFromContainerOptions{
+		SourcePath: filePath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy %s from container: %w", filePath, err)
+	}
+	defer copyResult.Content.Close()
+
+	return readFullFileFromTar(copyResult.Content)
+}
+
 // readFirstFileFromTar reads the first regular file from a tar stream.
 // Docker's CopyFromContainer wraps the file in a single-entry tar.
 func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
@@ -142,5 +169,23 @@ func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 			return nil, err
 		}
 		return data, nil
+	}
+}
+
+// readFullFileFromTar reads the first regular file from a tar stream without size limits.
+func readFullFileFromTar(r io.Reader) ([]byte, error) {
+	tr := tar.NewReader(r)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("no file found in tar stream")
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hdr.Typeflag == tar.TypeDir {
+			continue
+		}
+		return io.ReadAll(tr)
 	}
 }

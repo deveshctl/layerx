@@ -1,9 +1,12 @@
 package image
 
 import (
+	"archive/tar"
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsBinary_NullBytes(t *testing.T) {
@@ -63,4 +66,48 @@ func TestProcessContent_Empty(t *testing.T) {
 	assert.False(t, fc.Binary)
 	assert.False(t, fc.Truncated)
 	assert.Empty(t, fc.Data)
+}
+
+// --- readFullFileFromTar -----------------------------------------------------
+
+func TestReadFullFileFromTar_NoSizeLimit(t *testing.T) {
+	content := bytes.Repeat([]byte("x"), MaxViewSize+500)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "bigfile.dat",
+		Size:     int64(len(content)),
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+	_, err = tw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+
+	data, err := readFullFileFromTar(&buf)
+	require.NoError(t, err)
+	assert.Equal(t, len(content), len(data))
+}
+
+func TestReadFullFileFromTar_SkipsDirectories(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	tw.WriteHeader(&tar.Header{Name: "dir/", Typeflag: tar.TypeDir})
+	tw.WriteHeader(&tar.Header{Name: "dir/file.txt", Size: 5, Typeflag: tar.TypeReg})
+	tw.Write([]byte("hello"))
+	tw.Close()
+
+	data, err := readFullFileFromTar(&buf)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hello"), data)
+}
+
+func TestReadFullFileFromTar_EmptyTar(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	tw.Close()
+
+	_, err := readFullFileFromTar(&buf)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no file found")
 }
