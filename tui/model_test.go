@@ -928,6 +928,7 @@ func TestFileContentMsgErrorClearsViewState(t *testing.T) {
 	updated, _ := m.Update(fileContentMsg{err: fmt.Errorf("not found")})
 	um := updated.(model)
 	assert.Equal(t, viewNone, um.viewState)
+	assert.Contains(t, um.statusMsg, "not found")
 }
 
 func TestViewerBlocksNavigationKeys(t *testing.T) {

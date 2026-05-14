@@ -49,7 +49,7 @@ func Efficiency(layers []Layer) *EfficiencyResult {
 			continue
 		}
 		var waste int64
-		for _, occ := range occs[1:] {
+		for _, occ := range occs[:len(occs)-1] {
 			waste += occ.size
 		}
 		wastedBytes += waste

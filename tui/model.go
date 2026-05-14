@@ -239,7 +239,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileContentMsg:
 		if msg.err != nil {
 			m.viewState = viewNone
-			return m, nil
+			m.statusMsg = "Error: " + msg.err.Error()
+			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+				return clearStatusMsg{}
+			})
 		}
 		m.viewState = viewReady
 		m.viewContent = msg.content

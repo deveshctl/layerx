@@ -45,12 +45,12 @@ func TestEfficiency_TwoLayers_SameFile(t *testing.T) {
 		{Index: 1, Size: 200, Tree: makeTree(makeFile("config", "/etc/config", 200))},
 	}
 	result := Efficiency(layers)
-	assert.Equal(t, int64(200), result.WastedBytes)
-	expectedScore := 1.0 - 200.0/300.0
+	assert.Equal(t, int64(100), result.WastedBytes)
+	expectedScore := 1.0 - 100.0/300.0
 	assert.InDelta(t, expectedScore, result.Score, 0.001)
 	assert.Len(t, result.WastedFiles, 1)
 	assert.Equal(t, "/etc/config", result.WastedFiles[0].Path)
-	assert.Equal(t, int64(200), result.WastedFiles[0].TotalWasted)
+	assert.Equal(t, int64(100), result.WastedFiles[0].TotalWasted)
 	assert.Equal(t, 2, result.WastedFiles[0].LayerCount)
 }
 
@@ -61,8 +61,8 @@ func TestEfficiency_ThreeLayers_FileInAll(t *testing.T) {
 		{Index: 2, Size: 2000, Tree: makeTree(makeFile("app", "/app", 2000))},
 	}
 	result := Efficiency(layers)
-	assert.Equal(t, int64(3500), result.WastedBytes)
-	expectedScore := 1.0 - 3500.0/4500.0
+	assert.Equal(t, int64(2500), result.WastedBytes)
+	expectedScore := 1.0 - 2500.0/4500.0
 	assert.InDelta(t, expectedScore, result.Score, 0.001)
 	assert.Len(t, result.WastedFiles, 1)
 	assert.Equal(t, 3, result.WastedFiles[0].LayerCount)
@@ -105,6 +105,7 @@ func TestEfficiency_WastedFilesSortedBySize(t *testing.T) {
 	}
 	result := Efficiency(layers)
 	assert.Len(t, result.WastedFiles, 2)
+	// /big waste = 1000 (layer 0 copy), /small waste = 10 (layer 0 copy)
 	assert.Equal(t, "/big", result.WastedFiles[0].Path)
 	assert.Equal(t, "/small", result.WastedFiles[1].Path)
 }
