@@ -14,12 +14,10 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 	contentWidth := width - 2
 	contentHeight := height
 
-	filterLine := ""
-	if filterActive {
+	// Reserve a line for the filter bar whenever a filter is active or has a query.
+	showFilterBar := filterActive || filterQuery != ""
+	if showFilterBar {
 		contentHeight--
-		prefix := styleWithFg(accentColor).Render("/ ")
-		query := filterQuery + "█"
-		filterLine = prefix + query
 	}
 
 	var sb strings.Builder
@@ -52,7 +50,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		for i, f := range visible {
 			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, sm != sortNone)
 			sb.WriteString(line)
-			if i < contentHeight-1 {
+			if i < len(visible)-1 {
 				sb.WriteString("\n")
 			}
 		}
@@ -63,9 +61,9 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		}
 	}
 
-	if filterActive {
+	if showFilterBar {
 		sb.WriteString("\n")
-		sb.WriteString(filterLine)
+		sb.WriteString(renderFilterBar(filterActive, filterQuery, len(files), contentWidth))
 	}
 
 	title := "FILE TREE"
@@ -74,12 +72,29 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 	} else if filterQuery != "" {
 		title = "FILE TREE [0/0]"
 	}
-	if filterQuery != "" && !filterActive {
-		title += fmt.Sprintf(" \"%s\"", filterQuery)
-	}
 
 	content := sb.String()
 	return renderPanel(content, title, focused, contentWidth, height)
+}
+
+func renderFilterBar(active bool, query string, matchCount int, maxWidth int) string {
+	if active {
+		prefix := styleWithFg(accentColor).Render("/ ")
+		cursor := query + "█"
+		return prefix + cursor
+	}
+	// Persistent read-only indicator when filter is set but input closed.
+	prefix := styleWithFg(accentColor).Render("/ ")
+	queryStr := styleWithFg(selectedColor).Render(query)
+	matches := styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d matches)", matchCount))
+	hint := styleWithFg(unchangedColor).Render("  [Enter clear]")
+
+	line := prefix + queryStr + matches + hint
+	lineWidth := lipgloss.Width(line)
+	if lineWidth > maxWidth {
+		line = prefix + queryStr + matches
+	}
+	return line
 }
 
 func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool) string {

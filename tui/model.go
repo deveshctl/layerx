@@ -195,10 +195,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		// Esc has precedence: filter → help → quit
+		// Esc has precedence: filter (active) → filter (confirmed) → help → quit
 		if msg.Code == tea.KeyEscape {
 			if m.filterActive {
 				m.filterActive = false
+				m.filterQuery = ""
+				m.treeCursor = 0
+				m.treeOffset = 0
+				return m, nil
+			}
+			if m.filterQuery != "" {
 				m.filterQuery = ""
 				m.treeCursor = 0
 				m.treeOffset = 0
@@ -281,6 +287,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Filter):
 			if m.focus == focusTree {
 				m.filterActive = true
+				return m, nil
+			}
+			return m, nil
+
+		case msg.Code == tea.KeyEnter:
+			if m.focus == focusTree && m.filterQuery != "" {
+				m.filterQuery = ""
+				m.treeCursor = 0
+				m.treeOffset = 0
 				return m, nil
 			}
 			return m, nil
@@ -763,7 +778,7 @@ func (m model) overlayHelp() string {
 		dimStyle.Render("  File Tree"),
 		"  " + keyStyle.Render("/") + "             " + descStyle.Render("Open filter (substring)"),
 		"  " + keyStyle.Render("Esc") + "           " + descStyle.Render("Clear filter / close / quit"),
-		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("Keep filter, close input"),
+		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("Confirm filter / clear filter"),
 		"  " + keyStyle.Render("d") + "             " + descStyle.Render("Toggle diff-only (changed files)"),
 		"  " + keyStyle.Render("s") + "             " + descStyle.Render("Cycle sort: none → ↓size → ↑size"),
 		"",
