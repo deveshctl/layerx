@@ -55,6 +55,11 @@ func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMe
 	return &ImageMeta{Size: inspect.Size}, nil
 }
 
+// NewExtractor creates an Extractor using this resolver's Docker client.
+func (r *DockerResolver) NewExtractor() Extractor {
+	return NewDockerExtractor(r.cli)
+}
+
 // Resolve fetches the image, exports it as a tar, and parses the layer list.
 func (r *DockerResolver) Resolve(ctx context.Context, imageRef string) ([]Layer, error) {
 	return r.ResolveWithProgress(ctx, imageRef, nil)

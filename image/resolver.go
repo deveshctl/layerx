@@ -32,6 +32,11 @@ type Resolver interface {
 	Inspect(ctx context.Context, imageRef string) (*ImageMeta, error)
 }
 
+// ExtractorSource is implemented by resolvers that can produce an Extractor.
+type ExtractorSource interface {
+	NewExtractor() Extractor
+}
+
 // Layer holds metadata for a single image layer.
 type Layer struct {
 	Index   int
