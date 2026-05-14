@@ -1,0 +1,126 @@
+package ci
+
+import (
+	"bytes"
+	"fmt"
+	"testing"
+
+	"github.com/deveshpharswan/layerx/image"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestEvaluate_AllPass(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.95,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{},
+	}
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+		HighestUserWastedPercent{Threshold: 0.1},
+	}
+	report := Evaluate(eff, 10000, rules)
+	assert.True(t, report.Passed)
+	assert.Equal(t, 0, report.ExitCode())
+}
+
+func TestEvaluate_OneFails(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.80,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{},
+	}
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+	}
+	report := Evaluate(eff, 10000, rules)
+	assert.False(t, report.Passed)
+	assert.Equal(t, 1, report.ExitCode())
+}
+
+func TestEvaluate_AllFail(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.50,
+		WastedBytes: 5000,
+		WastedFiles: []image.WastedFile{
+			{Path: "/tmp/big.tar", TotalWasted: 3000, LayerCount: 3},
+		},
+	}
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+		HighestUserWastedPercent{Threshold: 0.1},
+	}
+	report := Evaluate(eff, 10000, rules)
+	assert.False(t, report.Passed)
+	assert.Equal(t, 1, report.ExitCode())
+	assert.Equal(t, 3, len(report.Results))
+}
+
+func TestReport_Print_Pass(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.95,
+		WastedBytes: 0,
+		WastedFiles: []image.WastedFile{},
+	}
+	report := Evaluate(eff, 1000, []Rule{LowestEfficiency{Threshold: 0.9}})
+	var buf bytes.Buffer
+	report.Print(&buf)
+	assert.Contains(t, buf.String(), "PASS")
+	assert.Contains(t, buf.String(), "95%")
+}
+
+func TestReport_Print_Fail(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.80,
+		WastedBytes: 5000,
+		WastedFiles: []image.WastedFile{
+			{Path: "/var/cache/apt/foo.deb", TotalWasted: 3000, LayerCount: 2},
+			{Path: "/tmp/output.tar", TotalWasted: 2000, LayerCount: 3},
+		},
+	}
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+	}
+	report := Evaluate(eff, 10000, rules)
+	var buf bytes.Buffer
+	report.Print(&buf)
+
+	output := buf.String()
+	assert.Contains(t, output, "FAIL")
+	assert.Contains(t, output, "efficiency:")
+	assert.Contains(t, output, "Top wasted files:")
+	assert.Contains(t, output, "/var/cache/apt/foo.deb")
+}
+
+func TestEvaluate_TopWasteLimitedTo10(t *testing.T) {
+	var files []image.WastedFile
+	for i := 0; i < 15; i++ {
+		files = append(files, image.WastedFile{
+			Path:        fmt.Sprintf("/file%d", i),
+			TotalWasted: int64(100 - i),
+			LayerCount:  2,
+		})
+	}
+	eff := &image.EfficiencyResult{
+		Score:       0.5,
+		WastedBytes: 1500,
+		WastedFiles: files,
+	}
+	report := Evaluate(eff, 3000, []Rule{LowestEfficiency{Threshold: 0.9}})
+	require.Len(t, report.TopWaste, 10)
+}
+
+func TestEvaluate_NoRules(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.5,
+		WastedBytes: 1000,
+		WastedFiles: []image.WastedFile{},
+	}
+	report := Evaluate(eff, 2000, []Rule{})
+	assert.True(t, report.Passed)
+	assert.Equal(t, 0, report.ExitCode())
+}

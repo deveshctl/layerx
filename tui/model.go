@@ -13,13 +13,15 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 
+	"github.com/deveshpharswan/layerx/config"
 	"github.com/deveshpharswan/layerx/image"
 )
 
 // Config holds the parameters needed to start the TUI.
 type Config struct {
-	ImageRef string
-	Resolver image.Resolver
+	ImageRef    string
+	Resolver    image.Resolver
+	Keybindings config.KeybindingsConfig
 }
 
 type focus int
@@ -129,17 +131,21 @@ type model struct {
 	extractor    image.Extractor
 	efficiency   *image.EfficiencyResult
 	writeFile    func(string, []byte, os.FileMode) error
+	keys         keyMap
 }
 
 // NewModel creates a new model wired to real Docker data.
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
+	km := defaultKeys()
+	applyOverrides(&km, cfg.Keybindings)
 	return model{
 		state:      stateLoading,
 		imageRef:   cfg.ImageRef,
 		resolver:   cfg.Resolver,
 		progressCh: ch,
 		writeFile:  os.WriteFile,
+		keys:       km,
 	}
 }
 
@@ -299,7 +305,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Quit via q or ctrl+c always works.
-		if key.Matches(msg, keys.Quit) {
+		if key.Matches(msg, m.keys.Quit) {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -310,7 +316,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Help toggle works when ready.
-		if key.Matches(msg, keys.Help) && m.state == stateReady {
+		if key.Matches(msg, m.keys.Help) && m.state == stateReady {
 			m.showHelp = !m.showHelp
 			return m, nil
 		}
@@ -323,13 +329,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// When viewing a file, only scroll/close keys work.
 		if m.viewState == viewReady {
 			switch {
-			case key.Matches(msg, keys.Down):
+			case key.Matches(msg, m.keys.Down):
 				m.scrollViewDown()
-			case key.Matches(msg, keys.Up):
+			case key.Matches(msg, m.keys.Up):
 				m.scrollViewUp()
-			case key.Matches(msg, keys.Top):
+			case key.Matches(msg, m.keys.Top):
 				m.viewOffset = 0
-			case key.Matches(msg, keys.Bottom):
+			case key.Matches(msg, m.keys.Bottom):
 				maxOffset := fileViewLineCount(m.viewContent) - m.viewVisibleHeight()
 				if maxOffset < 0 {
 					maxOffset = 0
@@ -348,7 +354,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		case key.Matches(msg, keys.Switch):
+		case key.Matches(msg, m.keys.Switch):
 			if m.focus == focusLayers {
 				m.focus = focusTree
 			} else {
@@ -356,23 +362,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case key.Matches(msg, keys.Down):
+		case key.Matches(msg, m.keys.Down):
 			m.moveDown()
 			return m, nil
 
-		case key.Matches(msg, keys.Up):
+		case key.Matches(msg, m.keys.Up):
 			m.moveUp()
 			return m, nil
 
-		case key.Matches(msg, keys.Top):
+		case key.Matches(msg, m.keys.Top):
 			m.moveToTop()
 			return m, nil
 
-		case key.Matches(msg, keys.Bottom):
+		case key.Matches(msg, m.keys.Bottom):
 			m.moveToBottom()
 			return m, nil
 
-		case key.Matches(msg, keys.Copy):
+		case key.Matches(msg, m.keys.Copy):
 			layers := m.layers()
 			if m.layerCursor < len(layers) {
 				cmd := layers[m.layerCursor].Command
@@ -386,7 +392,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case key.Matches(msg, keys.Filter):
+		case key.Matches(msg, m.keys.Filter):
 			if m.focus == focusTree {
 				m.filterActive = true
 				return m, nil
@@ -428,13 +434,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case key.Matches(msg, keys.DiffOnly):
+		case key.Matches(msg, m.keys.DiffOnly):
 			m.diffOnly = !m.diffOnly
 			m.treeCursor = 0
 			m.treeOffset = 0
 			return m, nil
 
-		case key.Matches(msg, keys.Sort):
+		case key.Matches(msg, m.keys.Sort):
 			switch m.sortMode {
 			case sortNone:
 				m.sortMode = sortDesc
@@ -447,7 +453,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.treeOffset = 0
 			return m, nil
 
-		case key.Matches(msg, keys.ExtractFile):
+		case key.Matches(msg, m.keys.ExtractFile):
 			if m.focus != focusTree {
 				return m, nil
 			}
