@@ -95,7 +95,8 @@ func (e *DockerExtractor) Extract(ctx context.Context, imageRef string, filePath
 	containerID := createResult.ID
 
 	defer func() {
-		_, _ = e.cli.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true})
+		removeCtx := context.WithoutCancel(ctx)
+		_, _ = e.cli.ContainerRemove(removeCtx, containerID, client.ContainerRemoveOptions{Force: true})
 	}()
 
 	copyResult, err := e.cli.CopyFromContainer(ctx, containerID, client.CopyFromContainerOptions{

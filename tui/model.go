@@ -43,6 +43,20 @@ const (
 	sortAsc
 )
 
+type viewState int
+
+const (
+	viewNone viewState = iota
+	viewLoading
+	viewReady
+)
+
+// fileContentMsg is sent when async file extraction completes.
+type fileContentMsg struct {
+	content *image.FileContent
+	err     error
+}
+
 // analysisMsg is sent when the background fetch completes.
 type analysisMsg struct {
 	analysis *image.Analysis
@@ -96,6 +110,10 @@ type model struct {
 	filterQuery  string
 	diffOnly     bool
 	sortMode     sortMode
+	viewState    viewState
+	viewContent  *image.FileContent
+	viewOffset   int
+	extractor    image.Extractor
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -159,7 +177,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinnerTickMsg:
-		if m.state == stateLoading {
+		if m.state == stateLoading || m.viewState == viewLoading {
 			m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
 			return m, m.spinnerTick()
 		}
@@ -187,6 +205,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = stateReady
 		m.analysis = msg.analysis
+		if src, ok := m.resolver.(image.ExtractorSource); ok {
+			m.extractor = src.NewExtractor()
+		}
 		m.clampCursors()
 		return m, nil
 
@@ -194,9 +215,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.copyConfirm = false
 		return m, nil
 
+	case fileContentMsg:
+		if msg.err != nil {
+			m.viewState = viewNone
+			return m, nil
+		}
+		m.viewState = viewReady
+		m.viewContent = msg.content
+		m.viewOffset = 0
+		return m, nil
+
 	case tea.KeyPressMsg:
-		// Esc has precedence: filter (active) → filter (confirmed) → help → quit
+		// Esc has precedence: viewer → filter (active) → filter (confirmed) → help → quit
 		if msg.Code == tea.KeyEscape {
+			if m.viewState != viewNone {
+				m.viewState = viewNone
+				m.viewContent = nil
+				m.viewOffset = 0
+				return m, nil
+			}
 			if m.filterActive {
 				m.filterActive = false
 				m.filterQuery = ""
@@ -237,6 +274,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// When help is shown, swallow all other keys.
 		if m.showHelp {
+			return m, nil
+		}
+
+		// When viewing a file, only scroll/close keys work.
+		if m.viewState == viewReady {
+			switch {
+			case key.Matches(msg, keys.Down):
+				m.scrollViewDown()
+			case key.Matches(msg, keys.Up):
+				m.scrollViewUp()
+			case key.Matches(msg, keys.Top):
+				m.viewOffset = 0
+			case key.Matches(msg, keys.Bottom):
+				maxOffset := fileViewLineCount(m.viewContent) - m.viewVisibleHeight()
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				m.viewOffset = maxOffset
+			}
+			return m, nil
+		}
+		if m.viewState == viewLoading {
 			return m, nil
 		}
 
@@ -297,6 +356,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.treeCursor = 0
 				m.treeOffset = 0
 				return m, nil
+			}
+			if m.focus == focusTree && m.extractor != nil {
+				files := m.displayTree()
+				if m.treeCursor < len(files) {
+					f := files[m.treeCursor]
+					if !f.IsDir {
+						m.viewState = viewLoading
+						return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
+					}
+				}
 			}
 			return m, nil
 
@@ -650,6 +719,11 @@ func (m model) viewReady() tea.View {
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
+	if m.viewState != viewNone {
+		viewer := renderFileView(m.viewContent, m.viewOffset, m.width, panelHeight, m.viewState == viewLoading, m.spinnerFrame)
+		panels = viewer
+	}
+
 	cmd := ""
 	layers := m.layers()
 	if m.layerCursor < len(layers) {
@@ -702,11 +776,14 @@ func (m model) renderHeader() string {
 }
 
 func (m model) renderStatusBar() string {
+	if m.viewState != viewNone {
+		return m.renderViewerStatusBar()
+	}
 	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Background(statusBgColor).Bold(true)
 	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
 	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
 
-	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
+	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
 		keyStyle.Render("Tab"), descStyle.Render("switch"),
 		sepStyle.Render("·"),
 		keyStyle.Render("j/k"), descStyle.Render("navigate"),
@@ -718,6 +795,8 @@ func (m model) renderStatusBar() string {
 		keyStyle.Render("s"), descStyle.Render("sort"),
 		sepStyle.Render("·"),
 		keyStyle.Render("c"), descStyle.Render("copy"),
+		sepStyle.Render("·"),
+		keyStyle.Render("↵"), descStyle.Render("view"),
 		sepStyle.Render("·"),
 		keyStyle.Render("?"), descStyle.Render("help"),
 		sepStyle.Render("·"),
@@ -761,6 +840,41 @@ func (m model) renderStatusBar() string {
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
 }
 
+func (m model) renderViewerStatusBar() string {
+	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Background(statusBgColor).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
+	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
+
+	hints := " " +
+		keyStyle.Render("j/k") + " " + descStyle.Render("scroll") + " " +
+		sepStyle.Render("·") + " " +
+		keyStyle.Render("g/G") + " " + descStyle.Render("top/bottom") + " " +
+		sepStyle.Render("·") + " " +
+		keyStyle.Render("Esc") + " " + descStyle.Render("close") + " " +
+		sepStyle.Render("·") + " " +
+		keyStyle.Render("q") + " " + descStyle.Render("quit")
+
+	var right string
+	if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
+		total := fileViewLineCount(m.viewContent)
+		line := m.viewOffset + 1
+		pct := 0
+		if total > 0 {
+			pct = line * 100 / total
+		}
+		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
+		right = rightDim.Render(fmt.Sprintf("Line %d/%d (%d%%) ", line, total, pct))
+	}
+
+	gap := m.width - lipgloss.Width(hints) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
+	}
+
+	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
+}
+
 func (m model) overlayHelp() string {
 	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor)
@@ -781,6 +895,12 @@ func (m model) overlayHelp() string {
 		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("Confirm filter / clear filter"),
 		"  " + keyStyle.Render("d") + "             " + descStyle.Render("Toggle diff-only (changed files)"),
 		"  " + keyStyle.Render("s") + "             " + descStyle.Render("Cycle sort: none → ↓size → ↑size"),
+		"",
+		dimStyle.Render("  File Viewer"),
+		"  " + keyStyle.Render("Enter") + "         " + descStyle.Render("View selected file content"),
+		"  " + keyStyle.Render("j/k") + "           " + descStyle.Render("Scroll up/down"),
+		"  " + keyStyle.Render("g/G") + "           " + descStyle.Render("Jump to top/bottom"),
+		"  " + keyStyle.Render("Esc") + "           " + descStyle.Render("Close viewer"),
 		"",
 		dimStyle.Render("  Actions"),
 		"  " + keyStyle.Render("c") + "             " + descStyle.Render("Copy command to clipboard"),
@@ -805,6 +925,42 @@ func (m model) overlayHelp() string {
 	popup := borderStyle.Render(body)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+}
+
+func (m model) fetchFileContent(path string) tea.Cmd {
+	extractor := m.extractor
+	imageRef := m.imageRef
+	return func() tea.Msg {
+		content, err := extractor.Extract(context.Background(), imageRef, path)
+		return fileContentMsg{content: content, err: err}
+	}
+}
+
+func (m *model) scrollViewDown() {
+	maxOffset := fileViewLineCount(m.viewContent) - m.viewVisibleHeight()
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.viewOffset < maxOffset {
+		m.viewOffset++
+	}
+}
+
+func (m *model) scrollViewUp() {
+	if m.viewOffset > 0 {
+		m.viewOffset--
+	}
+}
+
+func (m *model) viewVisibleHeight() int {
+	h := m.height - 8
+	if m.viewContent != nil && m.viewContent.Truncated {
+		h--
+	}
+	if h < 1 {
+		h = 1
+	}
+	return h
 }
 
 func friendlyError(err error) string {

@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -773,4 +775,136 @@ func TestEscClosesHelpBeforeQuit(t *testing.T) {
 	m = send(m, keyPressSpecial(tea.KeyEscape))
 	assert.False(t, m.showHelp)
 	assert.False(t, m.quitting)
+}
+
+// --- File Viewer (M08) -------------------------------------------------------
+
+type mockExtractor struct{}
+
+func (e *mockExtractor) Extract(_ context.Context, _ string, path string) (*image.FileContent, error) {
+	return &image.FileContent{
+		Path: path,
+		Data: []byte("mock content"),
+		Size: 12,
+	}, nil
+}
+
+func TestEnterOnFileTriggersViewing(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+
+	files := m.displayTree()
+	for i, f := range files {
+		if !f.IsDir {
+			m.treeCursor = i
+			break
+		}
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, viewLoading, um.viewState)
+}
+
+func TestEnterOnDirIsNoop(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+
+	files := m.displayTree()
+	for i, f := range files {
+		if f.IsDir {
+			m.treeCursor = i
+			break
+		}
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, viewNone, um.viewState)
+}
+
+func TestEscClosesFileViewer(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/test", Data: []byte("hi")}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	um := updated.(model)
+	assert.Equal(t, viewNone, um.viewState)
+	assert.Nil(t, um.viewContent)
+}
+
+func TestViewerScrollDown(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte(strings.Repeat("line\n", 100)),
+		Size: 500,
+	}
+	m.viewOffset = 0
+	m.height = 30
+
+	updated, _ := m.Update(keyPress('j'))
+	um := updated.(model)
+	assert.Equal(t, 1, um.viewOffset)
+}
+
+func TestViewerScrollUpAtTopStays(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("line1\nline2\n"),
+		Size: 12,
+	}
+	m.viewOffset = 0
+
+	updated, _ := m.Update(keyPress('k'))
+	um := updated.(model)
+	assert.Equal(t, 0, um.viewOffset)
+}
+
+func TestFileContentMsgSetsViewReady(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewLoading
+
+	content := &image.FileContent{Path: "/etc/hosts", Data: []byte("127.0.0.1 localhost"), Size: 19}
+	updated, _ := m.Update(fileContentMsg{content: content})
+	um := updated.(model)
+	assert.Equal(t, viewReady, um.viewState)
+	assert.Equal(t, content, um.viewContent)
+}
+
+func TestFileContentMsgErrorClearsViewState(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewLoading
+
+	updated, _ := m.Update(fileContentMsg{err: fmt.Errorf("not found")})
+	um := updated.(model)
+	assert.Equal(t, viewNone, um.viewState)
+}
+
+func TestViewerBlocksNavigationKeys(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/test", Data: []byte("hi")}
+	m.focus = focusLayers
+	cursorBefore := m.layerCursor
+
+	updated, _ := m.Update(keyPressSpecial(tea.KeyTab))
+	um := updated.(model)
+	assert.Equal(t, focusLayers, um.focus)
+	assert.Equal(t, cursorBefore, um.layerCursor)
+}
+
+func TestViewLoadingBlocksAllKeys(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewLoading
+
+	updated, _ := m.Update(keyPress('j'))
+	um := updated.(model)
+	assert.Equal(t, viewLoading, um.viewState)
 }
