@@ -40,8 +40,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	return tui.Run(tui.Config{
-		ImageRef:    imageRef,
-		Resolver:    resolver,
-		Keybindings: cfg.Keybindings,
+		ImageRef: imageRef,
+		Resolver: resolver,
 	})
 }

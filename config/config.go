@@ -12,8 +12,7 @@ const defaultConfigFile = ".layerx.yaml"
 
 // Config holds all user-configurable settings.
 type Config struct {
-	Rules       RulesConfig       `yaml:"rules"`
-	Keybindings KeybindingsConfig `yaml:"keybindings"`
+	Rules RulesConfig `yaml:"rules"`
 }
 
 // RulesConfig holds CI rule thresholds.
@@ -21,19 +20,6 @@ type RulesConfig struct {
 	LowestEfficiency        float64 `yaml:"lowest-efficiency"`
 	HighestWastedBytes      int64   `yaml:"highest-wasted-bytes"`
 	HighestUserWastedPercent float64 `yaml:"highest-user-wasted-percent"`
-}
-
-// KeybindingsConfig holds keybinding overrides. Empty string means keep default.
-type KeybindingsConfig struct {
-	Quit     string `yaml:"quit"`
-	Up       string `yaml:"up"`
-	Down     string `yaml:"down"`
-	Filter   string `yaml:"filter"`
-	Sort     string `yaml:"sort"`
-	DiffOnly string `yaml:"diff-only"`
-	Extract  string `yaml:"extract"`
-	Help     string `yaml:"help"`
-	Switch   string `yaml:"switch"`
 }
 
 // Default returns the config with hardcoded default values.

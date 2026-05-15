@@ -13,15 +13,13 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 
-	"github.com/deveshpharswan/layerx/config"
 	"github.com/deveshpharswan/layerx/image"
 )
 
 // Config holds the parameters needed to start the TUI.
 type Config struct {
-	ImageRef    string
-	Resolver    image.Resolver
-	Keybindings config.KeybindingsConfig
+	ImageRef string
+	Resolver image.Resolver
 }
 
 type focus int
@@ -137,15 +135,13 @@ type model struct {
 // NewModel creates a new model wired to real Docker data.
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
-	km := defaultKeys()
-	applyOverrides(&km, cfg.Keybindings)
 	return model{
 		state:      stateLoading,
 		imageRef:   cfg.ImageRef,
 		resolver:   cfg.Resolver,
 		progressCh: ch,
 		writeFile:  os.WriteFile,
-		keys:       km,
+		keys:       defaultKeys(),
 	}
 }
 

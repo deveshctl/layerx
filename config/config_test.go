@@ -14,7 +14,6 @@ func TestDefault(t *testing.T) {
 	assert.Equal(t, 0.9, cfg.Rules.LowestEfficiency)
 	assert.Equal(t, int64(0), cfg.Rules.HighestWastedBytes)
 	assert.Equal(t, 0.1, cfg.Rules.HighestUserWastedPercent)
-	assert.Equal(t, "", cfg.Keybindings.Quit)
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
@@ -30,9 +29,6 @@ func TestLoadFrom_ValidYAML(t *testing.T) {
   lowest-efficiency: 0.95
   highest-wasted-bytes: 5000000
   highest-user-wasted-percent: 0.05
-keybindings:
-  quit: "q"
-  filter: "f"
 `)
 	require.NoError(t, os.WriteFile(path, content, 0644))
 
@@ -41,9 +37,6 @@ keybindings:
 	assert.Equal(t, 0.95, cfg.Rules.LowestEfficiency)
 	assert.Equal(t, int64(5000000), cfg.Rules.HighestWastedBytes)
 	assert.Equal(t, 0.05, cfg.Rules.HighestUserWastedPercent)
-	assert.Equal(t, "q", cfg.Keybindings.Quit)
-	assert.Equal(t, "f", cfg.Keybindings.Filter)
-	assert.Equal(t, "", cfg.Keybindings.Up)
 }
 
 func TestLoadFrom_PartialYAML(t *testing.T) {

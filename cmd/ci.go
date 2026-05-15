@@ -20,9 +20,20 @@ var (
 var ciCmd = &cobra.Command{
 	Use:   "ci [image]",
 	Short: "Run efficiency checks for CI pipelines",
-	Long:  "Evaluates image efficiency against configurable thresholds. Exits 0 on pass, 1 on failure.",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runCICmd,
+	Long: `Evaluates image efficiency against configurable thresholds.
+Exits 0 on pass, 1 on failure.
+
+Thresholds can be set via flags or a .layerx.yaml file in the working directory:
+
+  rules:
+    lowest-efficiency: 0.9           # minimum efficiency score (0.0-1.0)
+    highest-wasted-bytes: 0          # max wasted bytes (0 = disabled)
+    highest-user-wasted-percent: 0.1 # max waste as fraction of total (0.0-1.0)
+
+Flags take precedence over config file values.
+Missing config file is silently ignored (defaults apply).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runCICmd,
 }
 
 func init() {
