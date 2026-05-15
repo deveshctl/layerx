@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [M13+M14] — 2026-05-15
 Shell completion and JSON export.
 
+### Fixed
+- CI workflow: Go version updated from 1.24 to 1.26 to match go.mod requirement.
+- Push hook: added explicit pattern for combined-milestone branches (`feat/mNN-mNN`).
+
 ### M13 — Shell Completion
 - `layerx completion [bash|zsh|fish|powershell]` outputs shell completion script.
 - Custom image argument completer suggests local Docker images via `docker images`.
