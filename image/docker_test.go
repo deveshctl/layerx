@@ -3,6 +3,7 @@ package image
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"testing"
 
@@ -305,4 +306,97 @@ func TestParseLayers_OCIFormat(t *testing.T) {
 	assert.Equal(t, "222222222222", layers[1].ID)
 	assert.Equal(t, int64(2048), layers[1].Size)
 	assert.Equal(t, "/bin/sh -c #(nop)  CMD [\"nginx\"]", layers[1].Command)
+}
+
+// buildGzipLayerTar creates a gzip-compressed tar containing the given entries,
+// simulating how Docker 25+ OCI format stores layer blobs.
+func buildGzipLayerTar(t *testing.T, entries []struct {
+	Name string
+	Size int64
+	Type byte
+}) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, e := range entries {
+		hdr := &tar.Header{
+			Name:     e.Name,
+			Size:     e.Size,
+			Typeflag: e.Type,
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+		if e.Size > 0 {
+			_, err := tw.Write(make([]byte, e.Size))
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+	return buf.Bytes()
+}
+
+func TestParseLayers_OCIGzipCompressedLayers(t *testing.T) {
+	configDigest := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	layerDigest := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+	manifest := []dockerManifest{{
+		Config: "blobs/sha256/" + configDigest,
+		Layers: []string{
+			"blobs/sha256/" + layerDigest,
+		},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	configData := buildConfig(t, []string{"/bin/sh -c apt-get update"})
+
+	// Build a gzip-compressed layer tar with known files
+	layerData := buildGzipLayerTar(t, []struct {
+		Name string
+		Size int64
+		Type byte
+	}{
+		{Name: "etc/", Size: 0, Type: tar.TypeDir},
+		{Name: "etc/hostname", Size: 12, Type: tar.TypeReg},
+		{Name: "usr/", Size: 0, Type: tar.TypeDir},
+		{Name: "usr/bin/", Size: 0, Type: tar.TypeDir},
+		{Name: "usr/bin/curl", Size: 1024, Type: tar.TypeReg},
+	})
+
+	// Verify the layer data actually starts with gzip magic bytes
+	require.True(t, len(layerData) >= 2 && layerData[0] == 0x1f && layerData[1] == 0x8b,
+		"test setup: layer data must be gzip-compressed")
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json":                manifestData,
+		"blobs/sha256/" + configDigest: configData,
+		"blobs/sha256/" + layerDigest:  layerData,
+	})
+
+	layers, err := parseLayers(tarBuf)
+	require.NoError(t, err)
+	require.Len(t, layers, 1)
+
+	// The critical assertion: Tree must be populated from gzip-compressed data
+	require.NotNil(t, layers[0].Tree, "Tree must be populated for gzip-compressed OCI layers")
+
+	// Verify the tree contents are correct
+	etc := layers[0].Tree.Root.FindChild("etc")
+	require.NotNil(t, etc, "etc directory must exist")
+	assert.True(t, etc.IsDir)
+
+	hostname := etc.FindChild("hostname")
+	require.NotNil(t, hostname, "etc/hostname must exist")
+	assert.Equal(t, int64(12), hostname.Size)
+
+	usr := layers[0].Tree.Root.FindChild("usr")
+	require.NotNil(t, usr, "usr directory must exist")
+
+	bin := usr.FindChild("bin")
+	require.NotNil(t, bin, "usr/bin directory must exist")
+
+	curl := bin.FindChild("curl")
+	require.NotNil(t, curl, "usr/bin/curl must exist")
+	assert.Equal(t, int64(1024), curl.Size)
 }

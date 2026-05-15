@@ -3,6 +3,7 @@ package image
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -282,12 +283,24 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 			layers[i].Command = commands[i]
 		}
 		if tarData, ok := blobs[layerPath]; ok && len(tarData) > 0 {
-			tree, _ := ParseLayerTar(bytes.NewReader(tarData))
-			layers[i].Tree = tree
+			r, err := decompressIfGzip(tarData)
+			if err == nil {
+				tree, _ := ParseLayerTar(r)
+				layers[i].Tree = tree
+			}
 		}
 	}
 
 	return layers, nil
+}
+
+// decompressIfGzip returns a reader that decompresses gzip data, or wraps raw
+// bytes directly. Docker 25+ OCI format stores layer blobs as gzip-compressed tar.
+func decompressIfGzip(data []byte) (io.Reader, error) {
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		return gzip.NewReader(bytes.NewReader(data))
+	}
+	return bytes.NewReader(data), nil
 }
 
 type dockerManifest struct {
