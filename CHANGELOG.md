@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M13+M14] — 2026-05-15
+Shell completion and JSON export.
+
+### Fixed
+- CI workflow: Go version updated from 1.24 to 1.26 to match go.mod requirement.
+- Push hook: added explicit pattern for combined-milestone branches (`feat/mNN-mNN`).
+
+### M13 — Shell Completion
+- `layerx completion [bash|zsh|fish|powershell]` outputs shell completion script.
+- Custom image argument completer suggests local Docker images via `docker images`.
+- Sourcing the script enables tab-completion for subcommands and image references.
+
+### M14 — JSON Export
+- `--json <path>` flag on root command exports analysis to JSON file (skips TUI).
+- Flat schema: imageRef, totalSize, layerCount, efficiency (score + wastedFiles), layers (each with files[]).
+- Files include path, size, and diffType (added/modified/removed/unchanged).
+- Gate C: `layerx --json /tmp/out.json nginx:latest` writes valid JSON; `jq '.layers | length'` returns correct count.
+
 ## [M11+M12] — 2026-05-15
 CI mode and config file — automated efficiency checks for pipelines.
 
