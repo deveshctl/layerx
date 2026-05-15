@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var flagJSON string
+
 var rootCmd = &cobra.Command{
 	Use:   "layerx [image]",
 	Short: "Inspect Docker image layers",
@@ -18,12 +20,20 @@ var rootCmd = &cobra.Command{
 	RunE:  runInspect,
 }
 
+func init() {
+	rootCmd.Flags().StringVar(&flagJSON, "json", "", "export analysis to JSON file (skip TUI)")
+}
+
 func Execute() error {
 	return rootCmd.Execute()
 }
 
 func runInspect(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
+
+	if flagJSON != "" {
+		return runJSONExport(imageRef, flagJSON)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
