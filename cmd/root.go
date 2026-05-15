@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/deveshpharswan/layerx/config"
 	"github.com/deveshpharswan/layerx/image"
 	"github.com/deveshpharswan/layerx/tui"
 	"github.com/spf13/cobra"
@@ -22,6 +24,15 @@ func Execute() error {
 
 func runInspect(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	if os.Getenv("CI") == "true" {
+		return executeCICheck(imageRef, cfg, ciCmd)
+	}
 
 	resolver, err := image.NewDockerResolver()
 	if err != nil {
