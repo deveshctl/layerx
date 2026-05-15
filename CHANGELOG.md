@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M11+M12] — 2026-05-15
+CI mode and config file — automated efficiency checks for pipelines.
+
+### M11 — CI Mode
+- `layerx ci <image>`: evaluates efficiency against configurable thresholds, exits 0/1.
+- Three independent rules: `lowest-efficiency`, `highest-wasted-bytes`, `highest-user-wasted-percent`.
+- `CI=true layerx <image>` triggers CI mode from root command (no TUI).
+- Human-readable report with aligned columns, wasted file listing.
+- All three rules independently configurable via CLI flags.
+
+### M12 — Config File
+- `.layerx.yaml` in working directory sets CI rule thresholds.
+- Missing config silently uses defaults; invalid YAML produces clear error.
+- Partial config merges with defaults (unspecified fields keep default values).
+- CLI flags override config file values.
+- Config example documented in `layerx ci --help`.
+
+### Fixed
+- OCI layer blobs: handle gzip-compressed blobs from Docker 25+ (`decompressIfGzip`).
+- Removed keybinding override feature (caused status bar/help mismatch with actual keys).
+
 ## [M09+M10] — 2026-05-14
 Efficiency analysis and file extraction to disk.
 
