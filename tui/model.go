@@ -306,7 +306,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// When filter input is active, capture all keys for text editing.
+		// When filter input is active, capture all keys.
 		if m.filterActive {
 			return m.handleFilterInput(msg)
 		}
