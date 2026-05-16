@@ -112,7 +112,7 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 	prefix := styleWithFg(accentColor).Render("/ ")
 	queryStr := styleWithFg(selectedColor).Render(query)
 	matches := styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d matches)", matchCount))
-	hint := styleWithFg(unchangedColor).Render("  [Enter clear]")
+	hint := styleWithFg(unchangedColor).Render("  [⌫ clear]")
 
 	line := prefix + queryStr + matches + hint
 	lineWidth := lipgloss.Width(line)
