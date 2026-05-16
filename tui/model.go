@@ -668,7 +668,11 @@ func (m *model) layerVisibleHeight() int {
 }
 
 func (m *model) treeVisibleHeight() int {
-	return m.height - 8
+	h := m.height - 8 - 1 // -1 for column header
+	if m.filterQuery != "" || m.filterActive {
+		h--
+	}
+	return h
 }
 
 func (m *model) clampCursors() {

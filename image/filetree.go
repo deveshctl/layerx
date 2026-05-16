@@ -1,5 +1,7 @@
 package image
 
+import "io/fs"
+
 // DiffType indicates how a file changed relative to previous layers.
 type DiffType int
 
@@ -20,6 +22,9 @@ type FileNode struct {
 	Name     string
 	Path     string
 	Size     int64
+	Mode     fs.FileMode
+	UID      int
+	GID      int
 	DiffType DiffType
 	Children []*FileNode
 	IsDir    bool

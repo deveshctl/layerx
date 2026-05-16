@@ -1,6 +1,9 @@
 package image
 
-import "fmt"
+import (
+	"fmt"
+	"io/fs"
+)
 
 func FormatBytes(b int64) string {
 	const (
@@ -19,4 +22,25 @@ func FormatBytes(b int64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+func FormatMode(m fs.FileMode) string {
+	var buf [10]byte
+	if m.IsDir() {
+		buf[0] = 'd'
+	} else if m&fs.ModeSymlink != 0 {
+		buf[0] = 'l'
+	} else {
+		buf[0] = '-'
+	}
+	const rwx = "rwx"
+	perm := m.Perm()
+	for i := 0; i < 9; i++ {
+		if perm&(1<<uint(8-i)) != 0 {
+			buf[1+i] = rwx[i%3]
+		} else {
+			buf[1+i] = '-'
+		}
+	}
+	return string(buf[:])
 }

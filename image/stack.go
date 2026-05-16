@@ -40,6 +40,9 @@ func mergeLayer(cumulative, layerRoot *FileNode) *FileNode {
 		Path:  cumulative.Path,
 		IsDir: cumulative.IsDir,
 		Size:  cumulative.Size,
+		Mode:  cumulative.Mode,
+		UID:   cumulative.UID,
+		GID:   cumulative.GID,
 	}
 
 	whiteouts, opaque := extractWhiteouts(layerRoot)
@@ -86,6 +89,9 @@ func mergeLayer(cumulative, layerRoot *FileNode) *FileNode {
 					Size:     lChild.Size,
 					IsDir:    lChild.IsDir,
 					DiffType: Modified,
+					Mode:     lChild.Mode,
+					UID:      lChild.UID,
+					GID:      lChild.GID,
 				}
 				if lChild.IsDir {
 					for _, gc := range lChild.Children {
@@ -141,6 +147,9 @@ func cloneAsUnchanged(node *FileNode) *FileNode {
 		Size:     node.Size,
 		IsDir:    node.IsDir,
 		DiffType: Unchanged,
+		Mode:     node.Mode,
+		UID:      node.UID,
+		GID:      node.GID,
 	}
 	for _, child := range node.Children {
 		clone.AddChild(cloneAsUnchanged(child))
@@ -155,6 +164,9 @@ func cloneAsRemoved(node *FileNode) *FileNode {
 		Size:     node.Size,
 		IsDir:    node.IsDir,
 		DiffType: Removed,
+		Mode:     node.Mode,
+		UID:      node.UID,
+		GID:      node.GID,
 	}
 	for _, child := range node.Children {
 		clone.AddChild(cloneAsRemoved(child))
@@ -169,6 +181,9 @@ func cloneAsAdded(node *FileNode) *FileNode {
 		Size:     node.Size,
 		IsDir:    node.IsDir,
 		DiffType: Added,
+		Mode:     node.Mode,
+		UID:      node.UID,
+		GID:      node.GID,
 	}
 	for _, child := range node.Children {
 		if isWhiteoutName(child.Name) {
@@ -187,6 +202,9 @@ func cloneStructure(node *FileNode) *FileNode {
 		Path:  node.Path,
 		Size:  node.Size,
 		IsDir: node.IsDir,
+		Mode:  node.Mode,
+		UID:   node.UID,
+		GID:   node.GID,
 	}
 	for _, child := range node.Children {
 		if child.DiffType == Removed {
