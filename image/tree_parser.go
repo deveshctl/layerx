@@ -3,6 +3,7 @@ package image
 import (
 	"archive/tar"
 	"io"
+	"io/fs"
 	"path"
 	"strings"
 )
@@ -32,7 +33,11 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 			size = 0
 		}
 
-		insertNode(tree.Root, name, size, isDir)
+		mode := hdr.FileInfo().Mode()
+		uid := hdr.Uid
+		gid := hdr.Gid
+
+		insertNode(tree.Root, name, size, isDir, mode, uid, gid)
 	}
 
 	return tree, nil
@@ -44,7 +49,7 @@ func cleanTarPath(p string) string {
 	return p
 }
 
-func insertNode(root *FileNode, fullPath string, size int64, isDir bool) {
+func insertNode(root *FileNode, fullPath string, size int64, isDir bool, mode fs.FileMode, uid, gid int) {
 	cleanPath := strings.TrimSuffix(fullPath, "/")
 	parts := strings.Split(cleanPath, "/")
 
@@ -66,12 +71,18 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir bool) {
 					existing.Size = size
 				}
 				existing.Path = absPath
+				existing.Mode = mode
+				existing.UID = uid
+				existing.GID = gid
 			} else {
 				node := &FileNode{
 					Name:  part,
 					Path:  absPath,
 					Size:  size,
 					IsDir: isDir,
+					Mode:  mode,
+					UID:   uid,
+					GID:   gid,
 				}
 				current.AddChild(node)
 			}
@@ -82,6 +93,7 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir bool) {
 					Name:  part,
 					Path:  dirPath,
 					IsDir: true,
+					Mode:  fs.ModeDir | 0755,
 				}
 				current.AddChild(existing)
 			}
