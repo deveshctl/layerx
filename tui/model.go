@@ -470,7 +470,8 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.tryOpenSelectedFile()
 	case msg.Code == tea.KeyBackspace:
 		if len(m.filterQuery) > 0 {
-			m.filterQuery = m.filterQuery[:len(m.filterQuery)-1]
+			runes := []rune(m.filterQuery)
+			m.filterQuery = string(runes[:len(runes)-1])
 			m.treeCursor = 0
 			m.treeOffset = 0
 		} else {
@@ -779,6 +780,9 @@ func (m model) viewLoading() tea.View {
 	lines = append(lines, "")
 
 	boxWidth := 52
+	if m.width > 0 && m.width-2 < boxWidth {
+		boxWidth = m.width - 2
+	}
 	boxHeight := len(lines)
 	if boxHeight < 7 {
 		for len(lines) < 7 {
@@ -909,6 +913,8 @@ func (m model) renderStatusBar() string {
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
 			{"g/G", "top/bottom"},
+			{"d", "diff"},
+			{"s", "sort"},
 			{"c", "copy"},
 			{"?", "help"},
 			{"q", "quit"},
