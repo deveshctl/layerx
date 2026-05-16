@@ -395,38 +395,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case msg.Code == tea.KeyEnter:
-			if m.focus == focusTree && m.filterQuery != "" {
+		case msg.Code == tea.KeyBackspace:
+			if m.focus == focusTree && !m.filterActive && m.filterQuery != "" {
 				m.filterQuery = ""
 				m.treeCursor = 0
 				m.treeOffset = 0
 				return m, nil
 			}
+
+		case msg.Code == tea.KeyEnter:
 			if m.focus == focusTree {
-				files := m.displayTree()
-				if m.treeCursor < len(files) {
-					f := files[m.treeCursor]
-					if f.IsDir {
-						m.statusMsg = "Cannot view directory"
-						return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-							return clearStatusMsg{}
-						})
-					}
-					if f.DiffType == image.Removed {
-						m.statusMsg = "File removed in this layer"
-						return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-							return clearStatusMsg{}
-						})
-					}
-					if m.extractor == nil {
-						m.statusMsg = "Extractor unavailable"
-						return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-							return clearStatusMsg{}
-						})
-					}
-					m.viewState = viewLoading
-					return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
-				}
+				return m.tryOpenSelectedFile()
 			}
 			return m, nil
 
@@ -488,14 +467,14 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == tea.KeyEnter:
 		m.filterActive = false
-		m.treeCursor = 0
-		m.treeOffset = 0
-		return m, nil
+		return m.tryOpenSelectedFile()
 	case msg.Code == tea.KeyBackspace:
 		if len(m.filterQuery) > 0 {
 			m.filterQuery = m.filterQuery[:len(m.filterQuery)-1]
 			m.treeCursor = 0
 			m.treeOffset = 0
+		} else {
+			m.filterActive = false
 		}
 		return m, nil
 	default:
@@ -506,6 +485,34 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
+	files := m.displayTree()
+	if m.treeCursor >= len(files) {
+		return m, nil
+	}
+	f := files[m.treeCursor]
+	if f.IsDir {
+		m.statusMsg = "Cannot view directory"
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
+	}
+	if f.DiffType == image.Removed {
+		m.statusMsg = "File removed in this layer"
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
+	}
+	if m.extractor == nil {
+		m.statusMsg = "Extractor unavailable"
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
+	}
+	m.viewState = viewLoading
+	return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
 }
 
 func (m model) layers() []image.Layer {
@@ -1002,6 +1009,7 @@ func (m model) overlayHelp() string {
 		"  " + sectionStyle.Render("File Tree"),
 		"  " + keyStyle.Render("/           ") + descStyle.Render("Search files (substring filter)"),
 		"  " + keyStyle.Render("Enter       ") + descStyle.Render("View file content"),
+		"  " + keyStyle.Render("Backspace   ") + descStyle.Render("Clear active filter"),
 		"  " + keyStyle.Render("d           ") + descStyle.Render("Show only changed files"),
 		"  " + keyStyle.Render("s           ") + descStyle.Render("Sort by size (↓ → ↑ → off)"),
 		"  " + keyStyle.Render("x           ") + descStyle.Render("Save file to current directory"),

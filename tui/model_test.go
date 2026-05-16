@@ -659,6 +659,30 @@ func TestFilterEnterKeepsQuery(t *testing.T) {
 	assert.Equal(t, "n", m.filterQuery)
 }
 
+func TestEnterOpensFileWhileFilterActive(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.extractor = &mockExtractor{}
+	m.filterQuery = "passwd"
+	m.treeCursor = 0
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, "passwd", um.filterQuery, "filter should stay active")
+	assert.Equal(t, viewLoading, um.viewState)
+}
+
+func TestBackspaceClearsFilterChip(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterQuery = "nginx"
+	m.filterActive = false
+	m.treeCursor = 2
+
+	m = send(m, keyPressSpecial(tea.KeyBackspace))
+	assert.Equal(t, "", m.filterQuery)
+	assert.Equal(t, 0, m.treeCursor)
+}
+
 func TestFilterBackspaceRemovesChar(t *testing.T) {
 	m := setupModelWithDiffs()
 	m = send(m, keyPress('/'))
