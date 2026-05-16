@@ -131,7 +131,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
-	size := formatSize(f)
+	size := formatSizeForNode(f, flat)
 
 	// Fixed column widths
 	const permCol = 10
@@ -201,11 +201,20 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	}
 }
 
-func formatSize(f *image.FileNode) string {
-	if f.IsDir {
-		return ""
+func formatSizeForNode(f *image.FileNode, flat bool) string {
+	if !f.IsDir {
+		if f.Size > 0 {
+			return image.FormatBytes(f.Size)
+		}
+		return "0 B"
 	}
-	return image.FormatBytes(f.Size)
+	if flat {
+		sz := nodeEffectiveSize(f)
+		if sz > 0 {
+			return image.FormatBytes(sz)
+		}
+	}
+	return ""
 }
 
 func buildTreePrefix(depth int) string {
