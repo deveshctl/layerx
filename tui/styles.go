@@ -50,7 +50,7 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 	vLine := borderFg.Render("│")
 
 	titleLen := len(title)
-	fillCount := contentWidth - titleLen - 4
+	fillCount := contentWidth - titleLen - 3
 	if fillCount < 0 {
 		fillCount = 0
 	}

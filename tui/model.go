@@ -919,6 +919,7 @@ func (m model) renderStatusBar() string {
 			{"j/k", "navigate"},
 			{"/", "filter"},
 			{"d", "diff"},
+			{"s", "sort"},
 			{"Enter", "view"},
 			{"x", "save"},
 			{"?", "help"},

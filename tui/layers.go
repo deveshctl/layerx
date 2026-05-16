@@ -54,7 +54,7 @@ func renderLayers(layers []image.Layer, cursor int, offset int, width, height in
 
 func renderCommandBar(cmd string, width int) string {
 	maxLines := 3
-	wrappedLines := wrapCommandLines(cmd, width-3, maxLines)
+	wrappedLines := wrapCommandLines(cmd, width-2, maxLines)
 
 	prefix := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("▶ ")
 

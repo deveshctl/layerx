@@ -199,27 +199,28 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	gap := strings.Repeat(" ", colGap)
 
 	var nameRendered string
-	if flat {
-		treePrefixRendered := ""
-		nameOnlyRendered := ""
+	prefixRuneLen := len([]rune(treePrefix))
+	fullNameRuneLen := len([]rune(fullName))
+	wasTruncated := len(nameRunes) > nameSpace
+
+	if flat || (wasTruncated && prefixRuneLen >= fullNameRuneLen) {
 		switch f.DiffType {
 		case image.Added:
-			nameOnlyRendered = styleWithFg(addedColor).Render(fullName)
+			nameRendered = styleWithFg(addedColor).Render(fullName)
 		case image.Modified:
-			nameOnlyRendered = styleWithFg(modifiedColor).Render(fullName)
+			nameRendered = styleWithFg(modifiedColor).Render(fullName)
 		case image.Removed:
-			nameOnlyRendered = styleWithFg(removedColor).Render(fullName)
+			nameRendered = styleWithFg(removedColor).Render(fullName)
 		default:
-			nameOnlyRendered = styleWithFg(fileNameColor).Render(fullName)
+			nameRendered = styleWithFg(fileNameColor).Render(fullName)
 		}
-		nameRendered = treePrefixRendered + nameOnlyRendered
 	} else {
-		treePrefixRendered := styleWithFg(treeDimColor).Render(treePrefix)
-		nameOnly := displayName
-		nameOnlyRunes := []rune(fullName)
-		if len(nameOnlyRunes) > nameSpace {
-			nameOnly = string([]rune(displayName)[:nameSpace-len([]rune(treePrefix))-1]) + "…"
+		fullRunes := []rune(fullName)
+		var nameOnly string
+		if prefixRuneLen < len(fullRunes) {
+			nameOnly = string(fullRunes[prefixRuneLen:])
 		}
+		treePrefixRendered := styleWithFg(treeDimColor).Render(treePrefix)
 		var nameOnlyRendered string
 		switch f.DiffType {
 		case image.Added:
@@ -235,7 +236,8 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	}
 
 	nameRenderedWidth := lipgloss.Width(nameRendered)
-	actualNamePad := nameSpace - nameRenderedWidth + len(diffGlyph) - 2
+	diffGlyphWidth := lipgloss.Width(diffGlyph)
+	actualNamePad := nameSpace - nameRenderedWidth + diffGlyphWidth - 2
 	if actualNamePad < 0 {
 		actualNamePad = 0
 	}
