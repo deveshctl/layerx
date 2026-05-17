@@ -90,11 +90,19 @@ Download a prebuilt binary from [Releases](https://github.com/deveshpharswan/lay
 
 ### Build from Source
 
-Requires Go 1.26+:
+Requires Go 1.26.2+:
 
 ```bash
 go install github.com/deveshpharswan/layerx@latest
 ```
+
+### Maintainer Setup (one-time, before first release)
+
+Before tagging the first release, create these two public repositories and configure the secret:
+
+1. Create [`github.com/deveshpharswan/homebrew-tap`](https://github.com/deveshpharswan/homebrew-tap) (public, empty)
+2. Create [`github.com/deveshpharswan/scoop-bucket`](https://github.com/deveshpharswan/scoop-bucket) (public, empty)
+3. Create a Personal Access Token with `repo` scope → add as `TAP_GITHUB_TOKEN` in repo **Settings → Secrets and Variables → Actions**
 
 ---
 
@@ -143,31 +151,6 @@ rules:
   highest-wasted-bytes: 52428800    # 50MB
   highest-user-wasted-percent: 0.1
 ```
-
----
-
-## How It Compares to dive
-
-| Feature | dive v0.13 | layerx |
-|---------|:----------:|:------:|
-| Layer browser with diff view | ✅ | ✅ |
-| File tree with Add/Modify/Remove colouring | ✅ | ✅ |
-| Filter by name | ✅ | ✅ |
-| Efficiency score + CI mode | ✅ | ✅ |
-| JSON export | ✅ | ✅ |
-| Config file | ✅ | ✅ |
-| Vim navigation | ✅ | ✅ |
-| File permissions + UID:GID display | ✅ | ✅ |
-| **File content viewer** | ❌ | ✅ |
-| **Viewer search with highlighting** | ❌ | ✅ |
-| **Clipboard (OSC52)** | ❌ | ✅ |
-| **Layer origin tracking** | ❌ | ✅ |
-| **Sort by size** | ❌ | ✅ |
-| **File extraction (OCI-compatible)** | ⚠️ broken | ✅ |
-| **Shell completion** | ❌ | ✅ |
-| Docker 25+ OCI format support | ⚠️ partial | ✅ |
-
-The features marked **bold** represent 450+ combined reactions on dive's issue tracker (issues [#224](https://github.com/wagoodman/dive/issues/224), [#336](https://github.com/wagoodman/dive/issues/336), [#89](https://github.com/wagoodman/dive/issues/89), [#341](https://github.com/wagoodman/dive/issues/341), [#525](https://github.com/wagoodman/dive/issues/525)).
 
 ---
 
