@@ -15,13 +15,13 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 
 	if loading {
 		frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
-		msg := frame + " Extracting file..."
+		msg := frame + " Extracting file…"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center, msg)
-		return renderPanel(body, "FILE VIEWER", true, contentWidth, height)
+		return renderPanel(body, "File Viewer", true, contentWidth, height, false, false)
 	}
 
 	if content == nil {
-		return renderPanel("", "FILE VIEWER", true, contentWidth, height)
+		return renderPanel("", "File Viewer", true, contentWidth, height, false, false)
 	}
 
 	title := content.Path
@@ -31,7 +31,7 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 		hint := "Press Esc to return"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
 			styleWithFg(removedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
-		return renderPanel(body, title, true, contentWidth, height)
+		return renderPanel(body, title, true, contentWidth, height, false, false)
 	}
 
 	if len(content.Data) == 0 {
@@ -39,7 +39,7 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 		hint := "Press Esc to return"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
 			styleWithFg(unchangedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
-		return renderPanel(body, title, true, contentWidth, height)
+		return renderPanel(body, title, true, contentWidth, height, false, false)
 	}
 
 	lines := strings.Split(string(content.Data), "\n")
@@ -67,7 +67,7 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 
 	for i, line := range visible {
 		lineNum := offset + i + 1
-		gutter := styleWithFg(unchangedColor).Render(fmt.Sprintf("%*d ", gutterWidth, lineNum))
+		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterWidth, lineNum))
 
 		maxLineWidth := contentWidth - gutterWidth - 1
 		if maxLineWidth < 1 {
@@ -94,7 +94,10 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 		sb.WriteString(styleWithFg(modifiedColor).Render(notice))
 	}
 
-	return renderPanel(sb.String(), title, true, contentWidth, height)
+	hasAbove := offset > 0
+	hasBelow := end < totalLines
+
+	return renderPanel(sb.String(), title, true, contentWidth, height, hasAbove, hasBelow)
 }
 
 func fileViewLineCount(content *image.FileContent) int {

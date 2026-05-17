@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshpharswan/layerx/image"
 )
@@ -39,26 +40,49 @@ func renderLayers(layers []image.Layer, cursor int, offset int, width, height in
 		}
 	}
 
-	title := "LAYERS"
+	title := "Layers"
 	if len(layers) > 0 {
-		title = fmt.Sprintf("LAYERS [%d/%d]", cursor+1, len(layers))
+		title = fmt.Sprintf("Layers %d/%d", cursor+1, len(layers))
 	}
 
+	hasAbove := offset > 0
+	hasBelow := end < len(layers)
+
 	content := sb.String()
-	return renderPanel(content, title, focused, contentWidth, height)
+	return renderPanel(content, title, focused, contentWidth, height, hasAbove, hasBelow)
 }
 
 func renderCommandBar(cmd string, width int) string {
 	maxLines := 3
-	wrappedLines := wrapCommandLines(cmd, width, maxLines)
+	wrappedLines := wrapCommandLines(cmd, width-2, maxLines)
+
+	prefix := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("▶ ")
+
 	var sb strings.Builder
 	for i, wl := range wrappedLines {
-		sb.WriteString(styleWithFg(commandColor).Render(wl))
+		if i == 0 {
+			styled := highlightInstruction(wl)
+			sb.WriteString(prefix + styled)
+		} else {
+			sb.WriteString("  " + styleWithFg(commandColor).Render(wl))
+		}
 		if i < maxLines-1 {
 			sb.WriteString("\n")
 		}
 	}
 	return sb.String()
+}
+
+func highlightInstruction(line string) string {
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+	instruction := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render(parts[0])
+	if len(parts) == 1 {
+		return instruction
+	}
+	return instruction + " " + styleWithFg(commandColor).Render(parts[1])
 }
 
 func wrapCommandLines(cmd string, width int, maxLines int) []string {
@@ -74,7 +98,7 @@ func wrapCommandLines(cmd string, width int, maxLines int) []string {
 			break
 		}
 		if i == maxLines-1 {
-			lines[i] = string(runes[:width-2]) + ".."
+			lines[i] = string(runes[:width-1]) + "…"
 			break
 		}
 		breakAt := width
@@ -104,16 +128,16 @@ func formatLayerLine(l image.Layer, selected bool, maxWidth int) string {
 		sizeWidth = 7
 	}
 
-	// 2 (leading) + indexWidth + 1 (sep) + sizeWidth + 2 (sep before cmd)
-	fixedCols := 2 + indexWidth + 1 + sizeWidth + 2
+	// 3 (leading: cursor + space) + indexWidth + 2 (gap) + sizeWidth + 2 (gap before cmd)
+	fixedCols := 3 + indexWidth + 2 + sizeWidth + 2
 	cmdSpace := maxWidth - fixedCols
 	cmd := l.Command
 	cmdRunes := []rune(cmd)
 	if cmdSpace <= 0 {
 		cmd = ""
 	} else if len(cmdRunes) > cmdSpace {
-		if cmdSpace > 2 {
-			cmd = string(cmdRunes[:cmdSpace-2]) + ".."
+		if cmdSpace > 1 {
+			cmd = string(cmdRunes[:cmdSpace-1]) + "…"
 		} else {
 			cmd = string(cmdRunes[:cmdSpace])
 		}
@@ -127,18 +151,32 @@ func formatLayerLine(l image.Layer, selected bool, maxWidth int) string {
 	if len([]rune(size)) < sizeWidth {
 		sizePad = strings.Repeat(" ", sizeWidth-len([]rune(size)))
 	}
-	plain := "  " + index + indexPad + " " + sizePad + size + "  " + cmd
-
-	// Hard-clamp to maxWidth to prevent any overflow.
-	plainRunes := []rune(plain)
-	if len(plainRunes) > maxWidth {
-		plain = string(plainRunes[:maxWidth])
-	}
 
 	if selected {
-		runes := []rune(plain)
-		inner := "> " + string(runes[2:])
-		return lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(inner)
+		cursor := lipgloss.NewStyle().Foreground(accentColor).Render("▸")
+		plain := " " + index + indexPad + "  " + sizePad + size + "  " + cmd
+		plainRunes := []rune(plain)
+		if len(plainRunes) > maxWidth-1 {
+			plain = string(plainRunes[:maxWidth-1])
+		}
+		inner := cursor + lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(plain)
+		return inner
+	}
+
+	dimHash := styleWithFg(metaDimColor).Render("#")
+	numStr := fmt.Sprintf("%d", l.Index)
+	numPad := ""
+	if len([]rune(numStr))+1 < indexWidth {
+		numPad = strings.Repeat(" ", indexWidth-len([]rune(numStr))-1)
+	}
+	sizeRendered := styleWithFg(headerDimColor).Render(sizePad + size)
+	cmdRendered := styleWithFg(commandColor).Render(cmd)
+
+	plain := "   " + dimHash + styleWithFg(fileNameColor).Render(numStr) + numPad + "  " + sizeRendered + "  " + cmdRendered
+
+	lineWidth := lipgloss.Width(plain)
+	if lineWidth > maxWidth {
+		return ansi.Truncate(plain, maxWidth, "")
 	}
 	return plain
 }

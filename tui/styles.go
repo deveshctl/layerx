@@ -9,28 +9,32 @@ import (
 )
 
 var (
-	accentColor          = lipgloss.Color("#7C9EFF")
-	focusedBorderColor   = lipgloss.Color("#7C9EFF")
-	unfocusedBorderColor = lipgloss.Color("#3a3a50")
+	accentColor          = lipgloss.Color("#89B4FA")
+	focusedBorderColor   = lipgloss.Color("#89B4FA")
+	unfocusedBorderColor = lipgloss.Color("#45475A")
 
-	selectedColor   = lipgloss.Color("#FFFFFF")
-	selectedBgColor = lipgloss.Color("#1e2545")
-	addedColor      = lipgloss.Color("#50FA7B")
-	modifiedColor   = lipgloss.Color("#F1FA8C")
-	removedColor    = lipgloss.Color("#FF5555")
-	unchangedColor  = lipgloss.Color("#6272A4")
+	selectedColor   = lipgloss.Color("#CDD6F4")
+	selectedBgColor = lipgloss.Color("#313244")
+	addedColor      = lipgloss.Color("#A6E3A1")
+	modifiedColor   = lipgloss.Color("#F9E2AF")
+	removedColor    = lipgloss.Color("#F38BA8")
+	unchangedColor  = lipgloss.Color("#A6ADC8")
 
-	separatorColor = lipgloss.Color("#3a3a50")
-	commandColor   = lipgloss.Color("#999999")
-	statusKeyColor = lipgloss.Color("#7C9EFF")
-	statusDimColor = lipgloss.Color("#777777")
-	statusBgColor  = lipgloss.Color("#1e1e2e")
-	headerDimColor = lipgloss.Color("#777777")
-	headerSepColor = lipgloss.Color("#444444")
-	fileNameColor  = lipgloss.Color("#BBBBBB")
+	separatorColor = lipgloss.Color("#313244")
+	commandColor   = lipgloss.Color("#A6ADC8")
+	statusKeyColor = lipgloss.Color("#89B4FA")
+	statusDimColor = lipgloss.Color("#6C7086")
+	statusBgColor  = lipgloss.Color("#181825")
+	headerDimColor = lipgloss.Color("#9399B2")
+	headerSepColor = lipgloss.Color("#313244")
+	fileNameColor  = lipgloss.Color("#BAC2DE")
+
+	metaDimColor  = lipgloss.Color("#6C7086")
+	treeDimColor  = lipgloss.Color("#45475A")
+	scrollDimColor = lipgloss.Color("#6C7086")
 )
 
-func renderPanel(content, title string, focused bool, contentWidth, height int) string {
+func renderPanel(content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
 	borderColor := unfocusedBorderColor
 	if focused {
 		borderColor = focusedBorderColor
@@ -46,11 +50,11 @@ func renderPanel(content, title string, focused bool, contentWidth, height int) 
 	vLine := borderFg.Render("│")
 
 	titleLen := len(title)
-	fillCount := contentWidth - titleLen - 2
+	fillCount := contentWidth - titleLen - 3
 	if fillCount < 0 {
 		fillCount = 0
 	}
-	topBorder := topLeft + " " + titleRendered + " " + borderFg.Render(strings.Repeat("─", fillCount)) + topRight
+	topBorder := topLeft + borderFg.Render("─") + " " + titleRendered + " " + borderFg.Render(strings.Repeat("─", fillCount)) + topRight
 
 	bottomBorder := bottomLeft + borderFg.Render(strings.Repeat("─", contentWidth)) + bottomRight
 
@@ -73,10 +77,19 @@ func renderPanel(content, title string, focused bool, contentWidth, height int) 
 		if pad < 0 {
 			pad = 0
 		}
+
 		sb.WriteString(vLine)
 		sb.WriteString(line)
 		sb.WriteString(strings.Repeat(" ", pad))
-		sb.WriteString(vLine)
+
+		rightBorder := vLine
+		if hasAbove && i == 0 {
+			rightBorder = styleWithFg(scrollDimColor).Render("▴")
+		} else if hasBelow && i == height-1 {
+			rightBorder = styleWithFg(scrollDimColor).Render("▾")
+		}
+		sb.WriteString(rightBorder)
+
 		if i < height-1 {
 			sb.WriteString("\n")
 		}

@@ -470,7 +470,8 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.tryOpenSelectedFile()
 	case msg.Code == tea.KeyBackspace:
 		if len(m.filterQuery) > 0 {
-			m.filterQuery = m.filterQuery[:len(m.filterQuery)-1]
+			runes := []rune(m.filterQuery)
+			m.filterQuery = string(runes[:len(runes)-1])
 			m.treeCursor = 0
 			m.treeOffset = 0
 		} else {
@@ -731,52 +732,68 @@ func (m model) View() tea.View {
 func (m model) viewLoading() tea.View {
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 
-	var line1, line2 string
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("◆ layerx"))
+	lines = append(lines, "")
 
 	switch m.loadPhase {
 	case image.PhasePulling:
-		line1 = fmt.Sprintf("%s Pulling %s ...", frame, m.imageRef)
+		lines = append(lines, fmt.Sprintf("  %s Pulling %s …", frame, m.imageRef))
 		if m.pullTotal > 0 {
-			line2 = fmt.Sprintf("   Layer %d/%d", m.pullLayers, m.pullTotal)
+			detail := fmt.Sprintf("    Layer %d/%d", m.pullLayers, m.pullTotal)
 			if m.pullBytesMax > 0 {
 				pct := int(m.pullBytes * 100 / m.pullBytesMax)
 				barWidth := 20
 				filled := barWidth * pct / 100
-				bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
-				line2 += fmt.Sprintf("  [%s]  %s / %s",
+				bar := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", filled)) +
+					lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", barWidth-filled))
+				detail += fmt.Sprintf("  [%s]  %s / %s",
 					bar,
 					image.FormatBytes(m.pullBytes),
 					image.FormatBytes(m.pullBytesMax))
 			}
+			lines = append(lines, detail)
 		}
 	case image.PhaseExporting:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		line1 = fmt.Sprintf("%s Loading %s%s ...", frame, m.imageRef, sizeInfo)
-		line2 = "   Exporting layers..."
+		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
+		lines = append(lines, "    Exporting layers…")
 	case image.PhaseParsing:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		line1 = fmt.Sprintf("%s Loading %s%s ...", frame, m.imageRef, sizeInfo)
-		line2 = "   Parsing layers..."
+		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
+		lines = append(lines, "    Parsing layers…")
 	default:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		line1 = fmt.Sprintf("%s Loading %s%s ...", frame, m.imageRef, sizeInfo)
+		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
 	}
 
-	msg := line1
-	if line2 != "" {
-		msg += "\n" + line2
+	lines = append(lines, "")
+
+	boxWidth := 52
+	if m.width > 0 && m.width-2 < boxWidth {
+		boxWidth = m.width - 2
+	}
+	boxHeight := len(lines)
+	if boxHeight < 7 {
+		for len(lines) < 7 {
+			lines = append(lines, "")
+		}
+		boxHeight = 7
 	}
 
-	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+	body := strings.Join(lines, "\n")
+	panel := renderPanel(body, "Loading", true, boxWidth, boxHeight, false, false)
+	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
@@ -833,7 +850,7 @@ func (m model) viewReady() tea.View {
 	}
 	commandBar := renderCommandBar(cmd, m.width)
 
-	sep := lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("-", m.width))
+	sep := lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", m.width))
 	status := m.renderStatusBar()
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar, sep, status)
@@ -859,10 +876,11 @@ func (m model) leftPanelWidth() int {
 }
 
 func (m model) renderHeader() string {
-	brand := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Bold(true).Render("layerx")
-	sep := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor).Render(" --- ")
+	glyph := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("◆")
+	brand := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Bold(true).Render(" layerx")
+	sep := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor).Render(" │ ")
 	imageName := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Render(m.imageRef)
-	left := brand + sep + imageName
+	left := glyph + brand + sep + imageName
 
 	totalSize := image.FormatBytes(m.analysis.TotalSize)
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
@@ -885,27 +903,49 @@ func (m model) renderStatusBar() string {
 	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
 	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
 
-	hints := fmt.Sprintf(" %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s",
-		keyStyle.Render("Tab"), descStyle.Render("switch"),
-		sepStyle.Render("·"),
-		keyStyle.Render("j/k"), descStyle.Render("navigate"),
-		sepStyle.Render("·"),
-		keyStyle.Render("/"), descStyle.Render("filter"),
-		sepStyle.Render("·"),
-		keyStyle.Render("d"), descStyle.Render("diff"),
-		sepStyle.Render("·"),
-		keyStyle.Render("s"), descStyle.Render("sort"),
-		sepStyle.Render("·"),
-		keyStyle.Render("c"), descStyle.Render("copy"),
-		sepStyle.Render("·"),
-		keyStyle.Render("Enter"), descStyle.Render("view"),
-		sepStyle.Render("·"),
-		keyStyle.Render("x"), descStyle.Render("save"),
-		sepStyle.Render("·"),
-		keyStyle.Render("?"), descStyle.Render("help"),
-		sepStyle.Render("·"),
-		keyStyle.Render("q"), descStyle.Render("quit"),
-	)
+	type hint struct{ key, desc string }
+	var hints []hint
+
+	compact := m.width < 90
+
+	if m.focus == focusLayers {
+		hints = []hint{
+			{"Tab", "switch"},
+			{"j/k", "navigate"},
+			{"g/G", "top/bottom"},
+			{"d", "diff"},
+			{"s", "sort"},
+			{"c", "copy"},
+			{"?", "help"},
+			{"q", "quit"},
+		}
+	} else {
+		hints = []hint{
+			{"Tab", "switch"},
+			{"j/k", "navigate"},
+			{"/", "filter"},
+			{"d", "diff"},
+			{"s", "sort"},
+			{"Enter", "view"},
+			{"x", "save"},
+			{"?", "help"},
+		}
+	}
+
+	var hintStr string
+	if compact {
+		parts := make([]string, len(hints))
+		for i, h := range hints {
+			parts[i] = keyStyle.Render(h.key)
+		}
+		hintStr = " " + strings.Join(parts, " ")
+	} else {
+		var parts []string
+		for _, h := range hints {
+			parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
+		}
+		hintStr = " " + strings.Join(parts, " "+sepStyle.Render("│")+" ")
+	}
 
 	layers := m.layers()
 	var right string
@@ -946,13 +986,13 @@ func (m model) renderStatusBar() string {
 		right = badges + rightHighlight + rightDim + " "
 	}
 
-	gap := m.width - lipgloss.Width(hints) - lipgloss.Width(right)
+	gap := m.width - lipgloss.Width(hintStr) - lipgloss.Width(right)
 	if gap < 0 {
 		gap = 0
 	}
 
 	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
-	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
+	return bgStyle.Render(hintStr + strings.Repeat(" ", gap) + right)
 }
 
 func (m model) renderViewerStatusBar() string {
@@ -962,11 +1002,11 @@ func (m model) renderViewerStatusBar() string {
 
 	hints := " " +
 		keyStyle.Render("j/k") + " " + descStyle.Render("scroll") + " " +
-		sepStyle.Render("·") + " " +
+		sepStyle.Render("│") + " " +
 		keyStyle.Render("g/G") + " " + descStyle.Render("top/bottom") + " " +
-		sepStyle.Render("·") + " " +
+		sepStyle.Render("│") + " " +
 		keyStyle.Render("Esc") + " " + descStyle.Render("close") + " " +
-		sepStyle.Render("·") + " " +
+		sepStyle.Render("│") + " " +
 		keyStyle.Render("q") + " " + descStyle.Render("quit")
 
 	var right string
@@ -1025,22 +1065,16 @@ func (m model) overlayHelp() string {
 		"  " + keyStyle.Render("?           ") + descStyle.Render("Toggle this help"),
 		"  " + keyStyle.Render("q / Ctrl+C  ") + descStyle.Render("Quit"),
 		"",
-		"  " + dimStyle.Render("Tip: directories and removed files cannot be viewed."),
+		"  " + dimStyle.Render("Press ? or Esc to close"),
 		"",
 	}
 
 	body := strings.Join(lines, "\n")
 
 	boxWidth := 56
-	boxHeight := len(lines) + 2
+	boxHeight := len(lines)
 
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(accentColor).
-		Width(boxWidth).
-		Height(boxHeight)
-
-	popup := borderStyle.Render(body)
+	popup := renderPanel(body, "Help", true, boxWidth, boxHeight, false, false)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 }

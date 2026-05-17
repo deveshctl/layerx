@@ -14,18 +14,15 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 	contentWidth := width - 2
 	contentHeight := height
 
-	// Reserve a line for the filter bar whenever a filter is active or has a query.
 	showFilterBar := filterActive || filterQuery != ""
 	if showFilterBar {
 		contentHeight--
 	}
 
-	// Reserve a line for the column header.
 	contentHeight--
 
 	var sb strings.Builder
 
-	// Column header
 	sb.WriteString(renderTreeHeader(contentWidth))
 	sb.WriteString("\n")
 
@@ -73,15 +70,22 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		sb.WriteString(renderFilterBar(filterActive, filterQuery, len(files), contentWidth))
 	}
 
-	title := "FILE TREE"
+	title := "File Tree"
 	if len(files) > 0 {
-		title = fmt.Sprintf("FILE TREE [%d/%d]", cursor+1, len(files))
+		title = fmt.Sprintf("File Tree %d/%d", cursor+1, len(files))
 	} else if filterQuery != "" {
-		title = "FILE TREE [0/0]"
+		title = "File Tree 0/0"
 	}
 
+	hasAbove := offset > 0
+	end := offset + contentHeight
+	if end > len(files) {
+		end = len(files)
+	}
+	hasBelow := end < len(files)
+
 	content := sb.String()
-	return renderPanel(content, title, focused, contentWidth, height)
+	return renderPanel(content, title, focused, contentWidth, height, hasAbove, hasBelow)
 }
 
 func renderTreeHeader(maxWidth int) string {
@@ -89,17 +93,31 @@ func renderTreeHeader(maxWidth int) string {
 	const uidGidCol = 8
 	const sizeCol = 8
 	const colGap = 2
+	const diffGlyphCol = 2
+	const minNameSpace = 8
 
-	perms := padRight("Permission", permCol)
-	uidGid := padRight("UID:GID", uidGidCol)
-	size := padLeft("Size", sizeCol)
-	tree := "Filetree"
+	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
+	sizeMeta := diffGlyphCol + sizeCol + colGap
+	showPerms := maxWidth >= fullMeta+minNameSpace
+	showSize := maxWidth >= sizeMeta+minNameSpace
 
-	header := perms + strings.Repeat(" ", colGap) + uidGid + strings.Repeat(" ", colGap) + size + strings.Repeat(" ", colGap) + tree
+	var header string
+	if showPerms {
+		perms := padRight("Permission", permCol)
+		uidGid := padRight("UID:GID", uidGidCol)
+		size := padLeft("Size", sizeCol)
+		header = "  " + perms + strings.Repeat(" ", colGap) + uidGid + strings.Repeat(" ", colGap) + size + strings.Repeat(" ", colGap) + "Filetree"
+	} else if showSize {
+		size := padLeft("Size", sizeCol)
+		header = "  " + size + strings.Repeat(" ", colGap) + "Filetree"
+	} else {
+		header = "  Filetree"
+	}
+
 	if len(header) > maxWidth {
 		header = header[:maxWidth]
 	}
-	return styleWithFg(headerDimColor).Render(header)
+	return styleWithFg(metaDimColor).Render(header)
 }
 
 func renderFilterBar(active bool, query string, matchCount int, maxWidth int) string {
@@ -108,7 +126,6 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 		cursor := query + "█"
 		return prefix + cursor
 	}
-	// Persistent read-only indicator when filter is set but input closed.
 	prefix := styleWithFg(accentColor).Render("/ ")
 	queryStr := styleWithFg(selectedColor).Render(query)
 	matches := styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d matches)", matchCount))
@@ -123,31 +140,32 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 }
 
 func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool) string {
-	// Column layout: "Permissions  UID:GID  Size  TreePrefix Name"
-	// Permissions: 10 chars fixed
-	// UID:GID: variable (typically 3-7 chars)
-	// Size: right-aligned, up to 8 chars
-	// TreePrefix + Name: remainder
-
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
 	size := formatSizeForNode(f, flat)
 
-	// Fixed column widths
 	const permCol = 10
 	const uidGidCol = 8
 	const sizeCol = 8
 	const colGap = 2
+	const diffGlyphCol = 2
 
-	// Build metadata columns
-	permStr := padRight(perms, permCol)
-	uidStr := padRight(uidGid, uidGidCol)
-	sizeStr := padLeft(size, sizeCol)
+	// Determine which metadata columns fit alongside a minimum 8-char filename.
+	const minNameSpace = 8
+	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
+	sizeMeta := diffGlyphCol + sizeCol + colGap
+	showPerms := maxWidth >= fullMeta+minNameSpace
+	showSize := maxWidth >= sizeMeta+minNameSpace
 
-	metaCols := permStr + strings.Repeat(" ", colGap) + uidStr + strings.Repeat(" ", colGap) + sizeStr + strings.Repeat(" ", colGap)
-	metaWidth := permCol + uidGidCol + sizeCol + colGap*3
+	var metaWidth int
+	if showPerms {
+		metaWidth = fullMeta
+	} else if showSize {
+		metaWidth = sizeMeta
+	} else {
+		metaWidth = diffGlyphCol
+	}
 
-	// Name portion with tree prefix
 	nameSpace := maxWidth - metaWidth
 	if nameSpace < 4 {
 		nameSpace = 4
@@ -176,29 +194,109 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 		fullName = string(nameRunes[:nameSpace-1]) + "…"
 	}
 
-	// Pad name to fill remaining width
 	nameWidth := len([]rune(fullName))
 	namePad := nameSpace - nameWidth
 	if namePad < 0 {
 		namePad = 0
 	}
 
-	fullLine := metaCols + fullName + strings.Repeat(" ", namePad)
+	var diffGlyph string
+	switch f.DiffType {
+	case image.Added:
+		diffGlyph = styleWithFg(addedColor).Render("+ ")
+	case image.Modified:
+		diffGlyph = styleWithFg(modifiedColor).Render("~ ")
+	case image.Removed:
+		diffGlyph = styleWithFg(removedColor).Render("- ")
+	default:
+		diffGlyph = "  "
+	}
 
 	if selected {
+		var selGlyph string
+		switch f.DiffType {
+		case image.Added:
+			selGlyph = "+ "
+		case image.Modified:
+			selGlyph = "~ "
+		case image.Removed:
+			selGlyph = "- "
+		default:
+			selGlyph = "  "
+		}
+		var metaCols string
+		if showPerms {
+			permStr := padRight(perms, permCol)
+			uidStr := padRight(uidGid, uidGidCol)
+			sizeStr := padLeft(size, sizeCol)
+			metaCols = permStr + strings.Repeat(" ", colGap) + uidStr + strings.Repeat(" ", colGap) + sizeStr + strings.Repeat(" ", colGap)
+		} else if showSize {
+			sizeStr := padLeft(size, sizeCol)
+			metaCols = sizeStr + strings.Repeat(" ", colGap)
+		}
+		fullLine := selGlyph + metaCols + fullName + strings.Repeat(" ", namePad)
 		return lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(fullLine)
 	}
 
-	switch f.DiffType {
-	case image.Added:
-		return styleWithFg(addedColor).Render(fullLine)
-	case image.Modified:
-		return styleWithFg(modifiedColor).Render(fullLine)
-	case image.Removed:
-		return styleWithFg(removedColor).Render(fullLine)
-	default:
-		return styleWithFg(fileNameColor).Render(fullLine)
+	var metaCols string
+	if showPerms {
+		permStr := styleWithFg(metaDimColor).Render(padRight(perms, permCol))
+		uidStr := styleWithFg(metaDimColor).Render(padRight(uidGid, uidGidCol))
+		sizeStr := styleWithFg(headerDimColor).Render(padLeft(size, sizeCol))
+		gap := strings.Repeat(" ", colGap)
+		metaCols = permStr + gap + uidStr + gap + sizeStr + gap
+	} else if showSize {
+		sizeStr := styleWithFg(headerDimColor).Render(padLeft(size, sizeCol))
+		metaCols = sizeStr + strings.Repeat(" ", colGap)
 	}
+
+	var nameRendered string
+	prefixRuneLen := len([]rune(treePrefix))
+	fullNameRuneLen := len([]rune(fullName))
+	wasTruncated := len(nameRunes) > nameSpace
+
+	if flat || (wasTruncated && prefixRuneLen >= fullNameRuneLen) {
+		switch f.DiffType {
+		case image.Added:
+			nameRendered = styleWithFg(addedColor).Render(fullName)
+		case image.Modified:
+			nameRendered = styleWithFg(modifiedColor).Render(fullName)
+		case image.Removed:
+			nameRendered = styleWithFg(removedColor).Render(fullName)
+		default:
+			nameRendered = styleWithFg(fileNameColor).Render(fullName)
+		}
+	} else {
+		fullRunes := []rune(fullName)
+		var nameOnly string
+		if prefixRuneLen < len(fullRunes) {
+			nameOnly = string(fullRunes[prefixRuneLen:])
+		}
+		treePrefixRendered := styleWithFg(treeDimColor).Render(treePrefix)
+		var nameOnlyRendered string
+		switch f.DiffType {
+		case image.Added:
+			nameOnlyRendered = styleWithFg(addedColor).Render(nameOnly)
+		case image.Modified:
+			nameOnlyRendered = styleWithFg(modifiedColor).Render(nameOnly)
+		case image.Removed:
+			nameOnlyRendered = styleWithFg(removedColor).Render(nameOnly)
+		default:
+			nameOnlyRendered = styleWithFg(fileNameColor).Render(nameOnly)
+		}
+		nameRendered = treePrefixRendered + nameOnlyRendered
+	}
+
+	nameRenderedWidth := lipgloss.Width(nameRendered)
+	diffGlyphWidth := lipgloss.Width(diffGlyph)
+	actualNamePad := nameSpace - nameRenderedWidth + diffGlyphWidth - 2
+	if actualNamePad < 0 {
+		actualNamePad = 0
+	}
+
+	fullLine := diffGlyph + metaCols + nameRendered + strings.Repeat(" ", actualNamePad)
+
+	return fullLine
 }
 
 func formatSizeForNode(f *image.FileNode, flat bool) string {
@@ -219,14 +317,9 @@ func formatSizeForNode(f *image.FileNode, flat bool) string {
 
 func buildTreePrefix(depth int) string {
 	if depth == 0 {
-		return "├── "
+		return ""
 	}
-	var sb strings.Builder
-	for i := 0; i < depth; i++ {
-		sb.WriteString("│   ")
-	}
-	sb.WriteString("├── ")
-	return sb.String()
+	return strings.Repeat("  ", depth)
 }
 
 func padRight(s string, width int) string {
