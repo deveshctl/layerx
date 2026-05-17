@@ -1,0 +1,69 @@
+version: 2
+
+builds:
+  - main: .
+    binary: layerx
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+nfpms:
+  - package_name: layerx
+    if: '{{ eq .Os "linux" }}'
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - deb
+      - rpm
+    maintainer: Devesh Pharswan <deveshpharswan@gmail.com>
+    description: Terminal-based Docker image layer inspector
+    homepage: https://github.com/deveshpharswan/layerx
+    license: MIT
+    bindir: /usr/bin
+
+brews:
+  - name: layerx
+    repository:
+      owner: deveshpharswan
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/deveshpharswan/layerx
+    description: Terminal-based Docker image layer inspector
+    license: MIT
+    test: |
+      system "#{bin}/layerx", "--version"
+
+scoops:
+  - name: layerx
+    repository:
+      owner: deveshpharswan
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/deveshpharswan/layerx
+    description: Terminal-based Docker image layer inspector
+    license: MIT
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
