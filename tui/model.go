@@ -124,12 +124,18 @@ type model struct {
 	diffOnly     bool
 	sortMode     sortMode
 	viewState    viewState
-	viewContent  *image.FileContent
-	viewOffset   int
-	extractor    image.Extractor
-	efficiency   *image.EfficiencyResult
-	writeFile    func(string, []byte, os.FileMode) error
-	keys         keyMap
+	viewContent      *image.FileContent
+	viewOffset       int
+	viewOriginLayer  int
+	viewOriginCmd    string
+	viewSearchActive bool
+	viewSearchQuery  string
+	viewSearchMatches [][2]int
+	viewSearchCursor int
+	extractor        image.Extractor
+	efficiency       *image.EfficiencyResult
+	writeFile        func(string, []byte, os.FileMode) error
+	keys             keyMap
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -271,9 +277,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case tea.KeyPressMsg:
-		// Esc has precedence: viewer → filter (active) → filter (confirmed) → help → quit
+		// Esc has precedence: viewer search → viewer → filter (active) → filter (confirmed) → help → quit
 		if msg.Code == tea.KeyEscape {
 			if m.viewState != viewNone {
+				if m.viewSearchActive {
+					m.viewSearchActive = false
+					m.viewSearchQuery = ""
+					m.viewSearchMatches = nil
+					m.viewSearchCursor = 0
+					return m, nil
+				}
+				if m.viewSearchQuery != "" {
+					m.viewSearchQuery = ""
+					m.viewSearchMatches = nil
+					m.viewSearchCursor = 0
+					return m, nil
+				}
 				m.viewState = viewNone
 				m.viewContent = nil
 				m.viewOffset = 0
@@ -322,9 +341,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// When viewing a file, only scroll/close keys work.
+		// When viewing a file, only scroll/close/search keys work.
 		if m.viewState == viewReady {
+			if m.viewSearchActive {
+				return m.handleViewerSearchInput(msg)
+			}
 			switch {
+			case key.Matches(msg, m.keys.ViewerSearch):
+				m.viewSearchActive = true
+				return m, nil
+			case key.Matches(msg, m.keys.NextMatch):
+				if len(m.viewSearchMatches) > 0 {
+					m.viewSearchCursor = (m.viewSearchCursor + 1) % len(m.viewSearchMatches)
+					m.scrollToViewerMatch()
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.PrevMatch):
+				if len(m.viewSearchMatches) > 0 {
+					m.viewSearchCursor = (m.viewSearchCursor - 1 + len(m.viewSearchMatches)) % len(m.viewSearchMatches)
+					m.scrollToViewerMatch()
+				}
+				return m, nil
+			case key.Matches(msg, m.keys.CopyContent):
+				if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
+					m.copyConfirm = true
+					return m, tea.Batch(
+						tea.SetClipboard(string(m.viewContent.Data)),
+						tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+							return clearCopyMsg{}
+						}),
+					)
+				}
+				return m, nil
 			case key.Matches(msg, m.keys.Down):
 				m.scrollViewDown()
 			case key.Matches(msg, m.keys.Up):
@@ -385,6 +433,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return clearCopyMsg{}
 					}),
 				)
+			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.CopyPath):
+			if m.focus == focusTree {
+				files := m.displayTree()
+				if m.treeCursor < len(files) {
+					m.copyConfirm = true
+					return m, tea.Batch(
+						tea.SetClipboard(files[m.treeCursor].Path),
+						tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+							return clearCopyMsg{}
+						}),
+					)
+				}
+			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.CopyContent):
+			if m.focus == focusLayers {
+				layers := m.layers()
+				if m.layerCursor < len(layers) {
+					m.copyConfirm = true
+					return m, tea.Batch(
+						tea.SetClipboard(layers[m.layerCursor].Command),
+						tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+							return clearCopyMsg{}
+						}),
+					)
+				}
 			}
 			return m, nil
 
@@ -467,7 +545,7 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == tea.KeyEnter:
 		m.filterActive = false
-		return m.tryOpenSelectedFile()
+		return m, nil
 	case msg.Code == tea.KeyBackspace:
 		if len(m.filterQuery) > 0 {
 			runes := []rune(m.filterQuery)
@@ -486,6 +564,71 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+func (m model) handleViewerSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEnter:
+		m.viewSearchActive = false
+		return m, nil
+	case msg.Code == tea.KeyBackspace:
+		if len(m.viewSearchQuery) > 0 {
+			runes := []rune(m.viewSearchQuery)
+			m.viewSearchQuery = string(runes[:len(runes)-1])
+			m.recomputeViewerMatches()
+		} else {
+			m.viewSearchActive = false
+		}
+		return m, nil
+	default:
+		if msg.Text != "" {
+			m.viewSearchQuery += msg.Text
+			m.recomputeViewerMatches()
+		}
+		return m, nil
+	}
+}
+
+func (m *model) recomputeViewerMatches() {
+	m.viewSearchMatches = nil
+	m.viewSearchCursor = 0
+	if m.viewSearchQuery == "" || m.viewContent == nil || m.viewContent.Binary {
+		return
+	}
+	query := strings.ToLower(m.viewSearchQuery)
+	lines := strings.Split(string(m.viewContent.Data), "\n")
+	for lineIdx, line := range lines {
+		lower := strings.ToLower(line)
+		offset := 0
+		for {
+			idx := strings.Index(lower[offset:], query)
+			if idx < 0 {
+				break
+			}
+			m.viewSearchMatches = append(m.viewSearchMatches, [2]int{lineIdx, offset + idx})
+			offset += idx + len(query)
+		}
+	}
+}
+
+func (m *model) scrollToViewerMatch() {
+	if len(m.viewSearchMatches) == 0 {
+		return
+	}
+	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
+	visHeight := m.viewVisibleHeight()
+	desired := targetLine - visHeight/2
+	if desired < 0 {
+		desired = 0
+	}
+	maxOffset := fileViewLineCount(m.viewContent) - visHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if desired > maxOffset {
+		desired = maxOffset
+	}
+	m.viewOffset = desired
 }
 
 func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
@@ -513,6 +656,13 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 		})
 	}
 	m.viewState = viewLoading
+	m.viewOriginLayer = f.IntroducedInLayer
+	layers := m.layers()
+	if f.IntroducedInLayer < len(layers) {
+		m.viewOriginCmd = layers[f.IntroducedInLayer].Command
+	} else {
+		m.viewOriginCmd = ""
+	}
 	return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
 }
 
@@ -834,12 +984,26 @@ func (m model) viewReady() tea.View {
 
 	header := m.renderHeader()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers)
-	right := renderFileTree(m.displayTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.sortMode)
+	right := renderFileTree(m.displayTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.sortMode, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
 	if m.viewState != viewNone {
-		viewer := renderFileView(m.viewContent, m.viewOffset, m.width, panelHeight, m.viewState == viewLoading, m.spinnerFrame)
+		viewer := renderFileView(viewerParams{
+			content:       m.viewContent,
+			offset:        m.viewOffset,
+			width:         m.width,
+			height:        panelHeight,
+			loading:       m.viewState == viewLoading,
+			spinnerFrame:  m.spinnerFrame,
+			originLayer:   m.viewOriginLayer,
+			originCmd:     m.viewOriginCmd,
+			currentLayer:  m.layerCursor,
+			searchQuery:   m.viewSearchQuery,
+			searchMatches: m.viewSearchMatches,
+			searchCursor:  m.viewSearchCursor,
+			searchActive:  m.viewSearchActive,
+		})
 		panels = viewer
 	}
 
@@ -1003,14 +1167,19 @@ func (m model) renderViewerStatusBar() string {
 	hints := " " +
 		keyStyle.Render("j/k") + " " + descStyle.Render("scroll") + " " +
 		sepStyle.Render("│") + " " +
-		keyStyle.Render("g/G") + " " + descStyle.Render("top/bottom") + " " +
+		keyStyle.Render("/") + " " + descStyle.Render("search") + " " +
+		sepStyle.Render("│") + " " +
+		keyStyle.Render("n/N") + " " + descStyle.Render("next/prev") + " " +
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("Esc") + " " + descStyle.Render("close") + " " +
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("q") + " " + descStyle.Render("quit")
 
 	var right string
-	if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
+	if len(m.viewSearchMatches) > 0 {
+		matchStyle := lipgloss.NewStyle().Foreground(searchCurrentBg).Background(statusBgColor).Bold(true)
+		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
+	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
 		total := fileViewLineCount(m.viewContent)
 		line := m.viewOffset + 1
 		pct := 0
@@ -1053,15 +1222,20 @@ func (m model) overlayHelp() string {
 		"  " + keyStyle.Render("d           ") + descStyle.Render("Show only changed files"),
 		"  " + keyStyle.Render("s           ") + descStyle.Render("Sort by size (↓ → ↑ → off)"),
 		"  " + keyStyle.Render("x           ") + descStyle.Render("Save file to current directory"),
+		"  " + keyStyle.Render("y           ") + descStyle.Render("Copy file path to clipboard"),
 		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Clear filter / close viewer"),
 		"",
 		"  " + sectionStyle.Render("File Viewer"),
 		"  " + keyStyle.Render("j / k       ") + descStyle.Render("Scroll down / up"),
 		"  " + keyStyle.Render("g / G       ") + descStyle.Render("Jump to top / bottom"),
+		"  " + keyStyle.Render("/           ") + descStyle.Render("Search in file"),
+		"  " + keyStyle.Render("n / N       ") + descStyle.Render("Next / previous match"),
+		"  " + keyStyle.Render("Y           ") + descStyle.Render("Copy file content to clipboard"),
 		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Return to file tree"),
 		"",
 		"  " + sectionStyle.Render("Other"),
 		"  " + keyStyle.Render("c           ") + descStyle.Render("Copy layer command to clipboard"),
+		"  " + keyStyle.Render("Y           ") + descStyle.Render("Copy layer command (in layers panel)"),
 		"  " + keyStyle.Render("?           ") + descStyle.Render("Toggle this help"),
 		"  " + keyStyle.Render("q / Ctrl+C  ") + descStyle.Render("Quit"),
 		"",
@@ -1116,6 +1290,9 @@ func (m *model) scrollViewUp() {
 func (m *model) viewVisibleHeight() int {
 	h := m.height - 8
 	if m.viewContent != nil && m.viewContent.Truncated {
+		h--
+	}
+	if m.viewSearchActive || m.viewSearchQuery != "" {
 		h--
 	}
 	if h < 1 {

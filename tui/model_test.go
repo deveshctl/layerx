@@ -483,12 +483,12 @@ func TestRenderFileTreeDoesNotPanic(t *testing.T) {
 	m := setupModel()
 	files := m.currentFlatTree()
 	assert.NotPanics(t, func() {
-		renderFileTree(files, 0, 0, 60, 20, true, false, "", sortNone)
+		renderFileTree(files, 0, 0, 60, 20, true, false, "", sortNone, 0)
 	})
 }
 
 func TestRenderFileTreeEmptyShowsPlaceholder(t *testing.T) {
-	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", sortNone)
+	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", sortNone, 0)
 	assert.Contains(t, output, "no filesystem changes")
 }
 
@@ -657,10 +657,10 @@ func TestFilterEnterKeepsQuery(t *testing.T) {
 	m = send(m, keyPressSpecial(tea.KeyEnter))
 	assert.False(t, m.filterActive)
 	assert.Equal(t, "n", m.filterQuery)
-	assert.Equal(t, "Extractor unavailable", m.statusMsg)
+	assert.Equal(t, viewNone, m.viewState, "Enter confirms search without opening file")
 }
 
-func TestEnterOpensFileWhileFilterActive(t *testing.T) {
+func TestEnterConfirmsSearchThenSecondEnterOpensFile(t *testing.T) {
 	m := setupModel()
 	m.focus = focusTree
 	m.extractor = &mockExtractor{}
@@ -668,11 +668,17 @@ func TestEnterOpensFileWhileFilterActive(t *testing.T) {
 	m.filterQuery = "passwd"
 	m.treeCursor = 0
 
+	// First Enter: confirms search, does NOT open file
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
 	assert.Equal(t, "passwd", um.filterQuery, "filter query preserved")
 	assert.False(t, um.filterActive, "filter input closed")
-	assert.Equal(t, viewLoading, um.viewState)
+	assert.Equal(t, viewNone, um.viewState, "file not opened yet")
+
+	// Second Enter: opens the selected file
+	updated2, _ := um.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um2 := updated2.(model)
+	assert.Equal(t, viewLoading, um2.viewState, "file opens on second Enter")
 }
 
 func TestBackspaceClearsFilterChip(t *testing.T) {
@@ -1109,4 +1115,191 @@ func TestFileSaveMsgWriteError(t *testing.T) {
 	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", data: []byte("hello")})
 	um := updated.(model)
 	assert.Equal(t, "Error: permission denied", um.statusMsg)
+}
+
+// --- Clipboard (y/Y) ---
+
+func TestCopyPathYKeyInTreePanel(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+
+	updated, cmd := m.Update(keyPress('y'))
+	um := updated.(model)
+	assert.True(t, um.copyConfirm, "copyConfirm should be set")
+	assert.NotNil(t, cmd, "should return clipboard command")
+}
+
+func TestCopyPathYKeyInLayersPanelIsNoop(t *testing.T) {
+	m := setupModel()
+	m.focus = focusLayers
+
+	updated, cmd := m.Update(keyPress('y'))
+	um := updated.(model)
+	assert.False(t, um.copyConfirm, "no copy in layers panel")
+	assert.Nil(t, cmd)
+}
+
+func TestCopyContentShiftYInViewer(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/etc/passwd",
+		Data: []byte("root:x:0:0"),
+		Size: 10,
+	}
+
+	updated, cmd := m.Update(keyPress('Y'))
+	um := updated.(model)
+	assert.True(t, um.copyConfirm)
+	assert.NotNil(t, cmd)
+}
+
+func TestCopyContentShiftYInLayerPanel(t *testing.T) {
+	m := setupModel()
+	m.focus = focusLayers
+
+	updated, cmd := m.Update(keyPress('Y'))
+	um := updated.(model)
+	assert.True(t, um.copyConfirm)
+	assert.NotNil(t, cmd)
+}
+
+// --- Viewer Search (/n/N) ---
+
+func TestViewerSearchActivatesOnSlash(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/etc/passwd",
+		Data: []byte("root:x:0:0\nnobody:x:65534:65534"),
+		Size: 30,
+	}
+
+	updated, _ := m.Update(keyPress('/'))
+	um := updated.(model)
+	assert.True(t, um.viewSearchActive)
+}
+
+func TestViewerSearchTypingBuildsQuery(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/etc/passwd",
+		Data: []byte("root:x:0:0\nnobody:x:65534:65534"),
+		Size: 30,
+	}
+	m.viewSearchActive = true
+
+	updated, _ := m.Update(tea.KeyPressMsg{Text: "r"})
+	um := updated.(model)
+	assert.Equal(t, "r", um.viewSearchQuery)
+
+	updated2, _ := um.Update(tea.KeyPressMsg{Text: "o"})
+	um2 := updated2.(model)
+	assert.Equal(t, "ro", um2.viewSearchQuery)
+	assert.Greater(t, len(um2.viewSearchMatches), 0)
+}
+
+func TestViewerSearchEnterConfirms(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("hello world"),
+		Size: 11,
+	}
+	m.viewSearchActive = true
+	m.viewSearchQuery = "hello"
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.False(t, um.viewSearchActive, "input closed")
+	assert.Equal(t, "hello", um.viewSearchQuery, "query preserved")
+}
+
+func TestViewerSearchEscClearsQuery(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("hello world"),
+		Size: 11,
+	}
+	m.viewSearchActive = true
+	m.viewSearchQuery = "hello"
+	m.viewSearchMatches = [][2]int{{0, 0}}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	um := updated.(model)
+	assert.False(t, um.viewSearchActive)
+	assert.Equal(t, "", um.viewSearchQuery)
+	assert.Nil(t, um.viewSearchMatches)
+}
+
+func TestViewerSearchNextPrevMatch(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("aaa\naaa\naaa"),
+		Size: 11,
+	}
+	m.viewSearchQuery = "aaa"
+	m.viewSearchMatches = [][2]int{{0, 0}, {1, 0}, {2, 0}}
+	m.viewSearchCursor = 0
+
+	updated, _ := m.Update(keyPress('n'))
+	um := updated.(model)
+	assert.Equal(t, 1, um.viewSearchCursor)
+
+	updated2, _ := um.Update(keyPress('n'))
+	um2 := updated2.(model)
+	assert.Equal(t, 2, um2.viewSearchCursor)
+
+	updated3, _ := um2.Update(keyPress('n'))
+	um3 := updated3.(model)
+	assert.Equal(t, 0, um3.viewSearchCursor, "wraps around")
+
+	updated4, _ := um3.Update(keyPress('N'))
+	um4 := updated4.(model)
+	assert.Equal(t, 2, um4.viewSearchCursor, "wraps backwards")
+}
+
+func TestViewerScrollStillWorksWithoutSearch(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte(strings.Repeat("line\n", 100)),
+		Size: 500,
+	}
+	m.viewOffset = 0
+
+	updated, _ := m.Update(keyPress('j'))
+	um := updated.(model)
+	assert.Equal(t, 1, um.viewOffset)
+}
+
+func TestViewerEscCascadeWithSearch(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("test"),
+		Size: 4,
+	}
+	m.viewSearchActive = true
+	m.viewSearchQuery = "test"
+
+	// First Esc: clears search
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	um := updated.(model)
+	assert.False(t, um.viewSearchActive)
+	assert.Equal(t, "", um.viewSearchQuery)
+	assert.Equal(t, viewReady, um.viewState, "viewer still open")
+
+	// Second Esc: closes viewer
+	updated2, _ := um.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	um2 := updated2.(model)
+	assert.Equal(t, viewNone, um2.viewState, "viewer closed")
 }
