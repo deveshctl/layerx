@@ -345,3 +345,104 @@ func TestStack_EmptySlice(t *testing.T) {
 	result = Stack([]Layer{})
 	assert.Empty(t, result)
 }
+
+func TestStack_IntroducedInLayer_SingleLayer(t *testing.T) {
+	tree := makeTree(
+		makeDir("etc", "/etc",
+			makeFile("passwd", "/etc/passwd", 100),
+		),
+		makeFile("README", "/README", 50),
+	)
+	layers := []Layer{{Index: 0, Tree: tree}}
+
+	result := Stack(layers)
+	require.Len(t, result, 1)
+
+	root := result[0].Root
+	assert.Equal(t, 0, root.FindChild("etc").IntroducedInLayer)
+	assert.Equal(t, 0, root.FindChild("etc").FindChild("passwd").IntroducedInLayer)
+	assert.Equal(t, 0, root.FindChild("README").IntroducedInLayer)
+}
+
+func TestStack_IntroducedInLayer_FileAddedInLaterLayer(t *testing.T) {
+	layer0 := makeTree(
+		makeFile("old", "/old", 100),
+	)
+	layer1 := makeTree(
+		makeFile("new", "/new", 200),
+	)
+	layer2 := makeTree(
+		makeFile("newest", "/newest", 300),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+		{Index: 2, Tree: layer2},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 3)
+
+	r1 := result[1].Root
+	assert.Equal(t, 0, r1.FindChild("old").IntroducedInLayer, "unchanged file keeps origin layer")
+	assert.Equal(t, 1, r1.FindChild("new").IntroducedInLayer, "new file gets current layer")
+
+	r2 := result[2].Root
+	assert.Equal(t, 0, r2.FindChild("old").IntroducedInLayer, "still layer 0")
+	assert.Equal(t, 1, r2.FindChild("new").IntroducedInLayer, "still layer 1")
+	assert.Equal(t, 2, r2.FindChild("newest").IntroducedInLayer, "added in layer 2")
+}
+
+func TestStack_IntroducedInLayer_ModifiedFileKeepsOrigin(t *testing.T) {
+	layer0 := makeTree(
+		makeDir("etc", "/etc",
+			makeFile("config", "/etc/config", 100),
+		),
+	)
+	layer1 := makeTree(
+		makeDir("etc", "/etc",
+			makeFile("config", "/etc/config", 250),
+		),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	config := result[1].Root.FindChild("etc").FindChild("config")
+	assert.Equal(t, Modified, config.DiffType)
+	assert.Equal(t, 0, config.IntroducedInLayer, "modified file keeps original introduction layer")
+}
+
+func TestStack_IntroducedInLayer_OpaqueWhiteout(t *testing.T) {
+	layer0 := makeTree(
+		makeDir("var", "/var",
+			makeFile("old.dat", "/var/old.dat", 100),
+		),
+	)
+	layer1 := makeTree(
+		makeDir("var", "/var",
+			makeFile(".wh..wh..opq", "/var/.wh..wh..opq", 0),
+			makeFile("new.dat", "/var/new.dat", 300),
+		),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	varDir := result[1].Root.FindChild("var")
+	newFile := varDir.FindChild("new.dat")
+	require.NotNil(t, newFile)
+	assert.Equal(t, 1, newFile.IntroducedInLayer, "file after opaque whiteout gets current layer")
+
+	oldFile := varDir.FindChild("old.dat")
+	require.NotNil(t, oldFile)
+	assert.Equal(t, 0, oldFile.IntroducedInLayer, "removed file preserves original origin")
+}

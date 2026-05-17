@@ -29,9 +29,13 @@ var (
 	headerSepColor = lipgloss.Color("#313244")
 	fileNameColor  = lipgloss.Color("#BAC2DE")
 
-	metaDimColor  = lipgloss.Color("#6C7086")
-	treeDimColor  = lipgloss.Color("#45475A")
+	metaDimColor   = lipgloss.Color("#6C7086")
+	treeDimColor   = lipgloss.Color("#45475A")
 	scrollDimColor = lipgloss.Color("#6C7086")
+
+	searchHighlightBg = lipgloss.Color("#585B70")
+	searchCurrentBg   = lipgloss.Color("#F9E2AF")
+	searchCurrentFg   = lipgloss.Color("#1E1E2E")
 )
 
 func renderPanel(content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {

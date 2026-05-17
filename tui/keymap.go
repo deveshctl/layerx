@@ -5,18 +5,23 @@ import (
 )
 
 type keyMap struct {
-	Quit        key.Binding
-	Up          key.Binding
-	Down        key.Binding
-	Top         key.Binding
-	Bottom      key.Binding
-	Switch      key.Binding
-	Copy        key.Binding
-	Help        key.Binding
-	Filter      key.Binding
-	DiffOnly    key.Binding
-	Sort        key.Binding
-	ExtractFile key.Binding
+	Quit         key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Top          key.Binding
+	Bottom       key.Binding
+	Switch       key.Binding
+	Copy         key.Binding
+	CopyPath     key.Binding
+	CopyContent  key.Binding
+	Help         key.Binding
+	Filter       key.Binding
+	DiffOnly     key.Binding
+	Sort         key.Binding
+	ExtractFile  key.Binding
+	ViewerSearch key.Binding
+	NextMatch    key.Binding
+	PrevMatch    key.Binding
 }
 
 func defaultKeys() keyMap {
@@ -49,6 +54,14 @@ func defaultKeys() keyMap {
 			key.WithKeys("c"),
 			key.WithHelp("c", "copy cmd"),
 		),
+		CopyPath: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "copy path"),
+		),
+		CopyContent: key.NewBinding(
+			key.WithKeys("Y"),
+			key.WithHelp("Y", "copy content"),
+		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
 			key.WithHelp("?", "help"),
@@ -68,6 +81,18 @@ func defaultKeys() keyMap {
 		ExtractFile: key.NewBinding(
 			key.WithKeys("x"),
 			key.WithHelp("x", "save file"),
+		),
+		ViewerSearch: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search"),
+		),
+		NextMatch: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "next match"),
+		),
+		PrevMatch: key.NewBinding(
+			key.WithKeys("N"),
+			key.WithHelp("N", "prev match"),
 		),
 	}
 }

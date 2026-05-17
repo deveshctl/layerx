@@ -19,15 +19,16 @@ type FileTree struct {
 
 // FileNode represents a single file or directory in a layer's filesystem.
 type FileNode struct {
-	Name     string
-	Path     string
-	Size     int64
-	Mode     fs.FileMode
-	UID      int
-	GID      int
-	DiffType DiffType
-	Children []*FileNode
-	IsDir    bool
+	Name              string
+	Path              string
+	Size              int64
+	Mode              fs.FileMode
+	UID               int
+	GID               int
+	DiffType          DiffType
+	IntroducedInLayer int
+	Children          []*FileNode
+	IsDir             bool
 }
 
 func NewFileTree() *FileTree {

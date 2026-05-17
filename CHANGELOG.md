@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M16] — 2026-05-17
+Clipboard, viewer search, and layer origin annotations.
+
+### Added
+- **Clipboard (OSC52)**: `y` copies focused file path; `Y` copies file content (viewer) or layer command (layers panel)
+- **Search in file viewer**: `/` opens search input, `n`/`N` navigate matches, inline highlighting with distinct current-match style
+- **Layer origin annotation**: file tree shows `(LN)` suffix for files introduced in a different layer; viewer title shows origin layer and command
+- `IntroducedInLayer` field on `FileNode` — propagated through `Stack()` for all clone/merge paths
+
+### Changed
+- Filter Enter behaviour: first Enter confirms the search query (closes input); second Enter opens the selected file (two-Enter flow)
+- Backspace on empty filter input is the primary clear+dismiss gesture (Esc still exits search mode)
+- Esc cascade extended: viewer search active → viewer search query → close viewer → filter → help → quit
+
+### Technical
+- `viewerParams` struct replaces parameter explosion in `renderFileView`
+- `renderViewerLine` uses occurrence-counting for highlight correctness on truncated lines
+- `renderViewerSearchBar` handles zero-match state without displaying invalid indices
+- OSC52 clipboard via `tea.SetClipboard()` — works in tmux/SSH sessions
+- 12 new unit tests covering clipboard, viewer search, origin tracking, and Esc cascade
+
 ## [UI Polish] — 2026-05-17
 TUI visual refinement — modern palette, improved layout, and UX fixes.
 

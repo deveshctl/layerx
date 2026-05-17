@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/deveshpharswan/layerx/image"
 )
 
-func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, sm sortMode) string {
+func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
 	contentHeight := height
 
@@ -52,7 +53,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		visible := files[offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, sm != sortNone)
+			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, !treeMode, treeMode, collapsed, currentLayer, filterQuery)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -139,7 +140,7 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 	return line
 }
 
-func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool) string {
+func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
 	size := formatSizeForNode(f, flat)
@@ -182,19 +183,39 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	} else {
 		displayName = f.Name
 		if f.IsDir {
-			displayName += "/"
+			if treeMode {
+				glyph := "▾ "
+				if isCollapsed(collapsed, f.Path) {
+					glyph = "▸ "
+				}
+				displayName = glyph + displayName + "/"
+			} else {
+				displayName += "/"
+			}
 		}
 		depth := nodeIndent(f)
 		treePrefix = buildTreePrefix(depth)
 	}
 
-	fullName := treePrefix + displayName
-	nameRunes := []rune(fullName)
-	if len(nameRunes) > nameSpace {
-		fullName = string(nameRunes[:nameSpace-1]) + "…"
+	var originSuffix string
+	showOrigin := !f.IsDir && f.DiffType != image.Added && f.IntroducedInLayer != currentLayer
+	if showOrigin {
+		originSuffix = fmt.Sprintf(" (L%d)", f.IntroducedInLayer)
 	}
 
-	nameWidth := len([]rune(fullName))
+	fullName := treePrefix + displayName
+	nameRunes := []rune(fullName)
+	availableForName := nameSpace - len([]rune(originSuffix))
+	if availableForName < 4 {
+		availableForName = 4
+		originSuffix = ""
+		showOrigin = false
+	}
+	if len(nameRunes) > availableForName {
+		fullName = string(nameRunes[:availableForName-1]) + "…"
+	}
+
+	nameWidth := len([]rune(fullName)) + len([]rune(originSuffix))
 	namePad := nameSpace - nameWidth
 	if namePad < 0 {
 		namePad = 0
@@ -234,7 +255,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 			sizeStr := padLeft(size, sizeCol)
 			metaCols = sizeStr + strings.Repeat(" ", colGap)
 		}
-		fullLine := selGlyph + metaCols + fullName + strings.Repeat(" ", namePad)
+		fullLine := selGlyph + metaCols + fullName + originSuffix + strings.Repeat(" ", namePad)
 		return lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(fullLine)
 	}
 
@@ -253,19 +274,10 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	var nameRendered string
 	prefixRuneLen := len([]rune(treePrefix))
 	fullNameRuneLen := len([]rune(fullName))
-	wasTruncated := len(nameRunes) > nameSpace
+	wasTruncated := len(nameRunes) > availableForName
 
 	if flat || (wasTruncated && prefixRuneLen >= fullNameRuneLen) {
-		switch f.DiffType {
-		case image.Added:
-			nameRendered = styleWithFg(addedColor).Render(fullName)
-		case image.Modified:
-			nameRendered = styleWithFg(modifiedColor).Render(fullName)
-		case image.Removed:
-			nameRendered = styleWithFg(removedColor).Render(fullName)
-		default:
-			nameRendered = styleWithFg(fileNameColor).Render(fullName)
-		}
+		nameRendered = renderNameWithHighlight(fullName, filterQuery, diffColorForNode(f))
 	} else {
 		fullRunes := []rune(fullName)
 		var nameOnly string
@@ -273,28 +285,23 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 			nameOnly = string(fullRunes[prefixRuneLen:])
 		}
 		treePrefixRendered := styleWithFg(treeDimColor).Render(treePrefix)
-		var nameOnlyRendered string
-		switch f.DiffType {
-		case image.Added:
-			nameOnlyRendered = styleWithFg(addedColor).Render(nameOnly)
-		case image.Modified:
-			nameOnlyRendered = styleWithFg(modifiedColor).Render(nameOnly)
-		case image.Removed:
-			nameOnlyRendered = styleWithFg(removedColor).Render(nameOnly)
-		default:
-			nameOnlyRendered = styleWithFg(fileNameColor).Render(nameOnly)
-		}
+		nameOnlyRendered := renderNameWithHighlight(nameOnly, filterQuery, diffColorForNode(f))
 		nameRendered = treePrefixRendered + nameOnlyRendered
 	}
 
-	nameRenderedWidth := lipgloss.Width(nameRendered)
+	var originRendered string
+	if showOrigin {
+		originRendered = styleWithFg(metaDimColor).Render(originSuffix)
+	}
+
+	nameRenderedWidth := lipgloss.Width(nameRendered) + lipgloss.Width(originRendered)
 	diffGlyphWidth := lipgloss.Width(diffGlyph)
 	actualNamePad := nameSpace - nameRenderedWidth + diffGlyphWidth - 2
 	if actualNamePad < 0 {
 		actualNamePad = 0
 	}
 
-	fullLine := diffGlyph + metaCols + nameRendered + strings.Repeat(" ", actualNamePad)
+	fullLine := diffGlyph + metaCols + nameRendered + originRendered + strings.Repeat(" ", actualNamePad)
 
 	return fullLine
 }
@@ -393,4 +400,48 @@ func nodeEffectiveSize(n *image.FileNode) int64 {
 	}
 	walk(n)
 	return total
+}
+
+func diffColorForNode(f *image.FileNode) color.Color {
+	switch f.DiffType {
+	case image.Added:
+		return addedColor
+	case image.Modified:
+		return modifiedColor
+	case image.Removed:
+		return removedColor
+	default:
+		return fileNameColor
+	}
+}
+
+func renderNameWithHighlight(name, query string, fg color.Color) string {
+	if query == "" || name == "" {
+		return styleWithFg(fg).Render(name)
+	}
+	lowerName := strings.ToLower(name)
+	lowerQuery := strings.ToLower(query)
+	if !strings.Contains(lowerName, lowerQuery) {
+		return styleWithFg(fg).Render(name)
+	}
+	runes := []rune(name)
+	lowerRunes := []rune(lowerName)
+	queryRunes := []rune(lowerQuery)
+	runeIdx := -1
+	for i := 0; i <= len(lowerRunes)-len(queryRunes); i++ {
+		if string(lowerRunes[i:i+len(queryRunes)]) == string(queryRunes) {
+			runeIdx = i
+			break
+		}
+	}
+	if runeIdx < 0 {
+		return styleWithFg(fg).Render(name)
+	}
+	before := string(runes[:runeIdx])
+	match := string(runes[runeIdx : runeIdx+len(queryRunes)])
+	after := string(runes[runeIdx+len(queryRunes):])
+
+	normal := styleWithFg(fg)
+	highlight := lipgloss.NewStyle().Foreground(fg).Background(searchHighlightBg)
+	return normal.Render(before) + highlight.Render(match) + normal.Render(after)
 }

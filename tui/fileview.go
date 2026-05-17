@@ -9,43 +9,70 @@ import (
 	"github.com/deveshpharswan/layerx/image"
 )
 
-func renderFileView(content *image.FileContent, offset, width, height int, loading bool, spinnerFrame int) string {
-	contentWidth := width - 2
-	contentHeight := height
+type viewerParams struct {
+	content      *image.FileContent
+	offset       int
+	width        int
+	height       int
+	loading      bool
+	spinnerFrame int
+	originLayer  int
+	originCmd    string
+	currentLayer int
+	searchQuery  string
+	searchMatches [][2]int
+	searchCursor int
+	searchActive bool
+}
 
-	if loading {
-		frame := spinnerFrames[spinnerFrame%len(spinnerFrames)]
+func renderFileView(p viewerParams) string {
+	contentWidth := p.width - 2
+	contentHeight := p.height
+
+	if p.loading {
+		frame := spinnerFrames[p.spinnerFrame%len(spinnerFrames)]
 		msg := frame + " Extracting file…"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center, msg)
-		return renderPanel(body, "File Viewer", true, contentWidth, height, false, false)
+		return renderPanel(body, "File Viewer", true, contentWidth, p.height, false, false)
 	}
 
-	if content == nil {
-		return renderPanel("", "File Viewer", true, contentWidth, height, false, false)
+	if p.content == nil {
+		return renderPanel("", "File Viewer", true, contentWidth, p.height, false, false)
 	}
 
-	title := content.Path
+	title := p.content.Path
+	if p.originLayer != p.currentLayer && p.originCmd != "" {
+		cmd := p.originCmd
+		if len([]rune(cmd)) > 40 {
+			cmd = string([]rune(cmd)[:39]) + "…"
+		}
+		title = fmt.Sprintf("%s  ← L%d: %s", p.content.Path, p.originLayer, cmd)
+	}
 
-	if content.Binary {
-		msg := fmt.Sprintf("Binary file (%s) — cannot display", image.FormatBytes(content.Size))
+	if p.content.Binary {
+		msg := fmt.Sprintf("Binary file (%s) — cannot display", image.FormatBytes(p.content.Size))
 		hint := "Press Esc to return"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
 			styleWithFg(removedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
-		return renderPanel(body, title, true, contentWidth, height, false, false)
+		return renderPanel(body, title, true, contentWidth, p.height, false, false)
 	}
 
-	if len(content.Data) == 0 {
+	if len(p.content.Data) == 0 {
 		msg := "Empty file (0 bytes)"
 		hint := "Press Esc to return"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
 			styleWithFg(unchangedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
-		return renderPanel(body, title, true, contentWidth, height, false, false)
+		return renderPanel(body, title, true, contentWidth, p.height, false, false)
 	}
 
-	lines := strings.Split(string(content.Data), "\n")
+	lines := strings.Split(string(p.content.Data), "\n")
 
 	viewHeight := contentHeight
-	if content.Truncated {
+	if p.content.Truncated {
+		viewHeight--
+	}
+	showSearchBar := p.searchActive || p.searchQuery != ""
+	if showSearchBar {
 		viewHeight--
 	}
 
@@ -53,20 +80,21 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 	gutterWidth := len(fmt.Sprintf("%d", totalLines)) + 1
 
 	var sb strings.Builder
-	end := offset + viewHeight
+	end := p.offset + viewHeight
 	if end > totalLines {
 		end = totalLines
 	}
-	if offset > totalLines {
-		offset = totalLines
+	if p.offset > totalLines {
+		p.offset = totalLines
 	}
-	if offset > end {
-		offset = end
+	if p.offset > end {
+		p.offset = end
 	}
-	visible := lines[offset:end]
+	visible := lines[p.offset:end]
 
 	for i, line := range visible {
-		lineNum := offset + i + 1
+		lineNum := p.offset + i + 1
+		lineIdx := p.offset + i
 		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterWidth, lineNum))
 
 		maxLineWidth := contentWidth - gutterWidth - 1
@@ -77,7 +105,8 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 			line = string([]rune(line)[:maxLineWidth-1]) + "…"
 		}
 
-		sb.WriteString(gutter + styleWithFg(fileNameColor).Render(line))
+		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor)
+		sb.WriteString(gutter + lineContent)
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
 		}
@@ -88,16 +117,125 @@ func renderFileView(content *image.FileContent, offset, width, height int, loadi
 		sb.WriteString("\n")
 	}
 
-	if content.Truncated {
-		notice := fmt.Sprintf("  File truncated at 1 MB (total: %s)", image.FormatBytes(content.Size))
+	if showSearchBar {
+		sb.WriteString("\n")
+		sb.WriteString(renderViewerSearchBar(p.searchQuery, p.searchActive, len(p.searchMatches), p.searchCursor, contentWidth))
+	}
+
+	if p.content.Truncated {
+		notice := fmt.Sprintf("  File truncated at 1 MB (total: %s)", image.FormatBytes(p.content.Size))
 		sb.WriteString("\n")
 		sb.WriteString(styleWithFg(modifiedColor).Render(notice))
 	}
 
-	hasAbove := offset > 0
+	hasAbove := p.offset > 0
 	hasBelow := end < totalLines
 
-	return renderPanel(sb.String(), title, true, contentWidth, height, hasAbove, hasBelow)
+	return renderPanel(sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
+}
+
+func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, matchCursor int) string {
+	if query == "" || len(matches) == 0 {
+		return styleWithFg(fileNameColor).Render(line)
+	}
+
+	lowerLine := strings.ToLower(line)
+	lowerQuery := strings.ToLower(query)
+	queryLen := len(lowerQuery)
+
+	// Determine which occurrence on this line (if any) is the current match.
+	currentOccurrence := -1
+	if matchCursor < len(matches) && matches[matchCursor][0] == lineIdx {
+		// Count how many matches on this line precede the current one.
+		count := 0
+		for _, m := range matches {
+			if m[0] != lineIdx {
+				if m[0] > lineIdx {
+					break
+				}
+				continue
+			}
+			if m[1] == matches[matchCursor][1] {
+				currentOccurrence = count
+				break
+			}
+			count++
+		}
+	}
+
+	type segment struct {
+		text    string
+		current bool
+		match   bool
+	}
+
+	var segments []segment
+	pos := 0
+	occurrence := 0
+	for {
+		idx := strings.Index(lowerLine[pos:], lowerQuery)
+		if idx < 0 {
+			break
+		}
+		matchStart := pos + idx
+		matchEnd := matchStart + queryLen
+
+		if matchStart > pos {
+			segments = append(segments, segment{text: line[pos:matchStart]})
+		}
+
+		isCurrent := occurrence == currentOccurrence
+		segments = append(segments, segment{text: line[matchStart:matchEnd], match: true, current: isCurrent})
+		pos = matchEnd
+		occurrence++
+	}
+	if pos < len(line) {
+		segments = append(segments, segment{text: line[pos:]})
+	}
+	if len(segments) == 0 {
+		return styleWithFg(fileNameColor).Render(line)
+	}
+
+	var sb strings.Builder
+	for _, seg := range segments {
+		if seg.current {
+			sb.WriteString(lipgloss.NewStyle().Foreground(searchCurrentFg).Background(searchCurrentBg).Render(seg.text))
+		} else if seg.match {
+			sb.WriteString(lipgloss.NewStyle().Foreground(fileNameColor).Background(searchHighlightBg).Render(seg.text))
+		} else {
+			sb.WriteString(styleWithFg(fileNameColor).Render(seg.text))
+		}
+	}
+	return sb.String()
+}
+
+func renderViewerSearchBar(query string, active bool, matchCount, cursor, maxWidth int) string {
+	prefix := styleWithFg(accentColor).Render("/ ")
+	if active {
+		cursorChar := styleWithFg(selectedColor).Render("█")
+		queryStr := styleWithFg(selectedColor).Render(query)
+		line := prefix + queryStr + cursorChar
+		if matchCount > 0 {
+			counter := styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
+			line += counter
+		} else if query != "" {
+			line += styleWithFg(statusDimColor).Render("  (no matches)")
+		}
+		return line
+	}
+	queryStr := styleWithFg(selectedColor).Render(query)
+	var counter string
+	if matchCount > 0 {
+		counter = styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
+	} else {
+		counter = styleWithFg(statusDimColor).Render("  (no matches)")
+	}
+	hint := styleWithFg(unchangedColor).Render("  [Esc clear]")
+	line := prefix + queryStr + counter + hint
+	if lipgloss.Width(line) > maxWidth {
+		line = prefix + queryStr + counter
+	}
+	return line
 }
 
 func fileViewLineCount(content *image.FileContent) int {
