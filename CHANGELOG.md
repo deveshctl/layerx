@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [UI Polish] — 2026-05-17
+TUI visual refinement — modern palette, improved layout, and UX fixes.
+
+### Changed
+- Modern colour palette: muted blue/purple accents, subtle borders, high-contrast text
+- Improved layer panel: right-aligned sizes, padded columns, cleaner command preview
+- File tree: proper column alignment for permissions, UID:GID, and size
+- Narrow terminal fallback: graceful degradation below 80 columns
+- Status bar: updated key hints with consistent formatting
+
+### Fixed
+- Border width calculation causing off-by-one panel sizing
+- Tree content overflowing panel bounds on resize
+- Scroll offset not accounting for header row in file tree
+- Rune-width handling for wide/combining characters in file paths
+- Filter+Enter now opens file viewer correctly without clearing filter state
+
+### Added
+- README.md with full feature documentation, usage examples, and dive comparison
+- LICENSE (MIT)
+
 ## [M13+M14] — 2026-05-15
 Shell completion and JSON export.
 
