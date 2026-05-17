@@ -4,11 +4,21 @@ A terminal-based Docker image layer inspector. Point it at any Docker image and 
 
 Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
-**Inspired by [dive](https://github.com/wagoodman/dive)** — layerx ships the features dive users have requested since 2018 but never received: file content viewing, sort-by-size, working OCI file extraction, and CI automation.
-
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
+
+---
+
+## Prerequisites
+
+Docker must be installed and running before using layerx.
+
+| Platform | Install |
+|----------|---------|
+| Linux | [Docker Engine](https://docs.docker.com/engine/install/) |
+| macOS | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) |
+| Windows | [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) |
 
 ---
 
@@ -47,15 +57,44 @@ Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
 ## Install
 
-### From source
+### Homebrew (macOS & Linux)
+
+```bash
+brew install deveshpharswan/tap/layerx
+```
+
+### Scoop (Windows)
+
+```bash
+scoop bucket add layerx https://github.com/deveshpharswan/scoop-bucket
+scoop install layerx
+```
+
+### Debian / Ubuntu (.deb)
+
+```bash
+curl -LO https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_VERSION_linux_amd64.deb
+sudo dpkg -i layerx_VERSION_linux_amd64.deb
+```
+
+### RHEL / Fedora (.rpm)
+
+```bash
+curl -LO https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_VERSION_linux_amd64.rpm
+sudo rpm -i layerx_VERSION_linux_amd64.rpm
+```
+
+### Direct Download
+
+Download a prebuilt binary from [Releases](https://github.com/deveshpharswan/layerx/releases) for your platform (Linux, macOS, Windows — amd64 and arm64).
+
+### Build from Source
+
+Requires Go 1.26+:
 
 ```bash
 go install github.com/deveshpharswan/layerx@latest
 ```
-
-### From release binary
-
-Download from [Releases](https://github.com/deveshpharswan/layerx/releases) — prebuilt for Linux, macOS, and Windows (amd64).
 
 ---
 
