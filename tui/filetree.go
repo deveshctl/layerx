@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -52,7 +53,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		visible := files[offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, sm != sortNone, currentLayer)
+			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, sm != sortNone, currentLayer, filterQuery)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -139,7 +140,7 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 	return line
 }
 
-func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool, currentLayer int) string {
+func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool, currentLayer int, filterQuery string) string {
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
 	size := formatSizeForNode(f, flat)
@@ -268,16 +269,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	wasTruncated := len(nameRunes) > availableForName
 
 	if flat || (wasTruncated && prefixRuneLen >= fullNameRuneLen) {
-		switch f.DiffType {
-		case image.Added:
-			nameRendered = styleWithFg(addedColor).Render(fullName)
-		case image.Modified:
-			nameRendered = styleWithFg(modifiedColor).Render(fullName)
-		case image.Removed:
-			nameRendered = styleWithFg(removedColor).Render(fullName)
-		default:
-			nameRendered = styleWithFg(fileNameColor).Render(fullName)
-		}
+		nameRendered = renderNameWithHighlight(fullName, filterQuery, diffColorForNode(f))
 	} else {
 		fullRunes := []rune(fullName)
 		var nameOnly string
@@ -285,17 +277,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 			nameOnly = string(fullRunes[prefixRuneLen:])
 		}
 		treePrefixRendered := styleWithFg(treeDimColor).Render(treePrefix)
-		var nameOnlyRendered string
-		switch f.DiffType {
-		case image.Added:
-			nameOnlyRendered = styleWithFg(addedColor).Render(nameOnly)
-		case image.Modified:
-			nameOnlyRendered = styleWithFg(modifiedColor).Render(nameOnly)
-		case image.Removed:
-			nameOnlyRendered = styleWithFg(removedColor).Render(nameOnly)
-		default:
-			nameOnlyRendered = styleWithFg(fileNameColor).Render(nameOnly)
-		}
+		nameOnlyRendered := renderNameWithHighlight(nameOnly, filterQuery, diffColorForNode(f))
 		nameRendered = treePrefixRendered + nameOnlyRendered
 	}
 
@@ -410,4 +392,48 @@ func nodeEffectiveSize(n *image.FileNode) int64 {
 	}
 	walk(n)
 	return total
+}
+
+func diffColorForNode(f *image.FileNode) color.Color {
+	switch f.DiffType {
+	case image.Added:
+		return addedColor
+	case image.Modified:
+		return modifiedColor
+	case image.Removed:
+		return removedColor
+	default:
+		return fileNameColor
+	}
+}
+
+func renderNameWithHighlight(name, query string, fg color.Color) string {
+	if query == "" || name == "" {
+		return styleWithFg(fg).Render(name)
+	}
+	lowerName := strings.ToLower(name)
+	lowerQuery := strings.ToLower(query)
+	if !strings.Contains(lowerName, lowerQuery) {
+		return styleWithFg(fg).Render(name)
+	}
+	runes := []rune(name)
+	lowerRunes := []rune(lowerName)
+	queryRunes := []rune(lowerQuery)
+	runeIdx := -1
+	for i := 0; i <= len(lowerRunes)-len(queryRunes); i++ {
+		if string(lowerRunes[i:i+len(queryRunes)]) == string(queryRunes) {
+			runeIdx = i
+			break
+		}
+	}
+	if runeIdx < 0 {
+		return styleWithFg(fg).Render(name)
+	}
+	before := string(runes[:runeIdx])
+	match := string(runes[runeIdx : runeIdx+len(queryRunes)])
+	after := string(runes[runeIdx+len(queryRunes):])
+
+	normal := styleWithFg(fg)
+	highlight := lipgloss.NewStyle().Foreground(fg).Background(searchHighlightBg)
+	return normal.Render(before) + highlight.Render(match) + normal.Render(after)
 }

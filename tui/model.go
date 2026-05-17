@@ -1092,6 +1092,7 @@ func (m model) renderStatusBar() string {
 			{"s", "sort"},
 			{"Enter", "view"},
 			{"x", "save"},
+			{"y", "copy path"},
 			{"?", "help"},
 		}
 	}
@@ -1171,12 +1172,17 @@ func (m model) renderViewerStatusBar() string {
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("n/N") + " " + descStyle.Render("next/prev") + " " +
 		sepStyle.Render("│") + " " +
+		keyStyle.Render("Y") + " " + descStyle.Render("copy") + " " +
+		sepStyle.Render("│") + " " +
 		keyStyle.Render("Esc") + " " + descStyle.Render("close") + " " +
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("q") + " " + descStyle.Render("quit")
 
 	var right string
-	if len(m.viewSearchMatches) > 0 {
+	if m.copyConfirm {
+		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
+		right = copiedStyle.Render("Copied!") + " "
+	} else if len(m.viewSearchMatches) > 0 {
 		matchStyle := lipgloss.NewStyle().Foreground(searchCurrentBg).Background(statusBgColor).Bold(true)
 		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
 	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
