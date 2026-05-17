@@ -19,7 +19,10 @@ Single binary. Zero runtime dependencies beyond a running Docker daemon.
 - **File tree** — columnar display with permissions, UID:GID, size, and diff colouring (green=added, yellow=modified, red=removed)
 - **Layer stacking** — correct filesystem view with `.wh.<name>` and `.wh..wh..opq` whiteout handling
 - **File content viewer** — press Enter on any file to view its contents inline with line numbers and scrolling
-- **Filter** — `/` opens substring filter, `Esc` clears
+- **Viewer search** — `/` in viewer opens search input with inline highlighting, `n`/`N` navigate matches
+- **Layer origin annotations** — file tree shows `(LN)` suffix for files introduced in a different layer; viewer title shows origin layer and command
+- **Clipboard (OSC52)** — `y` copies file path, `Y` copies file content (viewer) or layer command (layers panel); works over SSH/tmux
+- **Filter** — `/` opens substring filter, Enter confirms, Backspace-on-empty clears
 - **Diff-only mode** — `d` hides unchanged files, shows only added/modified/removed
 - **Sort by size** — `s` cycles: default → largest first → smallest first
 - **File extraction** — `x` saves the focused file to your working directory
@@ -80,8 +83,11 @@ source <(layerx completion bash)
 | `j` / `k` | Navigate up/down |
 | `g` / `G` | Jump to top/bottom |
 | `Enter` | Open file content viewer |
-| `Esc` | Back (close viewer → clear filter → quit) |
-| `/` | Filter file tree by name |
+| `Esc` | Back (close search → close viewer → clear filter → quit) |
+| `/` | Filter file tree (tree) / search in viewer (viewer) |
+| `n` / `N` | Next / previous search match (viewer) |
+| `y` | Copy file path to clipboard |
+| `Y` | Copy file content (viewer) / layer command (layers) |
 | `d` | Toggle diff-only mode |
 | `s` | Cycle sort (default → largest → smallest) |
 | `x` | Extract file to disk |
@@ -114,6 +120,9 @@ rules:
 | Vim navigation | ✅ | ✅ |
 | File permissions + UID:GID display | ✅ | ✅ |
 | **File content viewer** | ❌ | ✅ |
+| **Viewer search with highlighting** | ❌ | ✅ |
+| **Clipboard (OSC52)** | ❌ | ✅ |
+| **Layer origin tracking** | ❌ | ✅ |
 | **Sort by size** | ❌ | ✅ |
 | **File extraction (OCI-compatible)** | ⚠️ broken | ✅ |
 | **Shell completion** | ❌ | ✅ |
@@ -173,6 +182,7 @@ layerx is under active development. Current milestone progress:
 - [x] M13 — Shell completion
 - [x] M14 — JSON export
 - [ ] M15 — MCP server *(deferred)*
+- [x] M16 — Clipboard, viewer search, layer origin annotations
 
 ---
 
