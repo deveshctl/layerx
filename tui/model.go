@@ -121,8 +121,9 @@ type model struct {
 	showHelp     bool
 	filterActive bool
 	filterQuery  string
-	diffOnly     bool
-	sortMode     sortMode
+	diffOnly      bool
+	sortMode      sortMode
+	treeCollapsed map[string]bool
 	viewState    viewState
 	viewContent      *image.FileContent
 	viewOffset       int
@@ -638,7 +639,19 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 	}
 	f := files[m.treeCursor]
 	if f.IsDir {
-		m.statusMsg = "Cannot view directory"
+		if m.useTreeCollapse() {
+			m.treeCollapsed = toggleCollapsed(m.treeCollapsed, f.Path)
+			mp := &m
+			mp.clampCursors()
+			return *mp, nil
+		}
+		msg := "Collapse unavailable while sorting"
+		if m.filterQuery != "" {
+			msg = "Collapse unavailable while filtering"
+		} else if m.diffOnly {
+			msg = "Collapse unavailable in diff-only mode"
+		}
+		m.statusMsg = msg
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return clearStatusMsg{}
 		})
@@ -673,7 +686,7 @@ func (m model) layers() []image.Layer {
 	return m.analysis.Layers
 }
 
-func (m model) currentFlatTree() []*image.FileNode {
+func (m model) currentTreeRoot() *image.FileNode {
 	if m.analysis == nil {
 		return nil
 	}
@@ -684,11 +697,24 @@ func (m model) currentFlatTree() []*image.FileNode {
 	if tree == nil {
 		return nil
 	}
-	return flattenTree(tree.Root)
+	return tree.Root
+}
+
+func (m model) useTreeCollapse() bool {
+	return m.sortMode == sortNone && m.filterQuery == "" && !m.diffOnly
+}
+
+func (m *model) clearTreeCollapsed() {
+	m.treeCollapsed = nil
 }
 
 func (m model) displayTree() []*image.FileNode {
-	files := m.currentFlatTree()
+	var files []*image.FileNode
+	if m.useTreeCollapse() {
+		files = visibleTree(m.currentTreeRoot(), m.treeCollapsed)
+	} else {
+		files = flattenTree(m.currentTreeRoot())
+	}
 	if m.diffOnly {
 		files = applyDiffFilter(files)
 	}
@@ -731,6 +757,7 @@ func (m *model) moveDown() {
 			m.treeCursor = 0
 			m.treeOffset = 0
 			m.sortMode = sortNone
+			m.clearTreeCollapsed()
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -750,6 +777,7 @@ func (m *model) moveUp() {
 			m.treeCursor = 0
 			m.treeOffset = 0
 			m.sortMode = sortNone
+			m.clearTreeCollapsed()
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -768,6 +796,7 @@ func (m *model) moveToTop() {
 		m.treeCursor = 0
 		m.treeOffset = 0
 		m.sortMode = sortNone
+		m.clearTreeCollapsed()
 	case focusTree:
 		m.treeCursor = 0
 		m.treeOffset = 0
@@ -783,6 +812,7 @@ func (m *model) moveToBottom() {
 			m.treeCursor = 0
 			m.treeOffset = 0
 			m.sortMode = sortNone
+			m.clearTreeCollapsed()
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -984,7 +1014,7 @@ func (m model) viewReady() tea.View {
 
 	header := m.renderHeader()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers)
-	right := renderFileTree(m.displayTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.sortMode, m.layerCursor)
+	right := renderFileTree(m.displayTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
@@ -1094,6 +1124,12 @@ func (m model) renderStatusBar() string {
 			{"x", "save"},
 			{"y", "copy path"},
 			{"?", "help"},
+		}
+		if !compact && m.useTreeCollapse() {
+			files := m.displayTree()
+			if m.treeCursor < len(files) && files[m.treeCursor].IsDir {
+				hints = append(hints, hint{"Enter", "toggle"})
+			}
 		}
 	}
 
@@ -1223,7 +1259,8 @@ func (m model) overlayHelp() string {
 		"",
 		"  " + sectionStyle.Render("File Tree"),
 		"  " + keyStyle.Render("/           ") + descStyle.Render("Search files (substring filter)"),
-		"  " + keyStyle.Render("Enter       ") + descStyle.Render("View file content"),
+		"  " + keyStyle.Render("Enter       ") + descStyle.Render("View file / expand or collapse folder"),
+		"  " + dimStyle.Render("             (sort, filter, and diff-only use a flat list)"),
 		"  " + keyStyle.Render("Backspace   ") + descStyle.Render("Clear active filter"),
 		"  " + keyStyle.Render("d           ") + descStyle.Render("Show only changed files"),
 		"  " + keyStyle.Render("s           ") + descStyle.Render("Sort by size (↓ → ↑ → off)"),

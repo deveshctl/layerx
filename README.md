@@ -16,7 +16,7 @@ Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
 ### Interactive TUI
 - **Layer browser** — navigate layers with vim keys (j/k), see Dockerfile command, size, and short digest
-- **File tree** — columnar display with permissions, UID:GID, size, and diff colouring (green=added, yellow=modified, red=removed)
+- **File tree** — columnar display with permissions, UID:GID, size, and diff colouring (green=added, yellow=modified, red=removed); collapsible folders (Enter on a directory)
 - **Layer stacking** — correct filesystem view with `.wh.<name>` and `.wh..wh..opq` whiteout handling
 - **File content viewer** — press Enter on any file to view its contents inline with line numbers and scrolling
 - **Viewer search** — `/` in viewer opens search input with inline highlighting, `n`/`N` navigate matches
@@ -82,7 +82,7 @@ source <(layerx completion bash)
 | `Tab` | Switch panel (layers ↔ file tree) |
 | `j` / `k` | Navigate up/down |
 | `g` / `G` | Jump to top/bottom |
-| `Enter` | Open file content viewer |
+| `Enter` | Open file viewer; expand/collapse folder (tree mode) |
 | `Esc` | Back (close search → close viewer → clear filter → quit) |
 | `/` | Filter file tree (tree) / search in viewer (viewer) |
 | `n` / `N` | Next / previous search match (viewer) |

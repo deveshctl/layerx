@@ -481,15 +481,31 @@ func TestRenderLayersEmptyDoesNotPanic(t *testing.T) {
 
 func TestRenderFileTreeDoesNotPanic(t *testing.T) {
 	m := setupModel()
-	files := m.currentFlatTree()
+	files := m.displayTree()
 	assert.NotPanics(t, func() {
-		renderFileTree(files, 0, 0, 60, 20, true, false, "", sortNone, 0)
+		renderFileTree(files, 0, 0, 60, 20, true, false, "", true, nil, 0)
 	})
 }
 
 func TestRenderFileTreeEmptyShowsPlaceholder(t *testing.T) {
-	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", sortNone, 0)
+	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", true, nil, 0)
 	assert.Contains(t, output, "no filesystem changes")
+}
+
+func TestRenderFileTreeCollapsedDirShowsGlyph(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	files := m.displayTree()
+	for i, f := range files {
+		if f.Path == "/etc" {
+			m.treeCursor = i
+			break
+		}
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	line := renderFileTree(um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, um.treeCollapsed, 0)
+	assert.Contains(t, line, "▸")
 }
 
 // --- wrapCommandLines ---------------------------------------------------------
@@ -854,10 +870,38 @@ func TestEnterOnFileTriggersViewing(t *testing.T) {
 	assert.Equal(t, viewLoading, um.viewState)
 }
 
-func TestEnterOnDirIsNoop(t *testing.T) {
+func TestEnterOnDirTogglesCollapse(t *testing.T) {
 	m := setupModel()
 	m.focus = focusTree
 	m.extractor = &mockExtractor{}
+
+	before := len(m.displayTree())
+	etcIdx := -1
+	for i, f := range m.displayTree() {
+		if f.Path == "/etc" {
+			etcIdx = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, etcIdx, 0)
+	m.treeCursor = etcIdx
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, viewNone, um.viewState)
+	assert.Less(t, len(um.displayTree()), before)
+	assert.True(t, isCollapsed(um.treeCollapsed, "/etc"))
+
+	updated, _ = um.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um = updated.(model)
+	assert.Equal(t, before, len(um.displayTree()))
+	assert.False(t, isCollapsed(um.treeCollapsed, "/etc"))
+}
+
+func TestEnterOnDirWhileSortingShowsStatus(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m = send(m, keyPress('s'))
 
 	files := m.displayTree()
 	for i, f := range files {
@@ -869,8 +913,38 @@ func TestEnterOnDirIsNoop(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
-	assert.Equal(t, viewNone, um.viewState)
-	assert.Equal(t, "Cannot view directory", um.statusMsg)
+	assert.Contains(t, um.statusMsg, "unavailable")
+}
+
+func TestLayerChangeClearsCollapse(t *testing.T) {
+	m := setupModel()
+	m.treeCollapsed = map[string]bool{"/etc": true}
+	m.focus = focusLayers
+
+	m = send(m, keyPress('j'))
+	assert.Nil(t, m.treeCollapsed)
+}
+
+func TestFilterDisablesCollapse(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.filterQuery = "etc"
+	before := len(m.displayTree())
+
+	etcIdx := -1
+	for i, f := range m.displayTree() {
+		if f.Path == "/etc" {
+			etcIdx = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, etcIdx, 0)
+	m.treeCursor = etcIdx
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, before, len(um.displayTree()))
+	assert.Contains(t, um.statusMsg, "unavailable")
 }
 
 func TestEnterOnRemovedFileShowsStatusMsg(t *testing.T) {

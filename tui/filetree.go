@@ -11,7 +11,7 @@ import (
 	"github.com/deveshpharswan/layerx/image"
 )
 
-func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, sm sortMode, currentLayer int) string {
+func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
 	contentHeight := height
 
@@ -53,7 +53,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		visible := files[offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, sm != sortNone, currentLayer, filterQuery)
+			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, !treeMode, treeMode, collapsed, currentLayer, filterQuery)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -140,7 +140,7 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 	return line
 }
 
-func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool, currentLayer int, filterQuery string) string {
+func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
 	size := formatSizeForNode(f, flat)
@@ -183,7 +183,15 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat boo
 	} else {
 		displayName = f.Name
 		if f.IsDir {
-			displayName += "/"
+			if treeMode {
+				glyph := "▾ "
+				if isCollapsed(collapsed, f.Path) {
+					glyph = "▸ "
+				}
+				displayName = glyph + displayName + "/"
+			} else {
+				displayName += "/"
+			}
 		}
 		depth := nodeIndent(f)
 		treePrefix = buildTreePrefix(depth)
