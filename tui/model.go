@@ -645,10 +645,13 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 			mp.clampCursors()
 			return *mp, nil
 		}
-		msg := "Collapse unavailable while sorting"
-		if m.filterQuery != "" {
+		var msg string
+		switch {
+		case m.sortMode != sortNone:
+			msg = "Collapse unavailable while sorting"
+		case m.filterQuery != "":
 			msg = "Collapse unavailable while filtering"
-		} else if m.diffOnly {
+		case m.diffOnly:
 			msg = "Collapse unavailable in diff-only mode"
 		}
 		m.statusMsg = msg
@@ -708,6 +711,13 @@ func (m *model) clearTreeCollapsed() {
 	m.treeCollapsed = nil
 }
 
+func (m *model) resetTreeForLayerChange() {
+	m.treeCursor = 0
+	m.treeOffset = 0
+	m.sortMode = sortNone
+	m.clearTreeCollapsed()
+}
+
 func (m model) displayTree() []*image.FileNode {
 	var files []*image.FileNode
 	if m.useTreeCollapse() {
@@ -754,10 +764,7 @@ func (m *model) moveDown() {
 		layers := m.layers()
 		if m.layerCursor < len(layers)-1 {
 			m.layerCursor++
-			m.treeCursor = 0
-			m.treeOffset = 0
-			m.sortMode = sortNone
-			m.clearTreeCollapsed()
+			m.resetTreeForLayerChange()
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -774,10 +781,7 @@ func (m *model) moveUp() {
 	case focusLayers:
 		if m.layerCursor > 0 {
 			m.layerCursor--
-			m.treeCursor = 0
-			m.treeOffset = 0
-			m.sortMode = sortNone
-			m.clearTreeCollapsed()
+			m.resetTreeForLayerChange()
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -793,10 +797,7 @@ func (m *model) moveToTop() {
 	case focusLayers:
 		m.layerCursor = 0
 		m.layerOffset = 0
-		m.treeCursor = 0
-		m.treeOffset = 0
-		m.sortMode = sortNone
-		m.clearTreeCollapsed()
+		m.resetTreeForLayerChange()
 	case focusTree:
 		m.treeCursor = 0
 		m.treeOffset = 0
@@ -809,10 +810,7 @@ func (m *model) moveToBottom() {
 		layers := m.layers()
 		if len(layers) > 0 {
 			m.layerCursor = len(layers) - 1
-			m.treeCursor = 0
-			m.treeOffset = 0
-			m.sortMode = sortNone
-			m.clearTreeCollapsed()
+			m.resetTreeForLayerChange()
 			m.adjustLayerScroll()
 		}
 	case focusTree:
@@ -1013,8 +1011,9 @@ func (m model) viewReady() tea.View {
 	panelHeight := m.height - chromeRows
 
 	header := m.renderHeader()
+	treeFiles := m.displayTree()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers)
-	right := renderFileTree(m.displayTree(), m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
+	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
@@ -1045,7 +1044,7 @@ func (m model) viewReady() tea.View {
 	commandBar := renderCommandBar(cmd, m.width)
 
 	sep := lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", m.width))
-	status := m.renderStatusBar()
+	status := m.renderStatusBar(treeFiles)
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar, sep, status)
 
@@ -1089,7 +1088,7 @@ func (m model) renderHeader() string {
 	return bgStyle.Render(" " + left + strings.Repeat(" ", gap) + right)
 }
 
-func (m model) renderStatusBar() string {
+func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	if m.viewState != viewNone {
 		return m.renderViewerStatusBar()
 	}
@@ -1126,8 +1125,7 @@ func (m model) renderStatusBar() string {
 			{"?", "help"},
 		}
 		if !compact && m.useTreeCollapse() {
-			files := m.displayTree()
-			if m.treeCursor < len(files) && files[m.treeCursor].IsDir {
+			if m.treeCursor < len(treeFiles) && treeFiles[m.treeCursor].IsDir {
 				hints = append(hints, hint{"Enter", "toggle"})
 			}
 		}
