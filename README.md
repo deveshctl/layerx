@@ -86,20 +86,30 @@ scoop install layerx
 
 ### Debian / Ubuntu (.deb)
 
+**amd64:**
 ```bash
-VERSION=$(curl -s https://api.github.com/repos/deveshpharswan/layerx/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-ARCH=$(dpkg --print-architecture)   # amd64 or arm64
-curl -LO "https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_${VERSION}_linux_${ARCH}.deb"
-sudo dpkg -i "layerx_${VERSION}_linux_${ARCH}.deb"
+curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.deb
+sudo dpkg -i layerx_1.0.0_linux_amd64.deb
+```
+
+**arm64:**
+```bash
+curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.deb
+sudo dpkg -i layerx_1.0.0_linux_arm64.deb
 ```
 
 ### RHEL / Fedora (.rpm)
 
+**amd64:**
 ```bash
-VERSION=$(curl -s https://api.github.com/repos/deveshpharswan/layerx/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-curl -LO "https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_${VERSION}_linux_${ARCH}.rpm"
-sudo rpm -i "layerx_${VERSION}_linux_${ARCH}.rpm"
+curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.rpm
+sudo rpm -i layerx_1.0.0_linux_amd64.rpm
+```
+
+**arm64:**
+```bash
+curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.rpm
+sudo rpm -i layerx_1.0.0_linux_arm64.rpm
 ```
 
 ### Direct Download
