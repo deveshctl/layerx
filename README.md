@@ -10,6 +10,20 @@ Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
 ---
 
+## Quick Start
+
+```bash
+# macOS / Linux
+brew install deveshpharswan/tap/layerx
+
+# Try it
+layerx nginx:latest
+```
+
+Other platforms: see [Install](#install) below.
+
+---
+
 ## Prerequisites
 
 Docker must be installed and running before using layerx.
@@ -73,15 +87,19 @@ scoop install layerx
 ### Debian / Ubuntu (.deb)
 
 ```bash
-curl -LO https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_VERSION_linux_amd64.deb
-sudo dpkg -i layerx_VERSION_linux_amd64.deb
+VERSION=$(curl -s https://api.github.com/repos/deveshpharswan/layerx/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+ARCH=$(dpkg --print-architecture)   # amd64 or arm64
+curl -LO "https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_${VERSION}_linux_${ARCH}.deb"
+sudo dpkg -i "layerx_${VERSION}_linux_${ARCH}.deb"
 ```
 
 ### RHEL / Fedora (.rpm)
 
 ```bash
-curl -LO https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_VERSION_linux_amd64.rpm
-sudo rpm -i layerx_VERSION_linux_amd64.rpm
+VERSION=$(curl -s https://api.github.com/repos/deveshpharswan/layerx/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+curl -LO "https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_${VERSION}_linux_${ARCH}.rpm"
+sudo rpm -i "layerx_${VERSION}_linux_${ARCH}.rpm"
 ```
 
 ### Direct Download
@@ -95,14 +113,6 @@ Requires Go 1.26.2+:
 ```bash
 go install github.com/deveshpharswan/layerx@latest
 ```
-
-### Maintainer Setup (one-time, before first release)
-
-Before tagging the first release, create these two public repositories and configure the secret:
-
-1. Create [`github.com/deveshpharswan/homebrew-tap`](https://github.com/deveshpharswan/homebrew-tap) (public, empty)
-2. Create [`github.com/deveshpharswan/scoop-bucket`](https://github.com/deveshpharswan/scoop-bucket) (public, empty)
-3. Create a Personal Access Token with `repo` scope → add as `TAP_GITHUB_TOKEN` in repo **Settings → Secrets and Variables → Actions**
 
 ---
 
@@ -205,6 +215,18 @@ layerx is under active development. Current milestone progress:
 - [x] M14 — JSON export
 - [ ] M15 — MCP server *(deferred)*
 - [x] M16 — Clipboard, viewer search, layer origin annotations
+
+---
+
+## For Maintainers
+
+Before tagging the first release, create these two public repositories and configure the secret:
+
+1. Create [`github.com/deveshpharswan/homebrew-tap`](https://github.com/deveshpharswan/homebrew-tap) (public, empty)
+2. Create [`github.com/deveshpharswan/scoop-bucket`](https://github.com/deveshpharswan/scoop-bucket) (public, empty)
+3. Create a Personal Access Token with `repo` scope → add as `TAP_GITHUB_TOKEN` in repo **Settings → Secrets and Variables → Actions**
+
+Then push a `v*` tag and the [release workflow](.github/workflows/release.yml) handles the rest.
 
 ---
 
