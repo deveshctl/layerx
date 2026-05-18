@@ -42,16 +42,13 @@ Missing config file is silently ignored (defaults apply).`,
   layerx ci \
     --lowest-efficiency 0.9 \
     --highest-wasted-bytes 10485760 \
-    nginx:latest
-
-  # Use a .layerx.yaml file in the current directory (no flags needed)
-  layerx ci nginx:latest`,
+    nginx:latest`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCICmd,
 }
 
 func init() {
-	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (default 0.9)")
+	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (config default: 0.9)")
 	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum allowed wasted bytes (0 disables the rule)")
 	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule)")
 
