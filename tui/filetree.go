@@ -53,7 +53,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		visible := files[offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, !treeMode, treeMode, collapsed, currentLayer, filterQuery)
+			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, treeMode, collapsed, currentLayer, filterQuery)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -140,9 +140,10 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 	return line
 }
 
-func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, flat bool, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
+func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
+	flat := !treeMode
 	size := formatSizeForNode(f, flat)
 
 	const permCol = 10
@@ -371,11 +372,14 @@ func applySortBySize(files []*image.FileNode, mode sortMode) []*image.FileNode {
 	if mode == sortNone {
 		return files
 	}
+	sizes := make(map[*image.FileNode]int64, len(files))
+	for _, f := range files {
+		sizes[f] = nodeEffectiveSize(f)
+	}
 	sorted := make([]*image.FileNode, len(files))
 	copy(sorted, files)
 	sort.Slice(sorted, func(i, j int) bool {
-		si := nodeEffectiveSize(sorted[i])
-		sj := nodeEffectiveSize(sorted[j])
+		si, sj := sizes[sorted[i]], sizes[sorted[j]]
 		if mode == sortDesc {
 			return si > sj
 		}
