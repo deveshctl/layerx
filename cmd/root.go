@@ -24,6 +24,10 @@ func init() {
 	rootCmd.Flags().StringVar(&flagJSON, "json", "", "export analysis to JSON file (skip TUI)")
 }
 
+func SetVersionInfo(v, c, d string) {
+	rootCmd.Version = v
+}
+
 func Execute() error {
 	return rootCmd.Execute()
 }

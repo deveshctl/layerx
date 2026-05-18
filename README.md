@@ -4,11 +4,21 @@ A terminal-based Docker image layer inspector. Point it at any Docker image and 
 
 Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
-**Inspired by [dive](https://github.com/wagoodman/dive)** — layerx ships the features dive users have requested since 2018 but never received: file content viewing, sort-by-size, working OCI file extraction, and CI automation.
-
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
+
+---
+
+## Prerequisites
+
+Docker must be installed and running before using layerx.
+
+| Platform | Install |
+|----------|---------|
+| Linux | [Docker Engine](https://docs.docker.com/engine/install/) |
+| macOS | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) |
+| Windows | [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) |
 
 ---
 
@@ -47,15 +57,52 @@ Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
 ## Install
 
-### From source
+### Homebrew (macOS & Linux)
+
+```bash
+brew install deveshpharswan/tap/layerx
+```
+
+### Scoop (Windows)
+
+```bash
+scoop bucket add layerx https://github.com/deveshpharswan/scoop-bucket
+scoop install layerx
+```
+
+### Debian / Ubuntu (.deb)
+
+```bash
+curl -LO https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_VERSION_linux_amd64.deb
+sudo dpkg -i layerx_VERSION_linux_amd64.deb
+```
+
+### RHEL / Fedora (.rpm)
+
+```bash
+curl -LO https://github.com/deveshpharswan/layerx/releases/latest/download/layerx_VERSION_linux_amd64.rpm
+sudo rpm -i layerx_VERSION_linux_amd64.rpm
+```
+
+### Direct Download
+
+Download a prebuilt binary from [Releases](https://github.com/deveshpharswan/layerx/releases) for your platform (Linux, macOS, Windows — amd64 and arm64).
+
+### Build from Source
+
+Requires Go 1.26.2+:
 
 ```bash
 go install github.com/deveshpharswan/layerx@latest
 ```
 
-### From release binary
+### Maintainer Setup (one-time, before first release)
 
-Download from [Releases](https://github.com/deveshpharswan/layerx/releases) — prebuilt for Linux, macOS, and Windows (amd64).
+Before tagging the first release, create these two public repositories and configure the secret:
+
+1. Create [`github.com/deveshpharswan/homebrew-tap`](https://github.com/deveshpharswan/homebrew-tap) (public, empty)
+2. Create [`github.com/deveshpharswan/scoop-bucket`](https://github.com/deveshpharswan/scoop-bucket) (public, empty)
+3. Create a Personal Access Token with `repo` scope → add as `TAP_GITHUB_TOKEN` in repo **Settings → Secrets and Variables → Actions**
 
 ---
 
@@ -104,31 +151,6 @@ rules:
   highest-wasted-bytes: 52428800    # 50MB
   highest-user-wasted-percent: 0.1
 ```
-
----
-
-## How It Compares to dive
-
-| Feature | dive v0.13 | layerx |
-|---------|:----------:|:------:|
-| Layer browser with diff view | ✅ | ✅ |
-| File tree with Add/Modify/Remove colouring | ✅ | ✅ |
-| Filter by name | ✅ | ✅ |
-| Efficiency score + CI mode | ✅ | ✅ |
-| JSON export | ✅ | ✅ |
-| Config file | ✅ | ✅ |
-| Vim navigation | ✅ | ✅ |
-| File permissions + UID:GID display | ✅ | ✅ |
-| **File content viewer** | ❌ | ✅ |
-| **Viewer search with highlighting** | ❌ | ✅ |
-| **Clipboard (OSC52)** | ❌ | ✅ |
-| **Layer origin tracking** | ❌ | ✅ |
-| **Sort by size** | ❌ | ✅ |
-| **File extraction (OCI-compatible)** | ⚠️ broken | ✅ |
-| **Shell completion** | ❌ | ✅ |
-| Docker 25+ OCI format support | ⚠️ partial | ✅ |
-
-The features marked **bold** represent 450+ combined reactions on dive's issue tracker (issues [#224](https://github.com/wagoodman/dive/issues/224), [#336](https://github.com/wagoodman/dive/issues/336), [#89](https://github.com/wagoodman/dive/issues/89), [#341](https://github.com/wagoodman/dive/issues/341), [#525](https://github.com/wagoodman/dive/issues/525)).
 
 ---
 
