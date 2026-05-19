@@ -32,14 +32,25 @@ Thresholds can be set via flags or a .layerx.yaml file in the working directory:
 
 Flags take precedence over config file values.
 Missing config file is silently ignored (defaults apply).`,
+	Example: `  # Run with default thresholds (lowest-efficiency: 0.9)
+  layerx ci nginx:latest
+
+  # Override a single threshold
+  layerx ci --lowest-efficiency 0.95 nginx:latest
+
+  # Combine multiple rules
+  layerx ci \
+    --lowest-efficiency 0.9 \
+    --highest-wasted-bytes 10485760 \
+    nginx:latest`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCICmd,
 }
 
 func init() {
-	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum efficiency score (0.0-1.0)")
-	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum allowed wasted bytes")
-	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size (0.0-1.0)")
+	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (config default: 0.9)")
+	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum allowed wasted bytes (0 disables the rule)")
+	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule)")
 
 	rootCmd.AddCommand(ciCmd)
 }

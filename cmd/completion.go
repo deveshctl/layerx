@@ -15,26 +15,25 @@ func init() {
 var completionCmd = &cobra.Command{
 	Use:   "completion [bash|zsh|fish|powershell]",
 	Short: "Generate shell completion script",
-	Long: `Generate a completion script for the specified shell.
+	Long: `Generate an autocompletion script for the specified shell.
 
-To load completions:
+The script enables tab completion for subcommands, flags, and image
+references (read from "docker images") in your current shell session.`,
+	Example: `  # Bash (current session)
+  source <(layerx completion bash)
 
-Bash:
-  $ source <(layerx completion bash)
-  # Or install permanently:
-  $ layerx completion bash > /etc/bash_completion.d/layerx
+  # Bash (system-wide install)
+  layerx completion bash | sudo tee /etc/bash_completion.d/layerx
 
-Zsh:
-  $ layerx completion zsh > "${fpath[1]}/_layerx"
+  # Zsh
+  layerx completion zsh > "${fpath[1]}/_layerx"
 
-Fish:
-  $ layerx completion fish | source
-  # Or install permanently:
-  $ layerx completion fish > ~/.config/fish/completions/layerx.fish
+  # Fish
+  layerx completion fish | source
+  layerx completion fish > ~/.config/fish/completions/layerx.fish
 
-PowerShell:
-  PS> layerx completion powershell | Out-String | Invoke-Expression
-`,
+  # PowerShell
+  layerx completion powershell | Out-String | Invoke-Expression`,
 	DisableFlagsInUseLine: true,
 	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 	Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),

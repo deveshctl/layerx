@@ -15,13 +15,26 @@ var flagJSON string
 var rootCmd = &cobra.Command{
 	Use:   "layerx [image]",
 	Short: "Inspect Docker image layers",
-	Long:  "A terminal-based Docker image layer inspector.",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInspect,
+	Long: `A terminal-based Docker image layer inspector.
+
+Launches an interactive TUI by default to browse layers, explore filesystem
+changes, view file contents, and surface wasted bytes. Requires a running
+Docker daemon. Use --json to skip the TUI and export analysis to a file,
+or run "layerx ci" for non-interactive CI checks.`,
+	Example: `  # Inspect an image interactively
+  layerx nginx:latest
+
+  # Export analysis as JSON (skips the TUI)
+  layerx --json out.json nginx:latest
+
+  # Run efficiency checks (also triggered by CI=true)
+  layerx ci nginx:latest`,
+	Args: cobra.ExactArgs(1),
+	RunE: runInspect,
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&flagJSON, "json", "", "export analysis to JSON file (skip TUI)")
+	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON and exit (skips TUI)")
 }
 
 func SetVersionInfo(v, c, d string) {
