@@ -237,20 +237,30 @@ func (m model) renderWasteOverlay() string {
 
 	var footer string
 	switch {
+	case m.copyConfirm:
+		copied := lipgloss.NewStyle().Foreground(addedColor).Bold(true).Render("Copied!")
+		pad := 0
+		if innerWidth > lipgloss.Width(copied) {
+			pad = (innerWidth - lipgloss.Width(copied)) / 2
+		}
+		footer = strings.Repeat(" ", pad) + copied
+		lines = append(lines, footer)
 	case originalCount == 0:
 		footer = keyStyle.Render("Esc") + " " + descStyle.Render("close")
+		lines = append(lines, "  "+footer)
 	case m.wasteExpanded:
 		footer = keyStyle.Render("Enter") + " " + descStyle.Render("jump") + dimStyle.Render(" │ ") +
 			keyStyle.Render("a") + " " + descStyle.Render("collapse") + dimStyle.Render(" │ ") +
 			keyStyle.Render("y") + " " + descStyle.Render("copy") + dimStyle.Render(" │ ") +
 			keyStyle.Render("Esc") + " " + descStyle.Render("close")
+		lines = append(lines, "  "+footer)
 	default:
 		footer = keyStyle.Render("Enter") + " " + descStyle.Render("jump") + dimStyle.Render(" │ ") +
 			keyStyle.Render("a") + " " + descStyle.Render("expand") + dimStyle.Render(" │ ") +
 			keyStyle.Render("y") + " " + descStyle.Render("copy") + dimStyle.Render(" │ ") +
 			keyStyle.Render("Esc") + " " + descStyle.Render("close")
+		lines = append(lines, "  "+footer)
 	}
-	lines = append(lines, "  "+footer)
 	lines = append(lines, "")
 
 	body := strings.Join(lines, "\n")

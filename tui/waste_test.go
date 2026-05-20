@@ -306,3 +306,21 @@ func TestWasteRenderNarrow(t *testing.T) {
 	assert.NotContains(t, out, "x4", "narrow render must drop the count column")
 	assert.Contains(t, out, "L1", "layer column always present")
 }
+
+func TestWasteRenderCopyConfirm(t *testing.T) {
+	m := setupModel()
+	m.efficiency = efficiencyOf(3)
+	m.openWaste()
+
+	// Default render: no Copied! banner, footer hints visible.
+	before := m.renderWasteOverlay()
+	assert.NotContains(t, before, "Copied!")
+	assert.Contains(t, before, "jump", "footer hints visible by default")
+
+	// After y: copyConfirm flips, banner replaces footer hints.
+	updated, _ := m.Update(keyPress('y'))
+	um := updated.(model)
+	out := um.renderWasteOverlay()
+	assert.Contains(t, out, "Copied!", "copy banner shows in overlay")
+	assert.NotContains(t, out, "Enter jump", "footer hints replaced while copyConfirm")
+}
