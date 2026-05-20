@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M18] — 2026-05-20
+Waste Navigator — interactive overlay surfacing duplicated files and jumping to the layer that introduced each one.
+
+### Added
+- `w` opens a centred "Wasted Files" overlay listing the worst offenders by total wasted bytes
+- Columns: `path` | wasted bytes | `xN` (layer count) | `L{intro}` (introducing layer, 1-indexed); narrow terminals drop the `xN` column
+- `Enter` jumps to the introducing layer with the cursor positioned on the file; clears any active filter and disables `diff-only` if needed to surface the path
+- `a` toggles between the top 20 (default) and the full list (capped at 500)
+- `y` copies the highlighted path to the clipboard; modal stays open
+- `Esc` closes the overlay; `q`/`Ctrl+C` quit
+- Empty-state message when efficiency is 100%
+- Help overlay gains a "Wasted Files" section; status bar gains `w wasted`
+
+### Technical
+- New `tui/waste.go` (rendering + handler) and `tui/waste_test.go` (unit tests)
+- Reuses existing `image.Efficiency()` output and `FileNode.IntroducedInLayer` (M16) — no changes to `image/`, `ci/`, `config/`, `cmd/`, or `mcp/`
+- Esc cascade extended: viewer → waste → filter → help → quit
+- Update routing precedence: filter → waste → help-toggle → help-swallow → viewer → main switch
+
 ## [M16] — 2026-05-17
 Clipboard, viewer search, and layer origin annotations.
 

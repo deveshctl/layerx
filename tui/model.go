@@ -137,6 +137,10 @@ type model struct {
 	efficiency       *image.EfficiencyResult
 	writeFile        func(string, []byte, os.FileMode) error
 	keys             keyMap
+	showWaste     bool
+	wasteCursor   int
+	wasteExpanded bool
+	wasteRows     []wasteRow
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -299,6 +303,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewOffset = 0
 				return m, nil
 			}
+			if m.showWaste {
+				m.closeWaste()
+				return m, nil
+			}
 			if m.filterActive {
 				m.filterActive = false
 				m.filterQuery = ""
@@ -329,6 +337,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// When filter input is active, capture all keys.
 		if m.filterActive {
 			return m.handleFilterInput(msg)
+		}
+
+		// When waste overlay is open, capture all keys.
+		if m.showWaste {
+			return m.handleWasteOverlay(msg)
 		}
 
 		// Help toggle works when ready.
@@ -405,6 +418,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.focus = focusLayers
 			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.Waste):
+			if m.viewState != viewNone || m.filterActive || m.showHelp || m.showWaste {
+				return m, nil
+			}
+			m.openWaste()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Down):
@@ -1051,6 +1071,9 @@ func (m model) viewReady() tea.View {
 	if m.showHelp {
 		content = m.overlayHelp()
 	}
+	if m.showWaste {
+		content = m.renderWasteOverlay()
+	}
 
 	v := tea.NewView(content)
 	v.AltScreen = true
@@ -1108,7 +1131,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"g/G", "top/bottom"},
 			{"d", "diff"},
 			{"s", "sort"},
-			{"c", "copy"},
+			{"w", "wasted"},
 			{"?", "help"},
 			{"q", "quit"},
 		}
@@ -1119,6 +1142,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"/", "filter"},
 			{"d", "diff"},
 			{"s", "sort"},
+			{"w", "wasted"},
 			{"Enter", "view"},
 			{"x", "save"},
 			{"y", "copy path"},
@@ -1273,6 +1297,13 @@ func (m model) overlayHelp() string {
 		"  " + keyStyle.Render("n / N       ") + descStyle.Render("Next / previous match"),
 		"  " + keyStyle.Render("Y           ") + descStyle.Render("Copy file content to clipboard"),
 		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Return to file tree"),
+		"",
+		"  " + sectionStyle.Render("Wasted Files"),
+		"  " + keyStyle.Render("w           ") + descStyle.Render("Open wasted-files overlay"),
+		"  " + keyStyle.Render("Enter       ") + descStyle.Render("Jump to introducing layer + path"),
+		"  " + keyStyle.Render("a           ") + descStyle.Render("Expand top 20 to up to 500"),
+		"  " + keyStyle.Render("y           ") + descStyle.Render("Copy highlighted path"),
+		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Close overlay"),
 		"",
 		"  " + sectionStyle.Render("Other"),
 		"  " + keyStyle.Render("c           ") + descStyle.Render("Copy layer command to clipboard"),
