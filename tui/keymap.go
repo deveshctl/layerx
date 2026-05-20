@@ -22,6 +22,7 @@ type keyMap struct {
 	ViewerSearch key.Binding
 	NextMatch    key.Binding
 	PrevMatch    key.Binding
+	Waste        key.Binding
 }
 
 func defaultKeys() keyMap {
@@ -93,6 +94,10 @@ func defaultKeys() keyMap {
 		PrevMatch: key.NewBinding(
 			key.WithKeys("N"),
 			key.WithHelp("N", "prev match"),
+		),
+		Waste: key.NewBinding(
+			key.WithKeys("w"),
+			key.WithHelp("w", "wasted files"),
 		),
 	}
 }
