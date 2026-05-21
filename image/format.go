@@ -24,6 +24,18 @@ func FormatBytes(b int64) string {
 	}
 }
 
+// FormatSignedBytes formats b like FormatBytes but with an explicit sign
+// for non-zero values: "+12 MB", "-3.0 MB", "0 B". Used for net deltas.
+func FormatSignedBytes(b int64) string {
+	if b == 0 {
+		return "0 B"
+	}
+	if b < 0 {
+		return "-" + FormatBytes(-b)
+	}
+	return "+" + FormatBytes(b)
+}
+
 func FormatMode(m fs.FileMode) string {
 	var buf [10]byte
 	if m.IsDir() {

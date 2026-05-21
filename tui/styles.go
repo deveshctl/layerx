@@ -38,6 +38,10 @@ var (
 	searchCurrentFg   = lipgloss.Color("#1E1E2E")
 )
 
+// largeStepGrowthFraction is the threshold above which a positive Δfs
+// is colored as a notable size increase. 0.10 = 10% of final live size.
+const largeStepGrowthFraction = 0.10
+
 func renderPanel(content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
 	borderColor := unfocusedBorderColor
 	if focused {
@@ -53,7 +57,7 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 	bottomRight := borderFg.Render("╯")
 	vLine := borderFg.Render("│")
 
-	titleLen := len(title)
+	titleLen := lipgloss.Width(title)
 	fillCount := contentWidth - titleLen - 3
 	if fillCount < 0 {
 		fillCount = 0

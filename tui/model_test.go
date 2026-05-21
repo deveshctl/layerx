@@ -467,13 +467,13 @@ func TestFriendlyErrorGenericReturnsMessage(t *testing.T) {
 func TestRenderLayersDoesNotPanic(t *testing.T) {
 	a := testAnalysis()
 	assert.NotPanics(t, func() {
-		renderLayers(a.Layers, 0, 0, 40, 20, true)
+		renderLayers(a.Layers, 0, 0, 40, 20, true, sizeColDelta, 0)
 	})
 }
 
 func TestRenderLayersEmptyDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
-		renderLayers(nil, 0, 0, 40, 20, false)
+		renderLayers(nil, 0, 0, 40, 20, false, sizeColDelta, 0)
 	})
 }
 

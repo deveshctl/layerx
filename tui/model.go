@@ -45,6 +45,14 @@ const (
 	sortAsc
 )
 
+type sizeColMode int
+
+const (
+	sizeColDelta sizeColMode = iota
+	sizeColBlob
+	sizeColBoth
+)
+
 type viewState int
 
 const (
@@ -141,6 +149,7 @@ type model struct {
 	wasteCursor   int
 	wasteExpanded bool
 	wasteRows     []wasteRow
+	sizeMode      sizeColMode
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -417,6 +426,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusTree
 			} else {
 				m.focus = focusLayers
+			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.SizeColumn):
+			if m.focus != focusLayers {
+				return m, nil
+			}
+			switch m.sizeMode {
+			case sizeColDelta:
+				m.sizeMode = sizeColBlob
+			case sizeColBlob:
+				m.sizeMode = sizeColBoth
+			case sizeColBoth:
+				m.sizeMode = sizeColDelta
 			}
 			return m, nil
 
@@ -707,6 +730,20 @@ func (m model) layers() []image.Layer {
 		return nil
 	}
 	return m.analysis.Layers
+}
+
+// finalLiveSize returns the merged-filesystem live byte total at the
+// last layer, computed as Σ Δfs[i]. Used by the layer panel to color
+// large step growths relative to the image's final on-disk footprint.
+func (m model) finalLiveSize() int64 {
+	if m.analysis == nil {
+		return 0
+	}
+	var total int64
+	for _, l := range m.analysis.Layers {
+		total += l.NetDelta
+	}
+	return total
 }
 
 func (m model) currentTreeRoot() *image.FileNode {
@@ -1032,7 +1069,7 @@ func (m model) viewReady() tea.View {
 
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
-	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers)
+	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
@@ -1308,8 +1345,11 @@ func (m model) overlayHelp() string {
 		"  " + sectionStyle.Render("Other"),
 		"  " + keyStyle.Render("c           ") + descStyle.Render("Copy layer command to clipboard"),
 		"  " + keyStyle.Render("Y           ") + descStyle.Render("Copy layer command (in layers panel)"),
+		"  " + keyStyle.Render("S           ") + descStyle.Render("Toggle size column (Δfs / blob / both)"),
 		"  " + keyStyle.Render("?           ") + descStyle.Render("Toggle this help"),
 		"  " + keyStyle.Render("q / Ctrl+C  ") + descStyle.Render("Quit"),
+		"",
+		"  " + dimStyle.Render("Δfs = net filesystem change; layer 0 is full size."),
 		"",
 		"  " + dimStyle.Render("Press ? or Esc to close"),
 		"",

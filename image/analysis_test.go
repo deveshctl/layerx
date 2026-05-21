@@ -83,3 +83,100 @@ func TestAnalyze_EmptyImage(t *testing.T) {
 	assert.Empty(t, result.StackedTrees)
 	assert.Equal(t, int64(0), result.TotalSize)
 }
+
+func TestAnalyze_NetDelta_SingleLayer(t *testing.T) {
+	layers := []Layer{
+		{
+			Index: 0, ID: "aabb", Size: 1000,
+			Tree: makeTree(
+				makeFile("README", "/README", 800),
+			),
+		},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test:latest")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(800), result.Layers[0].NetDelta)
+	assert.Equal(t, TreeLiveFileBytes(result.StackedTrees[0]), result.Layers[0].NetDelta)
+}
+
+func TestAnalyze_NetDelta_TwoLayersNoOverlap(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Tree: makeTree(makeFile("a", "/a", 100))},
+		{Index: 1, Tree: makeTree(makeFile("b", "/b", 250))},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(100), result.Layers[0].NetDelta)
+	assert.Equal(t, int64(250), result.Layers[1].NetDelta)
+}
+
+func TestAnalyze_NetDelta_OverwriteSameSize(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Tree: makeTree(makeFile("config", "/config", 500))},
+		{Index: 1, Tree: makeTree(makeFile("config", "/config", 500))},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(500), result.Layers[0].NetDelta)
+	assert.Equal(t, int64(0), result.Layers[1].NetDelta)
+}
+
+func TestAnalyze_NetDelta_WhiteoutNegative(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Tree: makeTree(
+			makeDir("var", "/var",
+				makeFile("cache", "/var/cache", 1000),
+			),
+		)},
+		{Index: 1, Tree: makeTree(
+			makeDir("var", "/var",
+				makeFile(".wh.cache", "/var/.wh.cache", 0),
+			),
+		)},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1000), result.Layers[0].NetDelta)
+	assert.Equal(t, int64(-1000), result.Layers[1].NetDelta)
+}
+
+func TestAnalyze_NetDelta_EmptyLayer(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Tree: makeTree(makeFile("a", "/a", 100))},
+		{Index: 1, Tree: makeTree()},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(100), result.Layers[0].NetDelta)
+	assert.Equal(t, int64(0), result.Layers[1].NetDelta)
+}
+
+func TestAnalyze_NetDelta_SumEqualsFinalLiveSize(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Tree: makeTree(
+			makeFile("a", "/a", 300),
+			makeFile("b", "/b", 200),
+		)},
+		{Index: 1, Tree: makeTree(
+			makeFile("c", "/c", 150),
+			makeFile(".wh.b", "/.wh.b", 0),
+		)},
+		{Index: 2, Tree: makeTree(
+			makeFile("a", "/a", 500),
+		)},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test")
+	require.NoError(t, err)
+
+	var sum int64
+	for _, l := range result.Layers {
+		sum += l.NetDelta
+	}
+	final := TreeLiveFileBytes(result.StackedTrees[len(result.StackedTrees)-1])
+	assert.Equal(t, final, sum)
+}

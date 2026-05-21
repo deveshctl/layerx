@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+Layer net-delta column — surfaces per-layer change in merged-filesystem live byte size.
+
+### Added
+- `image.Layer.NetDelta` populated by `Analyze`; layer 0 = full live size, layer i>0 = stacked[i] − stacked[i−1]; negative on cleanup layers
+- `image.TreeLiveFileBytes` walks a tree summing live file bytes (skips directories and `Removed` subtrees)
+- `image.FormatSignedBytes` for "+12 MB" / "-3.0 MB" / "0 B"
+- TUI: layer panel shows signed Δfs column by default; `S` cycles delta → blob → both → delta
+- TUI: focused panel title gains size-mode suffix (`Δfs` / `blob` / `blob+Δfs`); `both` mode falls back to `delta` on narrow panels
+- TUI: Δfs colored green when negative, accent when ≥10% of final live size, dim otherwise
+- TUI: help overlay gains the `S` binding and a one-line note on Δfs convention
+- JSON export: each layer entry gains a `netDelta` field
+
+### Technical
+- New `image/size.go` (domain helper) + `image/size_test.go`; `cmd/json.go` and `tui/layers.go` consume the new field; no changes cross existing architectural rules
+
 ## [M18] — 2026-05-20
 Waste Navigator — interactive overlay surfacing duplicated files and jumping to the layer that introduced each one.
 
