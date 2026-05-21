@@ -19,8 +19,10 @@ func makeLayer(idx int, size, delta int64, cmd string) image.Layer {
 }
 
 func TestFormatLayerLine_DeltaMode_HasSignedColumn(t *testing.T) {
-	l := makeLayer(1, 5_000_000, 3_000_000, "RUN apt-get install foo")
-	out := formatLayerLine(l, false, 60, sizeColDelta, 30_000_000)
+	// Use exact binary-MB multiples so FormatBytes emits clean values.
+	const mb = 1024 * 1024
+	l := makeLayer(1, 5*mb, 3*mb, "RUN apt-get install foo")
+	out := formatLayerLine(l, false, 60, sizeColDelta, 30*mb)
 	// Should contain the signed delta string somewhere.
 	assert.Contains(t, out, "+3.0 MB")
 	// Should NOT contain the blob value when in delta mode.
@@ -28,35 +30,40 @@ func TestFormatLayerLine_DeltaMode_HasSignedColumn(t *testing.T) {
 }
 
 func TestFormatLayerLine_BlobMode_RegressionGuard(t *testing.T) {
-	l := makeLayer(1, 5_000_000, 3_000_000, "RUN apt-get install foo")
-	out := formatLayerLine(l, false, 60, sizeColBlob, 30_000_000)
+	const mb = 1024 * 1024
+	l := makeLayer(1, 5*mb, 3*mb, "RUN apt-get install foo")
+	out := formatLayerLine(l, false, 60, sizeColBlob, 30*mb)
 	// Blob value should appear; signed delta should NOT.
-	assert.Contains(t, out, "4.8 MB")
+	assert.Contains(t, out, "5.0 MB")
 	assert.NotContains(t, out, "+3.0 MB")
 }
 
 func TestFormatLayerLine_BothMode_HasBothValues(t *testing.T) {
-	l := makeLayer(1, 5_000_000, 3_000_000, "RUN apt-get install foo")
-	out := formatLayerLine(l, false, 80, sizeColBoth, 30_000_000)
-	assert.Contains(t, out, "4.8 MB")
+	const mb = 1024 * 1024
+	l := makeLayer(1, 5*mb, 3*mb, "RUN apt-get install foo")
+	out := formatLayerLine(l, false, 80, sizeColBoth, 30*mb)
+	assert.Contains(t, out, "5.0 MB")
 	assert.Contains(t, out, "+3.0 MB")
 }
 
 func TestFormatLayerLine_NegativeDeltaRendersWithMinus(t *testing.T) {
-	l := makeLayer(2, 1_000_000, -2_000_000, "RUN apt-get clean")
-	out := formatLayerLine(l, false, 60, sizeColDelta, 30_000_000)
+	const mb = 1024 * 1024
+	l := makeLayer(2, 1*mb, -2*mb, "RUN apt-get clean")
+	out := formatLayerLine(l, false, 60, sizeColDelta, 30*mb)
 	assert.Contains(t, out, "-2.0 MB")
 }
 
 func TestRenderLayers_BothMode_FallsBackToDelta_OnNarrowPanel(t *testing.T) {
+	const mb = 1024 * 1024
 	layers := []image.Layer{
-		makeLayer(0, 5_000_000, 5_000_000, "FROM alpine"),
-		makeLayer(1, 200_000, -2_000_000, "RUN clean"),
+		makeLayer(0, 5*mb, 5*mb, "FROM alpine"),
+		makeLayer(1, 200_000, -2*mb, "RUN clean"),
 	}
 	// width = 36 → contentWidth = 34, below the < 38 fallback threshold.
-	out := renderLayers(layers, 0, 0, 36, 10, true, sizeColBoth, 8_000_000)
-	// In delta-only fallback the blob value (5.0 MB / 4.8 MB) must be hidden.
-	assert.NotContains(t, out, "4.8 MB")
+	out := renderLayers(layers, 0, 0, 36, 10, true, sizeColBoth, 8*mb)
+	// In delta-only fallback the blob value (5.0 MB) must be hidden;
+	// only the signed delta column is rendered.
+	assert.NotContains(t, out, " 5.0 MB", "blob value (unsigned) must not appear in delta-fallback")
 	assert.Contains(t, out, "+5.0 MB")
 }
 
