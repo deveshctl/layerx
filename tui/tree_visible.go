@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/deveshpharswan/layerx/image"
+import "github.com/deveshctl/layerx/image"
 
 // visibleTree returns a depth-first list of nodes respecting collapsed directories.
 // collapsed[path]==true hides that directory's descendants. Missing keys mean expanded.

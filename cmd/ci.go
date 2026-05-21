@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/deveshpharswan/layerx/ci"
-	"github.com/deveshpharswan/layerx/config"
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/ci"
+	"github.com/deveshctl/layerx/config"
+	"github.com/deveshctl/layerx/image"
 	"github.com/spf13/cobra"
 )
 

@@ -13,7 +13,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 )
 
 // Config holds the parameters needed to start the TUI.

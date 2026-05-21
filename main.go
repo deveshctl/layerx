@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/deveshpharswan/layerx/cmd"
+	"github.com/deveshctl/layerx/cmd"
 )
 
 var (

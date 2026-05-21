@@ -3,7 +3,7 @@ package ci
 import (
 	"fmt"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 )
 
 // Rule evaluates one aspect of image efficiency.

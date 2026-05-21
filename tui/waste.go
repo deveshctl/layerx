@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 )
 
 const (

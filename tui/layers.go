@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 )
 
 func renderLayers(layers []image.Layer, cursor int, offset int, width, height int, focused bool) string {

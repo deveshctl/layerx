@@ -1,4 +1,4 @@
-module github.com/deveshpharswan/layerx
+module github.com/deveshctl/layerx
 
 go 1.26.2
 
