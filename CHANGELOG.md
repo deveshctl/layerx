@@ -17,6 +17,7 @@ Layer net-delta column — surfaces per-layer change in merged-filesystem live b
 
 ### Technical
 - New `image/size.go` (domain helper) + `image/size_test.go`; `cmd/json.go` and `tui/layers.go` consume the new field; no changes cross existing architectural rules
+- `tui/help.go` extracted from `tui/model.go`; column-rendering loop generalised to handle 1–N columns safely; help-popup width clamp simplified (no redundant floor that could exceed screen width)
 
 ## [M18] — 2026-05-20
 Waste Navigator — interactive overlay surfacing duplicated files and jumping to the layer that introduced each one.

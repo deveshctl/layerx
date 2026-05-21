@@ -192,8 +192,8 @@ func (m model) overlayHelp() string {
 	body.WriteString(st.title.Render("layerx — Keyboard Shortcuts"))
 	body.WriteString("\n\n")
 
-	if m.width >= helpMultiColumnMinWidth {
-		cols := helpLayoutColumns(sections)
+	cols := helpLayoutColumns(sections)
+	if m.width >= helpMultiColumnMinWidth && len(cols) >= 2 {
 		colBodies := make([]string, len(cols))
 		maxH := 0
 		for i, group := range cols {
@@ -202,18 +202,14 @@ func (m model) overlayHelp() string {
 				maxH = h
 			}
 		}
-		joined := lipgloss.JoinHorizontal(lipgloss.Top,
-			padHelpColumn(colBodies[0], maxH),
-			strings.Repeat(" ", helpColumnGap),
-			padHelpColumn(colBodies[1], maxH),
-		)
-		if len(colBodies) > 2 {
-			joined = lipgloss.JoinHorizontal(lipgloss.Top, joined,
-				strings.Repeat(" ", helpColumnGap),
-				padHelpColumn(colBodies[2], maxH),
-			)
+		parts := make([]string, 0, len(colBodies)*2-1)
+		for i, cb := range colBodies {
+			if i > 0 {
+				parts = append(parts, strings.Repeat(" ", helpColumnGap))
+			}
+			parts = append(parts, padHelpColumn(cb, maxH))
 		}
-		body.WriteString(joined)
+		body.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, parts...))
 	} else {
 		body.WriteString(renderHelpSectionsVertical(sections, st))
 	}
@@ -238,11 +234,8 @@ func (m model) overlayHelp() string {
 	if boxWidth < 56 {
 		boxWidth = 56
 	}
-	if boxWidth > m.width-4 {
-		boxWidth = m.width - 4
-	}
-	if boxWidth < 40 {
-		boxWidth = 40
+	if maxBox := m.width - 4; maxBox > 0 && boxWidth > maxBox {
+		boxWidth = maxBox
 	}
 	boxHeight := lipgloss.Height(content) + 2
 

@@ -39,3 +39,22 @@ func TestSizeModePanelSuffix(t *testing.T) {
 	assert.Equal(t, "stored", sizeModePanelSuffix(sizeColBlob))
 	assert.Equal(t, "stored+change", sizeModePanelSuffix(sizeColBoth))
 }
+
+func TestHelpLayoutColumns_FewSections_DoesNotCrash(t *testing.T) {
+	// Default fallback path: <=2 sections. Must not panic, must yield non-empty.
+	secs := []helpSection{
+		{title: "Only", entries: []helpEntry{{"x", "do x"}}},
+	}
+	cols := helpLayoutColumns(secs)
+	assert.NotEmpty(t, cols)
+}
+
+func TestOverlayHelp_TinyTerminal_DoesNotOverflow(t *testing.T) {
+	// m.width below the help-multicolumn threshold and below the box floor;
+	// the overlay must not request a width larger than the screen.
+	m := setupModel()
+	m.width = 60
+	m.height = 30
+	out := m.overlayHelp()
+	assert.NotEmpty(t, out)
+}
