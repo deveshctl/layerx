@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 )
 
 type jsonExport struct {

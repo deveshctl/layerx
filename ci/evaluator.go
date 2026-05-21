@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 )
 
 // Report holds the results of all rule evaluations.

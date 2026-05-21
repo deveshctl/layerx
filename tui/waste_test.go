@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

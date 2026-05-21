@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/deveshpharswan/layerx/image"
+	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

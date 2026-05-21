@@ -14,7 +14,7 @@ Single binary. Zero runtime dependencies beyond a running Docker daemon.
 
 ```bash
 # macOS / Linux
-brew install deveshpharswan/tap/layerx
+brew install deveshctl/tap/layerx
 
 # Try it
 layerx nginx:latest
@@ -74,13 +74,13 @@ Docker must be installed and running before using layerx.
 ### Homebrew (macOS & Linux)
 
 ```bash
-brew install deveshpharswan/tap/layerx
+brew install deveshctl/tap/layerx
 ```
 
 ### Scoop (Windows)
 
 ```bash
-scoop bucket add layerx https://github.com/deveshpharswan/scoop-bucket
+scoop bucket add layerx https://github.com/deveshctl/scoop-bucket
 scoop install layerx
 ```
 
@@ -88,13 +88,13 @@ scoop install layerx
 
 **amd64:**
 ```bash
-curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.deb
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.deb
 sudo dpkg -i layerx_1.0.0_linux_amd64.deb
 ```
 
 **arm64:**
 ```bash
-curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.deb
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.deb
 sudo dpkg -i layerx_1.0.0_linux_arm64.deb
 ```
 
@@ -102,26 +102,26 @@ sudo dpkg -i layerx_1.0.0_linux_arm64.deb
 
 **amd64:**
 ```bash
-curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.rpm
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.rpm
 sudo rpm -i layerx_1.0.0_linux_amd64.rpm
 ```
 
 **arm64:**
 ```bash
-curl -LO https://github.com/deveshpharswan/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.rpm
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.rpm
 sudo rpm -i layerx_1.0.0_linux_arm64.rpm
 ```
 
 ### Direct Download
 
-Download a prebuilt binary from [Releases](https://github.com/deveshpharswan/layerx/releases) for your platform (Linux, macOS, Windows — amd64 and arm64).
+Download a prebuilt binary from [Releases](https://github.com/deveshctl/layerx/releases) for your platform (Linux, macOS, Windows — amd64 and arm64).
 
 ### Build from Source
 
 Requires Go 1.26.2+:
 
 ```bash
-go install github.com/deveshpharswan/layerx@latest
+go install github.com/deveshctl/layerx@latest
 ```
 
 ---
@@ -232,8 +232,8 @@ layerx is under active development. Current milestone progress:
 
 Before tagging the first release, create these two public repositories and configure the secret:
 
-1. Create [`github.com/deveshpharswan/homebrew-tap`](https://github.com/deveshpharswan/homebrew-tap) (public, empty)
-2. Create [`github.com/deveshpharswan/scoop-bucket`](https://github.com/deveshpharswan/scoop-bucket) (public, empty)
+1. Create [`github.com/deveshctl/homebrew-tap`](https://github.com/deveshctl/homebrew-tap) (public, empty)
+2. Create [`github.com/deveshctl/scoop-bucket`](https://github.com/deveshctl/scoop-bucket) (public, empty)
 3. Create a Personal Access Token with `repo` scope → add as `TAP_GITHUB_TOKEN` in repo **Settings → Secrets and Variables → Actions**
 
 Then push a `v*` tag and the [release workflow](.github/workflows/release.yml) handles the rest.
