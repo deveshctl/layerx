@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Changed
+- Release artifact names dropped the version segment: `layerx_linux_amd64.deb` (was `layerx_1.1.0_linux_amd64.deb`). Applies to v1.1.1+.
+- README install snippets now use `/releases/latest/download/<name>` so they auto-track the latest release. Older releases keep their versioned filenames.
+
 ## [M19] — 2026-05-21
 Layer net-delta column — surfaces per-layer change in merged-filesystem live byte size.
 
