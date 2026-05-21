@@ -14,8 +14,8 @@ func TestBuildJSONExport_BasicStructure(t *testing.T) {
 		TotalSize:    100000,
 		StackedTrees: []*image.FileTree{image.NewFileTree(), image.NewFileTree()},
 		Layers: []image.Layer{
-			{Index: 0, ID: "aabbccddee11", Size: 60000, Command: "/bin/sh -c apt-get update"},
-			{Index: 1, ID: "ff0011223344", Size: 40000, Command: "/bin/sh -c #(nop) CMD"},
+			{Index: 0, ID: "aabbccddee11", Size: 60000, NetDelta: 60000, Command: "/bin/sh -c apt-get update"},
+			{Index: 1, ID: "ff0011223344", Size: 40000, NetDelta: -5000, Command: "/bin/sh -c #(nop) CMD"},
 		},
 	}
 	efficiency := &image.EfficiencyResult{
@@ -38,6 +38,8 @@ func TestBuildJSONExport_BasicStructure(t *testing.T) {
 	require.Len(t, export.Layers, 2)
 	assert.Equal(t, "aabbccddee11", export.Layers[0].ID)
 	assert.Equal(t, int64(60000), export.Layers[0].Size)
+	assert.Equal(t, int64(60000), export.Layers[0].NetDelta)
+	assert.Equal(t, int64(-5000), export.Layers[1].NetDelta)
 }
 
 func TestBuildJSONExport_EmptyWastedFiles(t *testing.T) {

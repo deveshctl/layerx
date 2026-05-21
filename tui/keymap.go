@@ -23,6 +23,7 @@ type keyMap struct {
 	NextMatch    key.Binding
 	PrevMatch    key.Binding
 	Waste        key.Binding
+	SizeColumn   key.Binding
 }
 
 func defaultKeys() keyMap {
@@ -98,6 +99,10 @@ func defaultKeys() keyMap {
 		Waste: key.NewBinding(
 			key.WithKeys("w"),
 			key.WithHelp("w", "wasted files"),
+		),
+		SizeColumn: key.NewBinding(
+			key.WithKeys("S"),
+			key.WithHelp("S", "size display"),
 		),
 	}
 }

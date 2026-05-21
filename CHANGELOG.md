@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [M19] — 2026-05-21
+Layer net-delta column — surfaces per-layer change in merged-filesystem live byte size.
+
+### Added
+- `image.Layer.NetDelta` populated by `Analyze`; layer 0 = full live size, layer i>0 = stacked[i] − stacked[i−1]; negative on cleanup layers
+- `image.TreeLiveFileBytes` walks a tree summing live file bytes (skips directories and `Removed` subtrees)
+- `image.FormatSignedBytes` for "+12 MB" / "-3.0 MB" / "0 B"
+- TUI: layer panel shows signed **Change** column by default (`S` cycles Change → Stored → both); panel title uses plain labels (`change` / `stored` / `stored+change`)
+- TUI: **Change** colored green when negative, accent when ≥10% of final live size, dim otherwise; `both` mode falls back to Change on narrow panels
+- TUI: help overlay uses multi-column layout on wide terminals; dedicated **Layers** section; footnote explains Change vs Stored
+- TUI: status bar shows **change** or **stored** for the selected layer when the layers panel is focused
+- JSON export: each layer entry gains a `netDelta` field
+
+### Technical
+- New `image/size.go` (domain helper) + `image/size_test.go`; `cmd/json.go` and `tui/layers.go` consume the new field; no changes cross existing architectural rules
+- `tui/help.go` extracted from `tui/model.go`; column-rendering loop generalised to handle 1–N columns safely; help-popup width clamp simplified (no redundant floor that could exceed screen width)
+
 ## [M18] — 2026-05-20
 Waste Navigator — interactive overlay surfacing duplicated files and jumping to the layer that introduced each one.
 

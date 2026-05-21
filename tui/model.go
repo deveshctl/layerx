@@ -45,6 +45,14 @@ const (
 	sortAsc
 )
 
+type sizeColMode int
+
+const (
+	sizeColDelta sizeColMode = iota
+	sizeColBlob
+	sizeColBoth
+)
+
 type viewState int
 
 const (
@@ -141,6 +149,7 @@ type model struct {
 	wasteCursor   int
 	wasteExpanded bool
 	wasteRows     []wasteRow
+	sizeMode      sizeColMode
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -417,6 +426,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusTree
 			} else {
 				m.focus = focusLayers
+			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.SizeColumn):
+			if m.focus != focusLayers {
+				return m, nil
+			}
+			switch m.sizeMode {
+			case sizeColDelta:
+				m.sizeMode = sizeColBlob
+			case sizeColBlob:
+				m.sizeMode = sizeColBoth
+			case sizeColBoth:
+				m.sizeMode = sizeColDelta
 			}
 			return m, nil
 
@@ -707,6 +730,20 @@ func (m model) layers() []image.Layer {
 		return nil
 	}
 	return m.analysis.Layers
+}
+
+// finalLiveSize returns the merged-filesystem live byte total at the
+// last layer, computed as Σ Δfs[i]. Used by the layer panel to color
+// large step growths relative to the image's final on-disk footprint.
+func (m model) finalLiveSize() int64 {
+	if m.analysis == nil {
+		return 0
+	}
+	var total int64
+	for _, l := range m.analysis.Layers {
+		total += l.NetDelta
+	}
+	return total
 }
 
 func (m model) currentTreeRoot() *image.FileNode {
@@ -1032,7 +1069,7 @@ func (m model) viewReady() tea.View {
 
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
-	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers)
+	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
@@ -1082,11 +1119,17 @@ func (m model) viewReady() tea.View {
 
 func (m model) leftPanelWidth() int {
 	w := m.width * 35 / 100
+	mx := 44
+	if m.sizeMode == sizeColBoth {
+		// Both columns need ~25 fixed chars; widen so the command column
+		// stays readable on terminals that can spare it.
+		mx = 56
+	}
 	if w < 24 {
 		w = 24
 	}
-	if w > 44 {
-		w = 44
+	if w > mx {
+		w = mx
 	}
 	return w
 }
@@ -1129,6 +1172,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
 			{"g/G", "top/bottom"},
+			{"S", "size"},
 			{"d", "diff"},
 			{"s", "sort"},
 			{"w", "wasted"},
@@ -1205,7 +1249,16 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			size = image.FormatBytes(layers[m.layerCursor].Size)
 		}
 		rightHighlight := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Bold(true).Render("Layer " + layerNum)
-		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor).Render("/" + layerTotal + " · " + size)
+		sizeLabel := "stored " + size
+		if m.focus == focusLayers && m.layerCursor < len(layers) {
+			switch m.sizeMode {
+			case sizeColDelta:
+				sizeLabel = "change " + image.FormatSignedBytes(layers[m.layerCursor].NetDelta)
+			case sizeColBoth:
+				sizeLabel = "stored " + size + " · change " + image.FormatSignedBytes(layers[m.layerCursor].NetDelta)
+			}
+		}
+		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor).Render("/" + layerTotal + " · " + sizeLabel)
 		right = badges + rightHighlight + rightDim + " "
 	}
 
@@ -1261,68 +1314,6 @@ func (m model) renderViewerStatusBar() string {
 
 	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
-}
-
-func (m model) overlayHelp() string {
-	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor)
-	descStyle := lipgloss.NewStyle().Foreground(fileNameColor)
-	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
-	sectionStyle := lipgloss.NewStyle().Foreground(modifiedColor).Bold(true)
-
-	lines := []string{
-		"",
-		"  " + titleStyle.Render("layerx — Keyboard Shortcuts"),
-		"",
-		"  " + sectionStyle.Render("Navigation"),
-		"  " + keyStyle.Render("j / k       ") + descStyle.Render("Move cursor down / up"),
-		"  " + keyStyle.Render("g / G       ") + descStyle.Render("Jump to first / last item"),
-		"  " + keyStyle.Render("Tab         ") + descStyle.Render("Switch panel (layers ↔ tree)"),
-		"",
-		"  " + sectionStyle.Render("File Tree"),
-		"  " + keyStyle.Render("/           ") + descStyle.Render("Search files (substring filter)"),
-		"  " + keyStyle.Render("Enter       ") + descStyle.Render("View file / expand or collapse folder"),
-		"  " + dimStyle.Render("             (sort, filter, and diff-only use a flat list)"),
-		"  " + keyStyle.Render("Backspace   ") + descStyle.Render("Clear active filter"),
-		"  " + keyStyle.Render("d           ") + descStyle.Render("Show only changed files"),
-		"  " + keyStyle.Render("s           ") + descStyle.Render("Sort by size (↓ → ↑ → off)"),
-		"  " + keyStyle.Render("x           ") + descStyle.Render("Save file to current directory"),
-		"  " + keyStyle.Render("y           ") + descStyle.Render("Copy file path to clipboard"),
-		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Clear filter / close viewer"),
-		"",
-		"  " + sectionStyle.Render("File Viewer"),
-		"  " + keyStyle.Render("j / k       ") + descStyle.Render("Scroll down / up"),
-		"  " + keyStyle.Render("g / G       ") + descStyle.Render("Jump to top / bottom"),
-		"  " + keyStyle.Render("/           ") + descStyle.Render("Search in file"),
-		"  " + keyStyle.Render("n / N       ") + descStyle.Render("Next / previous match"),
-		"  " + keyStyle.Render("Y           ") + descStyle.Render("Copy file content to clipboard"),
-		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Return to file tree"),
-		"",
-		"  " + sectionStyle.Render("Wasted Files"),
-		"  " + keyStyle.Render("w           ") + descStyle.Render("Open wasted-files overlay"),
-		"  " + keyStyle.Render("Enter       ") + descStyle.Render("Jump to introducing layer + path"),
-		"  " + keyStyle.Render("a           ") + descStyle.Render("Expand top 20 to up to 500"),
-		"  " + keyStyle.Render("y           ") + descStyle.Render("Copy highlighted path"),
-		"  " + keyStyle.Render("Esc         ") + descStyle.Render("Close overlay"),
-		"",
-		"  " + sectionStyle.Render("Other"),
-		"  " + keyStyle.Render("c           ") + descStyle.Render("Copy layer command to clipboard"),
-		"  " + keyStyle.Render("Y           ") + descStyle.Render("Copy layer command (in layers panel)"),
-		"  " + keyStyle.Render("?           ") + descStyle.Render("Toggle this help"),
-		"  " + keyStyle.Render("q / Ctrl+C  ") + descStyle.Render("Quit"),
-		"",
-		"  " + dimStyle.Render("Press ? or Esc to close"),
-		"",
-	}
-
-	body := strings.Join(lines, "\n")
-
-	boxWidth := 56
-	boxHeight := len(lines)
-
-	popup := renderPanel(body, "Help", true, boxWidth, boxHeight, false, false)
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 }
 
 func (m model) fetchFileContent(path string) tea.Cmd {

@@ -30,11 +30,12 @@ type jsonWastedFile struct {
 }
 
 type jsonLayer struct {
-	Index   int        `json:"index"`
-	ID      string     `json:"id"`
-	Size    int64      `json:"size"`
-	Command string     `json:"command"`
-	Files   []jsonFile `json:"files"`
+	Index    int        `json:"index"`
+	ID       string     `json:"id"`
+	Size     int64      `json:"size"`
+	NetDelta int64      `json:"netDelta"`
+	Command  string     `json:"command"`
+	Files    []jsonFile `json:"files"`
 }
 
 type jsonFile struct {
@@ -95,11 +96,12 @@ func buildJSONExport(analysis *image.Analysis, efficiency *image.EfficiencyResul
 
 	for i, layer := range analysis.Layers {
 		jl := jsonLayer{
-			Index:   layer.Index,
-			ID:      layer.ID,
-			Size:    layer.Size,
-			Command: layer.Command,
-			Files:   []jsonFile{},
+			Index:    layer.Index,
+			ID:       layer.ID,
+			Size:     layer.Size,
+			NetDelta: layer.NetDelta,
+			Command:  layer.Command,
+			Files:    []jsonFile{},
 		}
 		if i < len(analysis.StackedTrees) && analysis.StackedTrees[i] != nil && analysis.StackedTrees[i].Root != nil {
 			collectFiles(analysis.StackedTrees[i].Root, &jl.Files)

@@ -23,6 +23,7 @@ func AnalyzeWithProgress(ctx context.Context, resolver Resolver, imageRef string
 	}
 
 	stacked := Stack(layers)
+	assignNetDeltas(layers, stacked)
 
 	var totalSize int64
 	for _, l := range layers {

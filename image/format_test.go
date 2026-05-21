@@ -31,3 +31,24 @@ func TestFormatBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatSignedBytes(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		{0, "0 B"},
+		{1, "+1 B"},
+		{1024, "+1.0 KB"},
+		{1572864, "+1.5 MB"},
+		{-1, "-1 B"},
+		{-1024, "-1.0 KB"},
+		{-3145728, "-3.0 MB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, FormatSignedBytes(tt.input))
+		})
+	}
+}
