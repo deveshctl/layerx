@@ -70,14 +70,14 @@ func TestRenderLayers_BothMode_FallsBackToDelta_OnNarrowPanel(t *testing.T) {
 func TestRenderLayers_FocusedTitle_ReflectsSizeMode(t *testing.T) {
 	layers := []image.Layer{makeLayer(0, 1000, 1000, "FROM scratch")}
 	out := renderLayers(layers, 0, 0, 60, 5, true, sizeColDelta, 1000)
-	assert.Contains(t, out, "Δfs")
+	assert.Contains(t, out, sizeModeLabelChange)
 
 	out = renderLayers(layers, 0, 0, 60, 5, true, sizeColBlob, 1000)
-	assert.Contains(t, out, "blob")
-	assert.False(t, strings.Contains(out, "Δfs"), "blob mode title should not contain Δfs")
+	assert.Contains(t, out, sizeModeLabelStored)
+	assert.False(t, strings.Contains(out, sizeModeLabelChange), "stored mode title should not show change label")
 
 	out = renderLayers(layers, 0, 0, 60, 5, true, sizeColBoth, 1000)
-	assert.Contains(t, out, "blob+Δfs")
+	assert.Contains(t, out, sizeModeLabelBoth)
 }
 
 // --- S key behavior ---------------------------------------------------------

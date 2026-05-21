@@ -102,7 +102,7 @@ func defaultKeys() keyMap {
 		),
 		SizeColumn: key.NewBinding(
 			key.WithKeys("S"),
-			key.WithHelp("S", "size column"),
+			key.WithHelp("S", "size display"),
 		),
 	}
 }

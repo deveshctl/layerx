@@ -9,10 +9,10 @@ Layer net-delta column — surfaces per-layer change in merged-filesystem live b
 - `image.Layer.NetDelta` populated by `Analyze`; layer 0 = full live size, layer i>0 = stacked[i] − stacked[i−1]; negative on cleanup layers
 - `image.TreeLiveFileBytes` walks a tree summing live file bytes (skips directories and `Removed` subtrees)
 - `image.FormatSignedBytes` for "+12 MB" / "-3.0 MB" / "0 B"
-- TUI: layer panel shows signed Δfs column by default; `S` cycles delta → blob → both → delta
-- TUI: focused panel title gains size-mode suffix (`Δfs` / `blob` / `blob+Δfs`); `both` mode falls back to `delta` on narrow panels
-- TUI: Δfs colored green when negative, accent when ≥10% of final live size, dim otherwise
-- TUI: help overlay gains the `S` binding and a one-line note on Δfs convention
+- TUI: layer panel shows signed **Change** column by default (`S` cycles Change → Stored → both); panel title uses plain labels (`change` / `stored` / `stored+change`)
+- TUI: **Change** colored green when negative, accent when ≥10% of final live size, dim otherwise; `both` mode falls back to Change on narrow panels
+- TUI: help overlay uses multi-column layout on wide terminals; dedicated **Layers** section; footnote explains Change vs Stored
+- TUI: status bar shows **change** or **stored** for the selected layer when the layers panel is focused
 - JSON export: each layer entry gains a `netDelta` field
 
 ### Technical

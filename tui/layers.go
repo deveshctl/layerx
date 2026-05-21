@@ -54,14 +54,7 @@ func renderLayers(layers []image.Layer, cursor int, offset int, width, height in
 		title = fmt.Sprintf("Layers %d/%d", cursor+1, len(layers))
 	}
 	if focused {
-		switch effMode {
-		case sizeColDelta:
-			title += " · Δfs"
-		case sizeColBlob:
-			title += " · blob"
-		case sizeColBoth:
-			title += " · blob+Δfs"
-		}
+		title += " · " + sizeModePanelSuffix(effMode)
 	}
 
 	hasAbove := offset > 0
