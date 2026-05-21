@@ -156,6 +156,31 @@ func TestAnalyze_NetDelta_EmptyLayer(t *testing.T) {
 	assert.Equal(t, int64(0), result.Layers[1].NetDelta)
 }
 
+func TestAnalyze_NetDelta_OpaqueWhiteoutNegative(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Tree: makeTree(
+			makeDir("var", "/var",
+				makeDir("cache", "/var/cache",
+					makeFile("a", "/var/cache/a", 600),
+					makeFile("b", "/var/cache/b", 400),
+				),
+			),
+		)},
+		{Index: 1, Tree: makeTree(
+			makeDir("var", "/var",
+				makeDir("cache", "/var/cache",
+					makeFile(".wh..wh..opq", "/var/cache/.wh..wh..opq", 0),
+				),
+			),
+		)},
+	}
+	result, err := Analyze(context.Background(), &mockResolver{layers: layers}, "test")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1000), result.Layers[0].NetDelta)
+	assert.Equal(t, int64(-1000), result.Layers[1].NetDelta, "opaque whiteout removes all dir contents")
+}
+
 func TestAnalyze_NetDelta_SumEqualsFinalLiveSize(t *testing.T) {
 	layers := []Layer{
 		{Index: 0, Tree: makeTree(

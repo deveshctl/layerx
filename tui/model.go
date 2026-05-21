@@ -1119,11 +1119,17 @@ func (m model) viewReady() tea.View {
 
 func (m model) leftPanelWidth() int {
 	w := m.width * 35 / 100
+	mx := 44
+	if m.sizeMode == sizeColBoth {
+		// Both columns need ~25 fixed chars; widen so the command column
+		// stays readable on terminals that can spare it.
+		mx = 56
+	}
 	if w < 24 {
 		w = 24
 	}
-	if w > 44 {
-		w = 44
+	if w > mx {
+		w = mx
 	}
 	return w
 }

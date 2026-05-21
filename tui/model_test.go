@@ -314,6 +314,22 @@ func TestLeftPanelWidth(t *testing.T) {
 	}
 }
 
+func TestLeftPanelWidth_BothMode_WiderCap(t *testing.T) {
+	tests := []struct {
+		totalWidth int
+		want       int
+	}{
+		{50, 24},  // still floored at 24
+		{120, 42}, // 35% = 42, under both-mode cap of 56
+		{160, 56}, // 35% = 56, exactly the cap
+		{240, 56}, // 35% = 84 → clamped to both-mode max 56
+	}
+	for _, tc := range tests {
+		m := model{width: tc.totalWidth, sizeMode: sizeColBoth}
+		assert.Equal(t, tc.want, m.leftPanelWidth(), "both width=%d", tc.totalWidth)
+	}
+}
+
 // --- View: loading state -----------------------------------------------------
 
 func TestViewLoadingContainsLoadingAndImageRef(t *testing.T) {

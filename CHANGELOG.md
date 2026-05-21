@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [M19] — 2026-05-21
 Layer net-delta column — surfaces per-layer change in merged-filesystem live byte size.
 
 ### Added
