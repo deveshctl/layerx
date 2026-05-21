@@ -88,28 +88,28 @@ scoop install layerx
 
 **amd64:**
 ```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.deb
-sudo dpkg -i layerx_1.0.0_linux_amd64.deb
+curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
+sudo dpkg -i layerx_linux_amd64.deb
 ```
 
 **arm64:**
 ```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.deb
-sudo dpkg -i layerx_1.0.0_linux_arm64.deb
+curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_arm64.deb
+sudo dpkg -i layerx_linux_arm64.deb
 ```
 
 ### RHEL / Fedora (.rpm)
 
 **amd64:**
 ```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_amd64.rpm
-sudo rpm -i layerx_1.0.0_linux_amd64.rpm
+curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.rpm
+sudo rpm -i layerx_linux_amd64.rpm
 ```
 
 **arm64:**
 ```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.0.0/layerx_1.0.0_linux_arm64.rpm
-sudo rpm -i layerx_1.0.0_linux_arm64.rpm
+curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_arm64.rpm
+sudo rpm -i layerx_linux_arm64.rpm
 ```
 
 ### Direct Download

@@ -18,7 +18,7 @@ builds:
 archives:
   - formats:
       - tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         formats:
@@ -26,7 +26,7 @@ archives:
 
 nfpms:
   - package_name: layerx
-    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    file_name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - deb
       - rpm
