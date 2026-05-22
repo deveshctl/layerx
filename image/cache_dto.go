@@ -107,7 +107,7 @@ func fromCachedNode(c *cachedNode) *FileNode {
 		IsDir: c.IsDir,
 	}
 	for _, child := range c.Children {
-		n.AddChild(fromCachedNode(child))
+		n.Children = append(n.Children, fromCachedNode(child))
 	}
 	return n
 }

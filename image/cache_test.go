@@ -78,5 +78,111 @@ func TestCacheEnvelope_HoldsMetadata(t *testing.T) {
 	}
 	assert.Equal(t, "ff00", env.Digest)
 	assert.Equal(t, SchemaVersion, env.SchemaVersion)
-	assert.WithinDuration(t, now, env.CachedAt, time.Second)
+	assert.Equal(t, now, env.CachedAt)
+}
+
+// TestCacheDTO_RoundTrip_AllPersistableFields is the silent-drift guard.
+//
+// IMPORTANT for future maintainers: when adding a field to FileNode or Layer
+// that should persist across cache round-trips, you MUST update BOTH
+// cache_dto.go (cachedLayer/cachedNode + the to/from converters) AND this
+// test (set the field on the input and assert it on the rehydrated output).
+// Fields deliberately excluded from persistence (DiffType, IntroducedInLayer,
+// NetDelta) are covered by TestCacheDTO_RoundTrip_PreservesPersistedFields.
+func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
+	child := &FileNode{
+		Name:  "sh",
+		Path:  "/bin/sh",
+		Size:  800,
+		Mode:  fs.FileMode(0o755),
+		UID:   1,
+		GID:   2,
+		IsDir: false,
+	}
+	bin := &FileNode{
+		Name:  "bin",
+		Path:  "/bin",
+		Size:  4096,
+		Mode:  fs.FileMode(0o755) | fs.ModeDir,
+		UID:   3,
+		GID:   4,
+		IsDir: true,
+	}
+	bin.AddChild(child)
+	root := &FileNode{
+		Name:  "/",
+		Path:  "/",
+		Size:  0,
+		Mode:  fs.FileMode(0o755) | fs.ModeDir,
+		UID:   5,
+		GID:   6,
+		IsDir: true,
+	}
+	root.AddChild(bin)
+
+	layers := []Layer{{
+		Index:   7,
+		ID:      "deadbeef",
+		Size:    9999,
+		Command: "RUN cp /bin/sh /bin/sh",
+		Tree:    &FileTree{Root: root},
+	}}
+
+	dtos := toCachedLayers(layers)
+	rehydrated := fromCachedLayers(dtos)
+
+	require.Len(t, rehydrated, 1)
+	got := rehydrated[0]
+	// Every field on Layer (except deliberately-excluded NetDelta).
+	assert.Equal(t, 7, got.Index)
+	assert.Equal(t, "deadbeef", got.ID)
+	assert.Equal(t, int64(9999), got.Size)
+	assert.Equal(t, "RUN cp /bin/sh /bin/sh", got.Command)
+	require.NotNil(t, got.Tree)
+	require.NotNil(t, got.Tree.Root)
+
+	// Every persistable field on the root FileNode.
+	gotRoot := got.Tree.Root
+	assert.Equal(t, "/", gotRoot.Name)
+	assert.Equal(t, "/", gotRoot.Path)
+	assert.Equal(t, int64(0), gotRoot.Size)
+	assert.Equal(t, fs.FileMode(0o755)|fs.ModeDir, gotRoot.Mode)
+	assert.Equal(t, 5, gotRoot.UID)
+	assert.Equal(t, 6, gotRoot.GID)
+	assert.True(t, gotRoot.IsDir)
+	require.Len(t, gotRoot.Children, 1)
+
+	// Children persisted (via at least one nested child).
+	gotBin := gotRoot.Children[0]
+	assert.Equal(t, "bin", gotBin.Name)
+	assert.Equal(t, "/bin", gotBin.Path)
+	assert.Equal(t, int64(4096), gotBin.Size)
+	assert.Equal(t, fs.FileMode(0o755)|fs.ModeDir, gotBin.Mode)
+	assert.Equal(t, 3, gotBin.UID)
+	assert.Equal(t, 4, gotBin.GID)
+	assert.True(t, gotBin.IsDir)
+	require.Len(t, gotBin.Children, 1)
+
+	gotSh := gotBin.Children[0]
+	assert.Equal(t, "sh", gotSh.Name)
+	assert.Equal(t, "/bin/sh", gotSh.Path)
+	assert.Equal(t, int64(800), gotSh.Size)
+	assert.Equal(t, fs.FileMode(0o755), gotSh.Mode)
+	assert.Equal(t, 1, gotSh.UID)
+	assert.Equal(t, 2, gotSh.GID)
+	assert.False(t, gotSh.IsDir)
+	assert.Empty(t, gotSh.Children)
+}
+
+// TestCacheDTO_RoundTrip_NilRoot_BecomesNilTree documents an asymmetry:
+// a Layer with Tree: &FileTree{Root: nil} (non-nil wrapper, nil Root) round-trips
+// to Tree: nil. toCachedNode(nil) returns nil, so cachedLayer.Tree is nil, and
+// fromCachedLayers leaves the rehydrated Layer.Tree at its zero value.
+func TestCacheDTO_RoundTrip_NilRoot_BecomesNilTree(t *testing.T) {
+	layers := []Layer{{Index: 0, ID: "aa", Tree: &FileTree{Root: nil}}}
+
+	rehydrated := fromCachedLayers(toCachedLayers(layers))
+
+	require.Len(t, rehydrated, 1)
+	assert.Nil(t, rehydrated[0].Tree)
 }
