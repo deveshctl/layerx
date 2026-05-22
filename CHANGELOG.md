@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - New `image.PhaseCacheWarn` progress phase; non-fatal cache I/O failures (load or save) surface as a transient TUI status message instead of being silently dropped.
 
 ### Fixed
+- TUI no longer quits when `q` is typed inside the file-tree filter or the file-viewer search. The global quit binding now defers to the active text-input handler, so queries containing `q` (e.g. `jquery`, `graphql`) can be typed normally. `ctrl+c` continues to quit unconditionally.
 - TOCTOU cache poisoning: `AnalyzeWithOptions` now re-reads `ImageID` after `ResolveWithProgress` and refuses to write the cache if the digest changed mid-run (concurrent `docker pull` retag).
 - Empty / unsafe digests no longer reach the cache key. `normalizeDigest` rejects empty strings, `.`/`..`, and digests containing path separators, so a Resolver returning `("", nil)` cannot poison a shared cache slot and a hostile digest cannot escape the cache root.
 - Transient I/O during `gob.Decode` (permission flip, EBUSY) no longer evicts an otherwise-valid cache file. Only confirmed corruption deletes.

@@ -354,10 +354,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Quit via q or ctrl+c always works.
+		// Quit via q or ctrl+c. When a text input is active (filter or
+		// viewer search), 'q' must reach the input handler so users can
+		// type queries containing 'q' (e.g. "jquery"). ctrl+c still quits.
 		if key.Matches(msg, m.keys.Quit) {
-			m.quitting = true
-			return m, tea.Quit
+			inTextInput := m.filterActive || (m.viewState == viewReady && m.viewSearchActive)
+			if !inTextInput || msg.String() == "ctrl+c" {
+				m.quitting = true
+				return m, tea.Quit
+			}
 		}
 
 		// When filter input is active, capture all keys.
