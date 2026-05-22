@@ -1009,6 +1009,8 @@ func (m model) viewLoading() tea.View {
 		}
 		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
 		lines = append(lines, "    Parsing layers…")
+	case image.PhaseCacheLoad:
+		lines = append(lines, fmt.Sprintf("  %s %s — loaded from cache", frame, m.imageRef))
 	default:
 		sizeInfo := ""
 		if m.imageSize > 0 {
