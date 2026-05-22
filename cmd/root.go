@@ -10,7 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var flagJSON string
+var (
+	flagJSON    string
+	flagNoCache bool
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "layerx [image]",
@@ -35,6 +38,9 @@ or run "layerx ci" for non-interactive CI checks.`,
 
 func init() {
 	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON and exit (skips TUI)")
+	rootCmd.PersistentFlags().BoolVar(&flagNoCache, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
+	rootCmd.PersistentFlags().BoolVar(&flagNoCache, "refresh", false, "alias for --no-cache")
+	_ = rootCmd.PersistentFlags().MarkHidden("refresh")
 }
 
 func SetVersionInfo(v, c, d string) {
@@ -49,7 +55,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
 
 	if flagJSON != "" {
-		return runJSONExport(imageRef, flagJSON)
+		return runJSONExport(imageRef, flagJSON, flagNoCache)
 	}
 
 	cfg, err := config.Load()
@@ -58,7 +64,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	if os.Getenv("CI") == "true" {
-		return executeCICheck(imageRef, cfg, ciCmd)
+		return executeCICheck(imageRef, cfg, ciCmd, flagNoCache)
 	}
 
 	resolver, err := image.NewDockerResolver()
@@ -69,5 +75,6 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
+		NoCache:  flagNoCache,
 	})
 }

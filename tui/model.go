@@ -20,6 +20,7 @@ import (
 type Config struct {
 	ImageRef string
 	Resolver image.Resolver
+	NoCache  bool
 }
 
 type focus int
@@ -150,6 +151,7 @@ type model struct {
 	wasteExpanded bool
 	wasteRows     []wasteRow
 	sizeMode      sizeColMode
+	noCache       bool
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -162,6 +164,7 @@ func NewModel(cfg Config) model {
 		progressCh: ch,
 		writeFile:  os.WriteFile,
 		keys:       defaultKeys(),
+		noCache:    cfg.NoCache,
 	}
 }
 
@@ -187,9 +190,11 @@ func (m model) spinnerTick() tea.Cmd {
 func (m model) fetchAnalysisWithProgress(progressCh chan<- image.ProgressEvent) tea.Cmd {
 	resolver := m.resolver
 	imageRef := m.imageRef
+	noCache := m.noCache
 	return func() tea.Msg {
 		defer close(progressCh)
-		result, err := image.AnalyzeWithProgress(context.Background(), resolver, imageRef, progressCh)
+		result, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+			image.AnalyzeOptions{NoCache: noCache, Progress: progressCh})
 		return analysisMsg{analysis: result, err: err}
 	}
 }

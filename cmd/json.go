@@ -44,13 +44,14 @@ type jsonFile struct {
 	DiffType string `json:"diffType"`
 }
 
-func runJSONExport(imageRef, outputPath string) error {
+func runJSONExport(imageRef, outputPath string, noCache bool) error {
 	resolver, err := image.NewDockerResolver()
 	if err != nil {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
-	analysis, err := image.Analyze(context.Background(), resolver, imageRef)
+	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
 		return err
 	}

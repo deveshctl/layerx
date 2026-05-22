@@ -63,16 +63,17 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	return executeCICheck(imageRef, cfg, cmd)
+	return executeCICheck(imageRef, cfg, cmd, flagNoCache)
 }
 
-func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command) error {
+func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {
 	resolver, err := image.NewDockerResolver()
 	if err != nil {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
-	analysis, err := image.Analyze(context.Background(), resolver, imageRef)
+	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
 		return err
 	}
