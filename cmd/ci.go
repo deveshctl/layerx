@@ -18,20 +18,26 @@ var (
 )
 
 var ciCmd = &cobra.Command{
-	Use:   "ci [image]",
+	Use:   "ci [flags] IMAGE",
 	Short: "Run efficiency checks for CI pipelines",
-	Long: `Evaluates image efficiency against configurable thresholds.
-Exits 0 on pass, 1 on failure.
+	Long: `Evaluate image efficiency against configurable thresholds.
 
-Thresholds can be set via flags or a .layerx.yaml file in the working directory:
+Exits 0 when all rules pass, 1 when any rule fails. Output is plain text
+suitable for CI logs.
+
+Thresholds can be set via flags or a .layerx.yaml file in the working
+directory. Flags take precedence over config values. A missing config
+file is silently ignored and built-in defaults apply.
 
   rules:
     lowest-efficiency: 0.9           # minimum efficiency score (0.0-1.0)
     highest-wasted-bytes: 0          # max wasted bytes (0 = disabled)
     highest-user-wasted-percent: 0.1 # max waste as fraction of total (0.0-1.0)
 
-Flags take precedence over config file values.
-Missing config file is silently ignored (defaults apply).`,
+Cache:
+  Analysis results are cached on disk and reused across runs. Pass
+  --no-cache to force a fresh analysis (useful for pipelines that must
+  re-parse the image after a rebuild within the same digest).`,
 	Example: `  # Run with default thresholds (lowest-efficiency: 0.9)
   layerx ci nginx:latest
 
@@ -42,7 +48,10 @@ Missing config file is silently ignored (defaults apply).`,
   layerx ci \
     --lowest-efficiency 0.9 \
     --highest-wasted-bytes 10485760 \
-    nginx:latest`,
+    nginx:latest
+
+  # Force a fresh analysis, ignoring any cached result
+  layerx ci --no-cache nginx:latest`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCICmd,
 }

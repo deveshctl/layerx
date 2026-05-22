@@ -25,16 +25,30 @@ func noCacheRequested() bool {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "layerx [image]",
+	Use:   "layerx [flags] IMAGE",
 	Short: "Inspect Docker image layers",
-	Long: `A terminal-based Docker image layer inspector.
+	Long: `Inspect a Docker image's layers, filesystem changes, and wasted bytes.
 
-Launches an interactive TUI by default to browse layers, explore filesystem
-changes, view file contents, and surface wasted bytes. Requires a running
-Docker daemon. Use --json to skip the TUI and export analysis to a file,
-or run "layerx ci" for non-interactive CI checks.`,
+By default launches an interactive TUI for browsing layers, viewing file
+contents, and surfacing duplicated or removed files. Requires a running
+Docker daemon. Use --json to skip the TUI and export the analysis, or run
+"layerx ci" for non-interactive efficiency checks.
+
+Cache:
+  Analysis results are cached on disk under the user cache directory
+  (keyed by image digest) so repeat runs skip re-parsing layer tarballs.
+  Use --no-cache to bypass the cache for a single run; the run still
+  refreshes the cache on success.
+
+Environment:
+  CI=true   When set, "layerx IMAGE" runs the ci subcommand instead of
+            launching the TUI. Useful for pipelines that invoke layerx
+            without a subcommand.`,
 	Example: `  # Inspect an image interactively
   layerx nginx:latest
+
+  # Force a fresh analysis, ignoring any cached result
+  layerx --no-cache nginx:latest
 
   # Export analysis as JSON (skips the TUI)
   layerx --json out.json nginx:latest
