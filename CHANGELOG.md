@@ -3,9 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+- Per-image-digest analysis cache: `Analyze*` writes parsed layers to `{LAYERX_CACHE_DIR or os.UserCacheDir()/layerx}/{digest}/layers.gob` and reads them back on the next run. Repeat runs against an unchanged image skip Docker `ImageSave` + tar parse and feel instant.
+- `--no-cache` flag (alias `--refresh`) on the root command and `layerx ci`. Bypasses the cache for the current run; the run still writes the cache on success.
+- New `image.PhaseCacheLoad` progress phase; TUI renders "loaded from cache" briefly on hit.
+
 ### Changed
 - Release artifact names dropped the version segment: `layerx_linux_amd64.deb` (was `layerx_1.1.0_linux_amd64.deb`). Applies to v1.1.1+.
 - README install snippets now use `/releases/latest/download/<name>` so they auto-track the latest release. Older releases keep their versioned filenames.
+
+### Technical
+- New `image/cache.go`, `image/cache_dto.go`, `image/cache_test.go`. Encoding is `encoding/gob` with an envelope holding `digest`, `schemaVersion`, `cachedAt`, and `[]cachedLayer`. Schema mismatch, digest mismatch, and decode errors all delete the offending file and fall through to a cold resolve.
+- `Resolver` gains `ImageID(ctx, ref) (string, error)`. The cache is wired at `image.AnalyzeWithOptions`; existing `Analyze` and `AnalyzeWithProgress` are preserved as shims. Architectural laws unchanged: `image/` still has zero imports of `tui/`, `ci/`, `cmd/`, `config/`.
+- Cached fields per layer: `Index`, `ID`, `Size`, `Command`, parsed `Tree`. NOT cached: `NetDelta`, `DiffType`, `IntroducedInLayer` — recomputed by `Stack()` + `assignNetDeltas()` on every load.
 
 ## [M19] — 2026-05-21
 Layer net-delta column — surfaces per-layer change in merged-filesystem live byte size.
