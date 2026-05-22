@@ -41,7 +41,10 @@ func (m *mockResolver) ImageID(_ context.Context, _ string) (string, error) {
 	if m.imageID != "" {
 		return m.imageID, nil
 	}
-	return "sha256:deadbeef", nil
+	// Default: behave as if the image is not local yet. AnalyzeWithOptions
+	// then skips the cache lookup and falls through to ResolveWithProgress.
+	// Tests that exercise the cache must set imageID explicitly.
+	return "", assert.AnError
 }
 
 func TestAnalyze_Success(t *testing.T) {
