@@ -336,6 +336,7 @@ func TestViewLoadingContainsLoadingAndImageRef(t *testing.T) {
 	m := NewModel(Config{ImageRef: "nginx:latest"})
 	m.width = 120
 	m.height = 40
+	m.loadPhase = image.PhasePulling
 	v := m.View()
 	content := viewContent(v)
 	assert.Contains(t, content, "Pulling")
