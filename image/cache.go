@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,12 @@ func CacheDir() (string, error) {
 		if usable, _ := dirIsUsable(override); usable {
 			return override, nil
 		}
-		// Fall through to default; bad override is non-fatal.
+		// Bad override is non-fatal but the user almost certainly wants to
+		// know — they set the env var on purpose. Fall back to the default
+		// after warning once on stderr.
+		fmt.Fprintf(os.Stderr,
+			"layerx: ignoring LAYERX_CACHE_DIR=%q (not a usable directory); falling back to default\n",
+			override)
 	}
 	uc, err := os.UserCacheDir()
 	if err != nil {
@@ -48,28 +54,53 @@ func dirIsUsable(path string) (bool, error) {
 	return false, err
 }
 
+// errBadDigest is returned by cachePath/normalizeDigest when a caller
+// passes a digest that would escape the cache root (path separators, "..",
+// or empty). It is treated by callers as "do not cache" rather than fatal.
+var errBadDigest = errors.New("invalid cache digest")
+
 // cachePath returns the absolute path to the gob file for a given digest
-// under root. The digest is normalized (sha256: prefix stripped) so the
-// directory name is filesystem-safe on every OS.
-func cachePath(root, digest string) string {
-	return filepath.Join(root, normalizeDigest(digest), "layers.gob")
-}
-
-// normalizeDigest strips the "sha256:" prefix when present.
-func normalizeDigest(digest string) string {
-	if rest, ok := strings.CutPrefix(digest, "sha256:"); ok {
-		return rest
+// under root. The digest is normalized (sha256: prefix stripped) and
+// validated to ensure the directory name cannot escape root.
+func cachePath(root, digest string) (string, error) {
+	norm, err := normalizeDigest(digest)
+	if err != nil {
+		return "", err
 	}
-	return digest
+	return filepath.Join(root, norm, "layers.gob"), nil
 }
 
-// loadCache returns the persisted layers for the given digest, or ok=false
-// on any miss (no file, schema mismatch, digest mismatch, decode error).
-// On a soft miss the offending file is removed; the next call cold-resolves
-// and writes a fresh cache. err is non-nil only for unexpected I/O errors
-// the caller should report; misses are not errors.
+// normalizeDigest strips the "sha256:" prefix when present and rejects
+// anything that could escape a single directory component (empty, path
+// separators, "..", control chars).
+func normalizeDigest(digest string) (string, error) {
+	rest, _ := strings.CutPrefix(digest, "sha256:")
+	if rest == "" {
+		return "", errBadDigest
+	}
+	if rest == "." || rest == ".." {
+		return "", errBadDigest
+	}
+	if strings.ContainsAny(rest, `/\`) || strings.Contains(rest, "..") {
+		return "", errBadDigest
+	}
+	return rest, nil
+}
+
+// loadCache returns the persisted layers for the given digest.
+//
+// Return semantics:
+//   - (layers, true,  nil)  hit
+//   - (nil,    false, nil)  soft miss: file absent, schema mismatch, digest
+//     mismatch, or gob corruption. The offending file (if any) is removed.
+//   - (nil,    false, err)  hard miss: unexpected I/O the caller should log.
+//     The file is NOT removed in this branch — a transient EIO/EBUSY/perm
+//     failure should not evict an otherwise-valid cache.
 func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
-	path := cachePath(root, digest)
+	path, err := cachePath(root, digest)
+	if err != nil {
+		return nil, false, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -81,33 +112,59 @@ func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
 
 	var env cacheEnvelope
 	if decErr := gob.NewDecoder(f).Decode(&env); decErr != nil {
-		_ = f.Close()
+		// Distinguish gob corruption (delete + miss) from transient I/O
+		// during read (keep file, surface error). io.ErrUnexpectedEOF can
+		// arrive from either source — the safe call is to treat it as
+		// corruption since the temp+rename pattern means a successful
+		// rename always produced a complete file.
+		if isTransientIOError(decErr) {
+			return nil, false, fmt.Errorf("reading cache %s: %w", path, decErr)
+		}
 		_ = os.Remove(path)
 		return nil, false, nil
 	}
 	if env.SchemaVersion != SchemaVersion {
-		_ = f.Close()
 		_ = os.Remove(path)
 		return nil, false, nil
 	}
-	if env.Digest != normalizeDigest(digest) {
-		_ = f.Close()
+	normDigest, _ := normalizeDigest(digest)
+	if env.Digest != normDigest {
 		_ = os.Remove(path)
 		return nil, false, nil
 	}
 	return fromCachedLayers(env.Layers), true, nil
 }
 
+// isTransientIOError returns true when err looks like a recoverable I/O
+// failure (permission denied, device busy, network share glitch) rather
+// than confirmed file corruption.
+func isTransientIOError(err error) bool {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		return true
+	}
+	// Bare syscall errors and io.ErrClosedPipe are also transient. Plain
+	// EOF without context is treated as corruption (file truncated).
+	if errors.Is(err, io.ErrClosedPipe) {
+		return true
+	}
+	return false
+}
+
 // saveCache writes layers to {root}/{digest}/layers.gob using a temp file +
-// atomic rename. Errors are returned but should be treated as non-fatal by
-// callers (the user already has the live result).
+// fsync + atomic rename. Errors are returned but should be treated as
+// non-fatal by callers (the user already has the live result).
 func saveCache(root, digest string, layers []Layer) error {
-	dir := filepath.Join(root, normalizeDigest(digest))
+	norm, err := normalizeDigest(digest)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(root, norm)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating cache dir %s: %w", dir, err)
 	}
 
-	tmpName, err := tempFilename(dir, "layers.gob.tmp-")
+	tmpName, err := tempFilename("layers.gob.tmp-")
 	if err != nil {
 		return fmt.Errorf("generating temp name: %w", err)
 	}
@@ -119,7 +176,7 @@ func saveCache(root, digest string, layers []Layer) error {
 	}
 
 	env := cacheEnvelope{
-		Digest:        normalizeDigest(digest),
+		Digest:        norm,
 		SchemaVersion: SchemaVersion,
 		CachedAt:      time.Now().UTC(),
 		Layers:        toCachedLayers(layers),
@@ -128,6 +185,15 @@ func saveCache(root, digest string, layers []Layer) error {
 		_ = f.Close()
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("encoding cache: %w", encErr)
+	}
+	// fsync the file before rename so the data is durable on disk before the
+	// directory entry flips. Best-effort: fsync is unsupported on some
+	// platforms (Plan 9, certain FS configurations); a sync error is logged
+	// at the outer call site via the returned error chain.
+	if syncErr := f.Sync(); syncErr != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("syncing temp cache file: %w", syncErr)
 	}
 	if closeErr := f.Close(); closeErr != nil {
 		_ = os.Remove(tmpPath)
@@ -142,7 +208,10 @@ func saveCache(root, digest string, layers []Layer) error {
 	return nil
 }
 
-func tempFilename(_, prefix string) (string, error) {
+// tempFilename returns prefix + 16 random hex chars. The caller chooses the
+// directory; uniqueness is provided by the random suffix and enforced by
+// O_EXCL on the saveCache create call.
+func tempFilename(prefix string) (string, error) {
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		return "", err

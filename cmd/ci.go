@@ -63,7 +63,7 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	return executeCICheck(imageRef, cfg, cmd, flagNoCache)
+	return executeCICheck(imageRef, cfg, cmd, noCacheRequested())
 }
 
 func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {

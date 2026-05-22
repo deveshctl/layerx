@@ -93,6 +93,10 @@ func TestCacheEnvelope_HoldsMetadata(t *testing.T) {
 // test (set the field on the input and assert it on the rehydrated output).
 // Fields deliberately excluded from persistence (DiffType, IntroducedInLayer,
 // NetDelta) are covered by TestCacheDTO_RoundTrip_PreservesPersistedFields.
+//
+// The test exercises the on-disk round trip via saveCache + loadCache so a
+// gob-incompatible shape (unexported field, channel, function) fails here
+// rather than silently shipping.
 func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 	child := &FileNode{
 		Name:  "sh",
@@ -132,8 +136,12 @@ func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 		Tree:    &FileTree{Root: root},
 	}}
 
-	dtos := toCachedLayers(layers)
-	rehydrated := fromCachedLayers(dtos)
+	cacheRoot := t.TempDir()
+	digest := "sha256:driftguard"
+	require.NoError(t, saveCache(cacheRoot, digest, layers))
+	rehydrated, ok, err := loadCache(cacheRoot, digest)
+	require.NoError(t, err)
+	require.True(t, ok)
 
 	require.Len(t, rehydrated, 1)
 	got := rehydrated[0]
@@ -255,13 +263,16 @@ func TestLoadCache_Miss_NoFile(t *testing.T) {
 func TestLoadCache_SchemaMismatch_DeletesAndMisses(t *testing.T) {
 	root := t.TempDir()
 	digest := "sha256:badschema"
-	path := cachePath(root, digest)
+	path, err := cachePath(root, digest)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 
 	f, err := os.Create(path)
 	require.NoError(t, err)
+	norm, err := normalizeDigest(digest)
+	require.NoError(t, err)
 	env := cacheEnvelope{
-		Digest:        normalizeDigest(digest),
+		Digest:        norm,
 		SchemaVersion: SchemaVersion + 1,
 		CachedAt:      time.Now().UTC(),
 		Layers:        nil,
@@ -279,13 +290,16 @@ func TestLoadCache_SchemaMismatch_DeletesAndMisses(t *testing.T) {
 func TestLoadCache_DigestMismatch_DeletesAndMisses(t *testing.T) {
 	root := t.TempDir()
 	dirDigest := "sha256:aaaaaa"
-	path := cachePath(root, dirDigest)
+	path, err := cachePath(root, dirDigest)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 
 	f, err := os.Create(path)
 	require.NoError(t, err)
+	other, err := normalizeDigest("sha256:bbbbbb")
+	require.NoError(t, err)
 	env := cacheEnvelope{
-		Digest:        normalizeDigest("sha256:bbbbbb"),
+		Digest:        other,
 		SchemaVersion: SchemaVersion,
 		CachedAt:      time.Now().UTC(),
 		Layers:        nil,
@@ -303,7 +317,8 @@ func TestLoadCache_DigestMismatch_DeletesAndMisses(t *testing.T) {
 func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 	root := t.TempDir()
 	digest := "sha256:corrupt"
-	path := cachePath(root, digest)
+	path, err := cachePath(root, digest)
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte("not a gob blob"), 0o600))
 
@@ -319,7 +334,9 @@ func TestSaveCache_NoTempFileLingers(t *testing.T) {
 	digest := "sha256:keep"
 	require.NoError(t, saveCache(root, digest, nil))
 
-	dir := filepath.Dir(cachePath(root, digest))
+	path, err := cachePath(root, digest)
+	require.NoError(t, err)
+	dir := filepath.Dir(path)
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	for _, e := range entries {
@@ -329,7 +346,70 @@ func TestSaveCache_NoTempFileLingers(t *testing.T) {
 }
 
 func TestNormalizeDigest_StripsSha256Prefix(t *testing.T) {
-	assert.Equal(t, "abcdef", normalizeDigest("sha256:abcdef"))
-	assert.Equal(t, "abcdef", normalizeDigest("abcdef"))
-	assert.Equal(t, "", normalizeDigest(""))
+	got, err := normalizeDigest("sha256:abcdef")
+	require.NoError(t, err)
+	assert.Equal(t, "abcdef", got)
+
+	got, err = normalizeDigest("abcdef")
+	require.NoError(t, err)
+	assert.Equal(t, "abcdef", got)
+}
+
+func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
+	cases := []string{
+		"",
+		"sha256:",
+		".",
+		"..",
+		"sha256:..",
+		"../../etc/passwd",
+		"sha256:../etc",
+		"foo/bar",
+		`foo\bar`,
+		"prefix..suffix",
+	}
+	for _, c := range cases {
+		_, err := normalizeDigest(c)
+		assert.ErrorIs(t, err, errBadDigest, "should reject %q", c)
+	}
+}
+
+func TestSaveCache_RejectsBadDigest(t *testing.T) {
+	root := t.TempDir()
+	err := saveCache(root, "", nil)
+	assert.ErrorIs(t, err, errBadDigest)
+	err = saveCache(root, "../escape", nil)
+	assert.ErrorIs(t, err, errBadDigest)
+}
+
+func TestLoadCache_TransientIOError_KeepsFile(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:transient"
+	path, err := cachePath(root, digest)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+
+	// Make the file unreadable to simulate a permission flip mid-flight.
+	// On Windows os.Chmod has limited effect; this test runs meaningfully
+	// on Linux CI where Gate B exercises it.
+	require.NoError(t, os.WriteFile(path, []byte("anything"), 0o000))
+	defer func() { _ = os.Chmod(path, 0o600) }()
+
+	_, ok, err := loadCache(root, digest)
+	if err == nil && runtimeIsRestrictivePosix() {
+		t.Skip("file open succeeded despite 0o000; skipping (likely Windows or root)")
+	}
+	if err != nil {
+		assert.False(t, ok)
+		// Crucially: the file was NOT removed. Restore perms so cleanup works.
+		require.NoError(t, os.Chmod(path, 0o600))
+		_, statErr := os.Stat(path)
+		assert.NoError(t, statErr, "transient I/O failure must NOT evict cache")
+	}
+}
+
+func runtimeIsRestrictivePosix() bool {
+	// Heuristic: if we're running as root or on Windows, chmod 0o000 won't
+	// block the open. Tests that rely on it should skip.
+	return os.Geteuid() == 0
 }

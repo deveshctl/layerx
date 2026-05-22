@@ -11,10 +11,18 @@ type ImageMeta struct {
 type ProgressPhase int
 
 const (
-	PhasePulling ProgressPhase = iota
+	// PhaseUnknown is the zero value, used by callers to mean "no phase
+	// observed yet" so a UI can avoid rendering a stale default phase
+	// before the first event arrives.
+	PhaseUnknown ProgressPhase = iota
+	PhasePulling
 	PhaseExporting
 	PhaseParsing
 	PhaseCacheLoad // emitted on cache hit; no live Docker work follows
+	// PhaseCacheWarn is a non-fatal diagnostic: the cache load or save
+	// failed with an unexpected I/O error. The run continues with live
+	// data; UIs typically render Message in a status bar.
+	PhaseCacheWarn
 )
 
 // ProgressEvent reports loading progress back to the caller.
@@ -24,6 +32,9 @@ type ProgressEvent struct {
 	LayersTotal int
 	BytesCurr   int64
 	BytesTotal  int64
+	// Message carries human-readable diagnostic text for PhaseCacheWarn.
+	// Empty for normal phases.
+	Message string
 }
 
 // Resolver fetches image layer information from a container runtime.

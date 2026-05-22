@@ -11,9 +11,18 @@ import (
 )
 
 var (
-	flagJSON    string
-	flagNoCache bool
+	flagJSON      string
+	flagNoCacheFl bool
+	flagRefresh   bool
 )
+
+// noCacheRequested returns true when the user passed --no-cache or its
+// hidden alias --refresh. The two flags have separate underlying vars so
+// command-line ordering can't reverse the bypass intent (e.g.
+// `--refresh --no-cache=false` would otherwise leave the bypass off).
+func noCacheRequested() bool {
+	return flagNoCacheFl || flagRefresh
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "layerx [image]",
@@ -38,8 +47,8 @@ or run "layerx ci" for non-interactive CI checks.`,
 
 func init() {
 	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON and exit (skips TUI)")
-	rootCmd.PersistentFlags().BoolVar(&flagNoCache, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
-	rootCmd.PersistentFlags().BoolVar(&flagNoCache, "refresh", false, "alias for --no-cache")
+	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
+	rootCmd.PersistentFlags().BoolVar(&flagRefresh, "refresh", false, "alias for --no-cache")
 	_ = rootCmd.PersistentFlags().MarkHidden("refresh")
 }
 
@@ -55,7 +64,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
 
 	if flagJSON != "" {
-		return runJSONExport(imageRef, flagJSON, flagNoCache)
+		return runJSONExport(imageRef, flagJSON, noCacheRequested())
 	}
 
 	cfg, err := config.Load()
@@ -64,7 +73,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	if os.Getenv("CI") == "true" {
-		return executeCICheck(imageRef, cfg, ciCmd, flagNoCache)
+		return executeCICheck(imageRef, cfg, ciCmd, noCacheRequested())
 	}
 
 	resolver, err := image.NewDockerResolver()
@@ -75,6 +84,6 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
-		NoCache:  flagNoCache,
+		NoCache:  noCacheRequested(),
 	})
 }

@@ -1,6 +1,10 @@
 package image
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // Analysis holds the complete result of inspecting an image.
 type Analysis struct {
@@ -48,8 +52,10 @@ func AnalyzeWithProgress(ctx context.Context, resolver Resolver, imageRef string
 //  2. If !opts.NoCache and the digest is known, try loadCache. On hit we
 //     skip ResolveWithProgress entirely; emit PhaseCacheLoad.
 //  3. Otherwise call ResolveWithProgress (existing pull/export/parse path).
-//  4. If the resolve succeeded and we have a digest, write the cache. Save
-//     errors are non-fatal — the user already has the live result.
+//  4. After a successful resolve, re-read ImageID and require the result
+//     to match the pre-resolve digest before persisting the cache. A
+//     mismatch means the tag flipped during the run (concurrent docker
+//     pull) — caching either set of layers under either digest would lie.
 //  5. Stack + assignNetDeltas + TotalSize, build Analysis, return.
 //
 // Hit and miss paths converge at step 5: the same Analysis assembly runs
@@ -67,24 +73,21 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	}
 
 	digest, digestErr := resolver.ImageID(ctx, imageRef)
-	// digestErr is expected when the image is not local yet. We just skip
-	// the cache lookup; ResolveWithProgress will pull and we'll re-Inspect
-	// after that to write the cache.
-
-	canCache := digestErr == nil && cacheRoot != ""
+	canCache := digestErr == nil && digest != "" && cacheRoot != ""
 
 	var (
 		layers    []Layer
 		fromCache bool
 	)
 	if canCache && !opts.NoCache {
-		cached, ok, _ := loadCache(cacheRoot, digest)
+		cached, ok, loadErr := loadCache(cacheRoot, digest)
+		if loadErr != nil && !errors.Is(loadErr, errBadDigest) {
+			emitCacheWarn(opts.Progress, fmt.Sprintf("cache load failed: %v", loadErr))
+		}
 		if ok {
 			layers = cached
 			fromCache = true
-			if opts.Progress != nil {
-				opts.Progress <- ProgressEvent{Phase: PhaseCacheLoad}
-			}
+			emitProgress(opts.Progress, ProgressEvent{Phase: PhaseCacheLoad})
 		}
 	}
 
@@ -95,16 +98,38 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		}
 		layers = fresh
 
-		// We may not have had a digest before (image was not local). Try once
-		// more after the resolve, which has now ensured the image is local.
-		if digestErr != nil && cacheRoot != "" {
-			if d, err := resolver.ImageID(ctx, imageRef); err == nil {
-				digest = d
-				canCache = true
+		// Re-read ImageID after the resolve. Two reasons:
+		//  1. The image may not have been local before; ResolveWithProgress
+		//     has now pulled it, so the digest is observable.
+		//  2. The tag's underlying digest may have flipped mid-run (a
+		//     concurrent `docker pull` retagged it). If post-resolve
+		//     digest disagrees with pre-resolve, we don't know which set
+		//     of layers we actually exported, so refuse to cache.
+		postDigest, postErr := resolver.ImageID(ctx, imageRef)
+		switch {
+		case postErr != nil || postDigest == "":
+			// Cannot verify; skip cache write. Surface the gap so users
+			// know cold cost will repeat.
+			if cacheRoot != "" {
+				emitCacheWarn(opts.Progress, "cache write skipped: post-resolve image digest unavailable")
 			}
-		}
-		if canCache {
-			_ = saveCache(cacheRoot, digest, layers) // non-fatal on failure
+		case digestErr != nil:
+			// Pre-resolve digest was unknown (image was not local); the
+			// post-resolve digest is now authoritative.
+			digest = postDigest
+			if err := saveCache(cacheRoot, digest, layers); err != nil {
+				emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
+			}
+		case postDigest != digest:
+			// Tag flipped underneath us. Refuse to cache either way.
+			emitCacheWarn(opts.Progress,
+				"cache write skipped: image digest changed during analysis (concurrent pull?)")
+		default:
+			if cacheRoot != "" {
+				if err := saveCache(cacheRoot, digest, layers); err != nil {
+					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
+				}
+			}
 		}
 	}
 
@@ -122,4 +147,21 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		StackedTrees: stacked,
 		TotalSize:    totalSize,
 	}, nil
+}
+
+// emitProgress sends ev on ch, but never blocks. A caller passing an
+// unbuffered or full channel just loses this event — the alternative is
+// deadlocking the entire analyze pipeline.
+func emitProgress(ch chan<- ProgressEvent, ev ProgressEvent) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- ev:
+	default:
+	}
+}
+
+func emitCacheWarn(ch chan<- ProgressEvent, msg string) {
+	emitProgress(ch, ProgressEvent{Phase: PhaseCacheWarn, Message: msg})
 }

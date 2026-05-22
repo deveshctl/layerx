@@ -233,6 +233,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case progressMsg:
+		// PhaseCacheWarn is a non-fatal diagnostic. Surface it without
+		// overwriting the active loading phase — the analyze pipeline is
+		// still running and the user wants to see what it's doing.
+		if msg.event.Phase == image.PhaseCacheWarn {
+			m.statusMsg = "cache: " + msg.event.Message
+			return m, tea.Batch(
+				listenForProgress(m.progressCh),
+				tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+					return clearStatusMsg{}
+				}),
+			)
+		}
 		m.loadPhase = msg.event.Phase
 		m.pullLayers = msg.event.LayersDone
 		m.pullTotal = msg.event.LayersTotal

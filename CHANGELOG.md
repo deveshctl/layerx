@@ -7,15 +7,27 @@ All notable changes to this project will be documented in this file.
 - Per-image-digest analysis cache: `Analyze*` writes parsed layers to `{LAYERX_CACHE_DIR or os.UserCacheDir()/layerx}/{digest}/layers.gob` and reads them back on the next run. Repeat runs against an unchanged image skip Docker `ImageSave` + tar parse and feel instant.
 - `--no-cache` flag (alias `--refresh`) on the root command and `layerx ci`. Bypasses the cache for the current run; the run still writes the cache on success.
 - New `image.PhaseCacheLoad` progress phase; TUI renders "loaded from cache" briefly on hit.
+- New `image.PhaseCacheWarn` progress phase; non-fatal cache I/O failures (load or save) surface as a transient TUI status message instead of being silently dropped.
+
+### Fixed
+- TOCTOU cache poisoning: `AnalyzeWithOptions` now re-reads `ImageID` after `ResolveWithProgress` and refuses to write the cache if the digest changed mid-run (concurrent `docker pull` retag).
+- Empty / unsafe digests no longer reach the cache key. `normalizeDigest` rejects empty strings, `.`/`..`, and digests containing path separators, so a Resolver returning `("", nil)` cannot poison a shared cache slot and a hostile digest cannot escape the cache root.
+- Transient I/O during `gob.Decode` (permission flip, EBUSY) no longer evicts an otherwise-valid cache file. Only confirmed corruption deletes.
+- `saveCache` fsyncs the temp file before atomic rename so a power loss between rename and writeback can no longer leave a zero-length `layers.gob`.
+- TUI no longer flashes "Pulling …" before the first progress event arrives. New `image.PhaseUnknown` zero value falls through to a generic "Loading …" line; cache hits jump straight to "loaded from cache".
+- `--refresh` is now a separate flag bound to its own variable. `--no-cache` and `--refresh` are OR'd at read time, so command-line ordering can no longer reverse the bypass intent.
+- Bad `LAYERX_CACHE_DIR` overrides print one stderr warning before falling back to `os.UserCacheDir()`.
 
 ### Changed
 - Release artifact names dropped the version segment: `layerx_linux_amd64.deb` (was `layerx_1.1.0_linux_amd64.deb`). Applies to v1.1.1+.
 - README install snippets now use `/releases/latest/download/<name>` so they auto-track the latest release. Older releases keep their versioned filenames.
 
 ### Technical
-- New `image/cache.go`, `image/cache_dto.go`, `image/cache_test.go`. Encoding is `encoding/gob` with an envelope holding `digest`, `schemaVersion`, `cachedAt`, and `[]cachedLayer`. Schema mismatch, digest mismatch, and decode errors all delete the offending file and fall through to a cold resolve.
+- New `image/cache.go`, `image/cache_dto.go`, `image/cache_test.go`. Encoding is `encoding/gob` with an envelope holding `digest`, `schemaVersion`, `cachedAt`, and `[]cachedLayer`. Schema mismatch, digest mismatch, and confirmed corruption all delete the offending file and fall through to a cold resolve; transient I/O does not.
 - `Resolver` gains `ImageID(ctx, ref) (string, error)`. The cache is wired at `image.AnalyzeWithOptions`; existing `Analyze` and `AnalyzeWithProgress` are preserved as shims. Architectural laws unchanged: `image/` still has zero imports of `tui/`, `ci/`, `cmd/`, `config/`.
 - Cached fields per layer: `Index`, `ID`, `Size`, `Command`, parsed `Tree`. NOT cached: `NetDelta`, `DiffType`, `IntroducedInLayer` — recomputed by `Stack()` + `assignNetDeltas()` on every load.
+- `TestCacheDTO_RoundTrip_AllPersistableFields` now exercises the on-disk gob round trip via `saveCache` + `loadCache` so a future field with a gob-incompatible shape fails the test rather than silently shipping.
+- All `Progress` channel sends in `AnalyzeWithOptions` are non-blocking (`select … default`) — a caller passing an unbuffered or full channel can no longer deadlock the analyze pipeline.
 
 ## [M19] — 2026-05-21
 Layer net-delta column — surfaces per-layer change in merged-filesystem live byte size.
