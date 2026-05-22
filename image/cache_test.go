@@ -2,6 +2,8 @@ package image
 
 import (
 	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -185,4 +187,36 @@ func TestCacheDTO_RoundTrip_NilRoot_BecomesNilTree(t *testing.T) {
 
 	require.Len(t, rehydrated, 1)
 	assert.Nil(t, rehydrated[0].Tree)
+}
+
+func TestCacheDir_PrefersLAYERX_CACHE_DIR(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LAYERX_CACHE_DIR", dir)
+	got, err := CacheDir()
+	require.NoError(t, err)
+	assert.Equal(t, dir, got)
+}
+
+func TestCacheDir_FallsBackToUserCacheDir(t *testing.T) {
+	t.Setenv("LAYERX_CACHE_DIR", "")
+	got, err := CacheDir()
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(got), "cache dir must be absolute")
+	assert.Equal(t, "layerx", filepath.Base(got))
+
+	uc, err := os.UserCacheDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(uc, "layerx"), got)
+}
+
+func TestCacheDir_RejectsUnusableOverride(t *testing.T) {
+	// Pointing at a path that is a regular file is not a usable directory.
+	f, err := os.CreateTemp(t.TempDir(), "not-a-dir")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	t.Setenv("LAYERX_CACHE_DIR", f.Name())
+
+	got, err := CacheDir()
+	require.NoError(t, err, "fallback should succeed even if override is bad")
+	assert.NotEqual(t, f.Name(), got)
 }
