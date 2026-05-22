@@ -1,9 +1,11 @@
 package image
 
 import (
+	"encoding/gob"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,4 +221,115 @@ func TestCacheDir_RejectsUnusableOverride(t *testing.T) {
 	got, err := CacheDir()
 	require.NoError(t, err, "fallback should succeed even if override is bad")
 	assert.NotEqual(t, f.Name(), got)
+}
+
+func TestSaveLoadCache_RoundTrip(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:abcdef"
+
+	layers := []Layer{
+		{
+			Index: 0, ID: "aabb", Size: 100, Command: "FROM alpine",
+			Tree: makeTree(makeFile("a", "/a", 50)),
+		},
+	}
+	require.NoError(t, saveCache(root, digest, layers))
+
+	got, ok, err := loadCache(root, digest)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Len(t, got, 1)
+	assert.Equal(t, "aabb", got[0].ID)
+	require.NotNil(t, got[0].Tree)
+	assert.NotNil(t, got[0].Tree.Root.FindChild("a"))
+}
+
+func TestLoadCache_Miss_NoFile(t *testing.T) {
+	root := t.TempDir()
+	got, ok, err := loadCache(root, "sha256:nope")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Nil(t, got)
+}
+
+func TestLoadCache_SchemaMismatch_DeletesAndMisses(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:badschema"
+	path := cachePath(root, digest)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	env := cacheEnvelope{
+		Digest:        normalizeDigest(digest),
+		SchemaVersion: SchemaVersion + 1,
+		CachedAt:      time.Now().UTC(),
+		Layers:        nil,
+	}
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+
+	_, ok, err := loadCache(root, digest)
+	require.NoError(t, err)
+	assert.False(t, ok, "schema mismatch must be a miss")
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "miss must delete the bad file")
+}
+
+func TestLoadCache_DigestMismatch_DeletesAndMisses(t *testing.T) {
+	root := t.TempDir()
+	dirDigest := "sha256:aaaaaa"
+	path := cachePath(root, dirDigest)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	env := cacheEnvelope{
+		Digest:        normalizeDigest("sha256:bbbbbb"),
+		SchemaVersion: SchemaVersion,
+		CachedAt:      time.Now().UTC(),
+		Layers:        nil,
+	}
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+
+	_, ok, err := loadCache(root, dirDigest)
+	require.NoError(t, err)
+	assert.False(t, ok, "digest mismatch must be a miss")
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:corrupt"
+	path := cachePath(root, digest)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("not a gob blob"), 0o600))
+
+	_, ok, err := loadCache(root, digest)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestSaveCache_NoTempFileLingers(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:keep"
+	require.NoError(t, saveCache(root, digest, nil))
+
+	dir := filepath.Dir(cachePath(root, digest))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.False(t, strings.HasPrefix(e.Name(), "layers.gob.tmp-"),
+			"temp file lingered: %s", e.Name())
+	}
+}
+
+func TestNormalizeDigest_StripsSha256Prefix(t *testing.T) {
+	assert.Equal(t, "abcdef", normalizeDigest("sha256:abcdef"))
+	assert.Equal(t, "abcdef", normalizeDigest("abcdef"))
+	assert.Equal(t, "", normalizeDigest(""))
 }
