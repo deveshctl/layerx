@@ -11,9 +11,10 @@ type ImageMeta struct {
 type ProgressPhase int
 
 const (
-	PhasePulling  ProgressPhase = iota
+	PhasePulling ProgressPhase = iota
 	PhaseExporting
 	PhaseParsing
+	PhaseCacheLoad // emitted on cache hit; no live Docker work follows
 )
 
 // ProgressEvent reports loading progress back to the caller.
@@ -30,6 +31,10 @@ type Resolver interface {
 	Resolve(ctx context.Context, imageRef string) ([]Layer, error)
 	ResolveWithProgress(ctx context.Context, imageRef string, progress chan<- ProgressEvent) ([]Layer, error)
 	Inspect(ctx context.Context, imageRef string) (*ImageMeta, error)
+	// ImageID returns the image content digest (e.g. "sha256:abc...") for ref.
+	// Implementations may return an error if the image is not local; callers
+	// that want pull-on-miss must call ensure-image semantics first.
+	ImageID(ctx context.Context, imageRef string) (string, error)
 }
 
 // ExtractorSource is implemented by resolvers that can produce an Extractor.

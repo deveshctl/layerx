@@ -9,15 +9,20 @@ import (
 )
 
 type mockResolver struct {
-	layers []Layer
-	err    error
+	layers       []Layer
+	err          error
+	imageID      string
+	imageIDErr   error
+	resolveCalls int
 }
 
 func (m *mockResolver) Resolve(_ context.Context, _ string) ([]Layer, error) {
+	m.resolveCalls++
 	return m.layers, m.err
 }
 
 func (m *mockResolver) ResolveWithProgress(_ context.Context, _ string, _ chan<- ProgressEvent) ([]Layer, error) {
+	m.resolveCalls++
 	return m.layers, m.err
 }
 
@@ -27,6 +32,16 @@ func (m *mockResolver) Inspect(_ context.Context, _ string) (*ImageMeta, error) 
 		total += l.Size
 	}
 	return &ImageMeta{Size: total}, m.err
+}
+
+func (m *mockResolver) ImageID(_ context.Context, _ string) (string, error) {
+	if m.imageIDErr != nil {
+		return "", m.imageIDErr
+	}
+	if m.imageID != "" {
+		return m.imageID, nil
+	}
+	return "sha256:deadbeef", nil
 }
 
 func TestAnalyze_Success(t *testing.T) {
