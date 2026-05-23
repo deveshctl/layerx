@@ -441,6 +441,50 @@ func TestViewLoadingPullProgressNoBytesTotal(t *testing.T) {
 	assert.NotContains(t, content, "MB", "no byte counts when total bytes unknown")
 }
 
+// TestViewLoadingPullProgressShrinksBarOnNarrowTerminal asserts the progress
+// bar shrinks (rather than overflowing or being truncated) when the terminal
+// is too narrow for the default 20-cell bar plus counter and bytes.
+// Regression: the bytes-total ("4.7 GB") was being clipped mid-value because
+// the bar was hard-coded to 20 cells regardless of terminal width.
+func TestViewLoadingPullProgressShrinksBarOnNarrowTerminal(t *testing.T) {
+	m := NewModel(Config{ImageRef: "ai/qwen3"})
+	m.width = 50
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullLayers = 1
+	m.pullTotal = 3
+	m.pullBytes = 69 * 1024 * 1024
+	m.pullBytesMax = 5046586573 // ~4.7 GB
+
+	content := viewContent(m.View())
+
+	assert.Contains(t, content, "4.7 GB", "bytes-total must not be truncated on narrow terminal")
+	assert.Contains(t, content, "Layer 1/3")
+	require.LessOrEqual(t, maxPanelLineWidth(content), 50,
+		"panel must not exceed terminal width")
+}
+
+// TestViewLoadingPullProgressDropsBarWhenTooNarrow asserts that on a very
+// narrow terminal the bar is dropped entirely (rather than rendered with
+// fewer than 4 cells, which looks broken).
+func TestViewLoadingPullProgressDropsBarWhenTooNarrow(t *testing.T) {
+	m := NewModel(Config{ImageRef: "x"})
+	m.width = 40
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullLayers = 1
+	m.pullTotal = 3
+	m.pullBytes = 69 * 1024 * 1024
+	m.pullBytesMax = 5046586573 // ~4.7 GB
+
+	content := viewContent(m.View())
+
+	assert.Contains(t, content, "4.7 GB")
+	assert.Contains(t, content, "Layer 1/3")
+	assert.NotContains(t, content, "━", "bar should be omitted when terminal cannot fit ≥4 cells")
+	require.LessOrEqual(t, maxPanelLineWidth(content), 40)
+}
+
 // --- View: error state -------------------------------------------------------
 
 func TestViewErrorContainsErrorMessage(t *testing.T) {
