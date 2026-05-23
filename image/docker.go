@@ -56,6 +56,17 @@ func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMe
 	return &ImageMeta{Size: inspect.Size}, nil
 }
 
+// ImageID returns the image content digest from the Docker daemon. It does
+// not pull; the caller is expected to ensure the image is local first
+// (AnalyzeWithProgress does this).
+func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, error) {
+	inspect, err := r.cli.ImageInspect(ctx, imageRef)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
+	}
+	return inspect.ID, nil
+}
+
 // NewExtractor creates an Extractor using this resolver's Docker client.
 func (r *DockerResolver) NewExtractor() Extractor {
 	return NewDockerExtractor(r.cli)

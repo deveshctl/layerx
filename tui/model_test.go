@@ -336,6 +336,7 @@ func TestViewLoadingContainsLoadingAndImageRef(t *testing.T) {
 	m := NewModel(Config{ImageRef: "nginx:latest"})
 	m.width = 120
 	m.height = 40
+	m.loadPhase = image.PhasePulling
 	v := m.View()
 	content := viewContent(v)
 	assert.Contains(t, content, "Pulling")
@@ -749,6 +750,58 @@ func TestFilterSwallowsNavKeysWhenActive(t *testing.T) {
 	m = send(m, keyPress('j'))
 	assert.Equal(t, cursorBefore, m.treeCursor)
 	assert.Contains(t, m.filterQuery, "j")
+}
+
+func TestFilterSwallowsQWhenActive(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	m = send(m, keyPress('j'))
+	m = send(m, keyPress('q'))
+	assert.False(t, m.quitting, "q must not quit while filter input is active")
+	assert.Equal(t, "jq", m.filterQuery)
+}
+
+func TestFilterCtrlCStillQuits(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	m = send(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	assert.True(t, m.quitting, "ctrl+c must always quit, even with filter active")
+}
+
+func TestViewerSearchSwallowsQWhenActive(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("jquery and graphql"),
+		Size: 18,
+	}
+	m.viewSearchActive = true
+
+	m = send(m, keyPress('j'))
+	m = send(m, keyPress('q'))
+	assert.False(t, m.quitting, "q must not quit while viewer search is active")
+	assert.Equal(t, "jq", m.viewSearchQuery)
+}
+
+func TestViewerSearchCtrlCStillQuits(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: []byte("hello"),
+		Size: 5,
+	}
+	m.viewSearchActive = true
+
+	m = send(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	assert.True(t, m.quitting, "ctrl+c must always quit, even with viewer search active")
+}
+
+func TestQStillQuitsWhenNoTextInputActive(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('q'))
+	assert.True(t, m.quitting, "q quits normally when no text input is capturing")
 }
 
 // --- Sort by size ------------------------------------------------------------

@@ -20,6 +20,7 @@ import (
 type Config struct {
 	ImageRef string
 	Resolver image.Resolver
+	NoCache  bool
 }
 
 type focus int
@@ -150,6 +151,7 @@ type model struct {
 	wasteExpanded bool
 	wasteRows     []wasteRow
 	sizeMode      sizeColMode
+	noCache       bool
 }
 
 // NewModel creates a new model wired to real Docker data.
@@ -162,6 +164,7 @@ func NewModel(cfg Config) model {
 		progressCh: ch,
 		writeFile:  os.WriteFile,
 		keys:       defaultKeys(),
+		noCache:    cfg.NoCache,
 	}
 }
 
@@ -187,9 +190,11 @@ func (m model) spinnerTick() tea.Cmd {
 func (m model) fetchAnalysisWithProgress(progressCh chan<- image.ProgressEvent) tea.Cmd {
 	resolver := m.resolver
 	imageRef := m.imageRef
+	noCache := m.noCache
 	return func() tea.Msg {
 		defer close(progressCh)
-		result, err := image.AnalyzeWithProgress(context.Background(), resolver, imageRef, progressCh)
+		result, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+			image.AnalyzeOptions{NoCache: noCache, Progress: progressCh})
 		return analysisMsg{analysis: result, err: err}
 	}
 }
@@ -228,6 +233,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case progressMsg:
+		// PhaseCacheWarn is a non-fatal diagnostic. Surface it without
+		// overwriting the active loading phase — the analyze pipeline is
+		// still running and the user wants to see what it's doing.
+		if msg.event.Phase == image.PhaseCacheWarn {
+			m.statusMsg = "cache: " + msg.event.Message
+			return m, tea.Batch(
+				listenForProgress(m.progressCh),
+				tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+					return clearStatusMsg{}
+				}),
+			)
+		}
 		m.loadPhase = msg.event.Phase
 		m.pullLayers = msg.event.LayersDone
 		m.pullTotal = msg.event.LayersTotal
@@ -337,10 +354,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Quit via q or ctrl+c always works.
+		// Quit via q or ctrl+c. When a text input is active (filter or
+		// viewer search), 'q' must reach the input handler so users can
+		// type queries containing 'q' (e.g. "jquery"). ctrl+c still quits.
 		if key.Matches(msg, m.keys.Quit) {
-			m.quitting = true
-			return m, tea.Quit
+			inTextInput := m.filterActive || (m.viewState == viewReady && m.viewSearchActive)
+			if !inTextInput || msg.String() == "ctrl+c" {
+				m.quitting = true
+				return m, tea.Quit
+			}
 		}
 
 		// When filter input is active, capture all keys.
@@ -1004,6 +1026,8 @@ func (m model) viewLoading() tea.View {
 		}
 		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
 		lines = append(lines, "    Parsing layers…")
+	case image.PhaseCacheLoad:
+		lines = append(lines, fmt.Sprintf("  %s %s — loaded from cache", frame, m.imageRef))
 	default:
 		sizeInfo := ""
 		if m.imageSize > 0 {
