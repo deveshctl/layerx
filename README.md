@@ -52,6 +52,10 @@ Docker must be installed and running before using layerx.
 - **File extraction** — `x` saves the focused file to your working directory
 - **Efficiency badge** — score percentage and wasted bytes in the status bar
 
+### Performance
+- **Analysis cache** — repeat runs against an unchanged image skip the Docker tar export and parse, loading from a per-image-digest cache under `os.UserCacheDir()/layerx/<digest>/` (override with `LAYERX_CACHE_DIR`)
+- `--no-cache` (alias `--refresh`) bypasses the cache for the current run; the run still writes the cache on success
+
 ### CI Mode
 - `layerx ci <image>` — evaluates image efficiency against configurable thresholds
 - Three rules: `lowest-efficiency`, `highest-wasted-bytes`, `highest-user-wasted-percent`
@@ -86,29 +90,53 @@ scoop install layerx
 
 ### Debian / Ubuntu (.deb)
 
-**amd64:**
+**Latest** — amd64:
 ```bash
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
 sudo dpkg -i layerx_linux_amd64.deb
 ```
 
-**arm64:**
+**Latest** — arm64:
 ```bash
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_arm64.deb
 sudo dpkg -i layerx_linux_arm64.deb
 ```
 
+**Pinned to v1.2.0** — amd64:
+```bash
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_amd64.deb
+sudo dpkg -i layerx_linux_amd64.deb
+```
+
+**Pinned to v1.2.0** — arm64:
+```bash
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_arm64.deb
+sudo dpkg -i layerx_linux_arm64.deb
+```
+
 ### RHEL / Fedora (.rpm)
 
-**amd64:**
+**Latest** — amd64:
 ```bash
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.rpm
 sudo rpm -i layerx_linux_amd64.rpm
 ```
 
-**arm64:**
+**Latest** — arm64:
 ```bash
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_arm64.rpm
+sudo rpm -i layerx_linux_arm64.rpm
+```
+
+**Pinned to v1.2.0** — amd64:
+```bash
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_amd64.rpm
+sudo rpm -i layerx_linux_amd64.rpm
+```
+
+**Pinned to v1.2.0** — arm64:
+```bash
+curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_arm64.rpm
 sudo rpm -i layerx_linux_arm64.rpm
 ```
 
@@ -131,6 +159,9 @@ go install github.com/deveshctl/layerx@latest
 ```bash
 # Interactive TUI
 layerx nginx:latest
+
+# Bypass the analysis cache (force a fresh tar export + parse)
+layerx --no-cache nginx:latest
 
 # CI mode — exit 1 if efficiency < 95%
 layerx ci --lowest-efficiency 0.95 nginx:latest
