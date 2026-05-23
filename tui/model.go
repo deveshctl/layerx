@@ -1039,6 +1039,11 @@ func (m model) viewLoading() tea.View {
 	lines = append(lines, "")
 
 	boxWidth := 52
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w+2 > boxWidth {
+			boxWidth = w + 2
+		}
+	}
 	if m.width > 0 && m.width-2 < boxWidth {
 		boxWidth = m.width - 2
 	}

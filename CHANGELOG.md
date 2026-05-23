@@ -9,6 +9,7 @@ Two correctness fixes in the layer-stacking and file-viewer paths.
 ### Fixed
 - Directory metadata changes (mode, UID, GID) are now correctly attributed to the layer that introduced them. Previously, `RUN chmod 0777 /app` in a later layer was silently dropped from the stacked tree — the merged node always took its metadata from the cumulative state, never re-consulting the new layer.
 - File viewer (`Enter`) and save-to-disk (`x`) now extract the file as it exists at the selected layer, not as it exists in the final image. Previously both spawned a temporary container from the final image, so viewing `/etc/config` at Layer 2 always showed Layer 5's content. New `Extractor.ExtractFromLayer` and `ExtractRawFromLayer` methods walk back from the selected layer's tar to find the most recent version of the file.
+- Loading panel no longer truncates the pull-progress line on large images. The box width is now sized to fit the longest content line (e.g. `Layer 1/3  [━━━━━━━━━━━━━━━━━━━━]  254.3 MB / 4.21 GB`) with the previous 52-column value as a floor and `terminal_width - 2` as a ceiling.
 
 ### Technical
 - New methods on `image.Extractor` interface; existing `Extract` / `ExtractRaw` retained for backward compatibility.
