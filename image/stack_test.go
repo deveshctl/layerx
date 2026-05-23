@@ -1,6 +1,7 @@
 package image
 
 import (
+	"io/fs"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -445,4 +446,98 @@ func TestStack_IntroducedInLayer_OpaqueWhiteout(t *testing.T) {
 	oldFile := varDir.FindChild("old.dat")
 	require.NotNil(t, oldFile)
 	assert.Equal(t, 0, oldFile.IntroducedInLayer, "removed file preserves original origin")
+}
+
+func TestStack_DirMetadataChange_Mode(t *testing.T) {
+	layer0 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o755, UID: 0, GID: 0,
+			Children: []*FileNode{makeFile("file.txt", "/app/file.txt", 100)},
+		},
+	)
+	layer1 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o777, UID: 0, GID: 0},
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	app := result[1].Root.FindChild("app")
+	require.NotNil(t, app)
+	assert.Equal(t, fs.FileMode(0o777), app.Mode, "Mode must propagate from later layer")
+	assert.Equal(t, Modified, app.DiffType, "metadata-only change must mark dir Modified")
+	assert.Equal(t, 1, app.IntroducedInLayer, "IntroducedInLayer must update on metadata change")
+
+	child := app.FindChild("file.txt")
+	require.NotNil(t, child)
+	assert.Equal(t, Unchanged, child.DiffType, "child contents are unchanged")
+}
+
+func TestStack_DirMetadataChange_UIDGID(t *testing.T) {
+	layer0 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o755, UID: 0, GID: 0},
+	)
+	layer1 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o755, UID: 1000, GID: 1000},
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	app := Stack(layers)[1].Root.FindChild("app")
+	require.NotNil(t, app)
+	assert.Equal(t, 1000, app.UID)
+	assert.Equal(t, 1000, app.GID)
+	assert.Equal(t, Modified, app.DiffType)
+	assert.Equal(t, 1, app.IntroducedInLayer)
+}
+
+func TestStack_NoMetadataChange_StaysUnchanged(t *testing.T) {
+	// Regression: a layer that touches /other but not /app must NOT mark /app Modified.
+	layer0 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o755},
+		&FileNode{Name: "other", Path: "/other", IsDir: true, Mode: 0o755},
+	)
+	layer1 := makeTree(
+		&FileNode{Name: "other", Path: "/other", IsDir: true, Mode: 0o755,
+			Children: []*FileNode{makeFile("new", "/other/new", 10)},
+		},
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	app := Stack(layers)[1].Root.FindChild("app")
+	require.NotNil(t, app)
+	assert.Equal(t, Unchanged, app.DiffType, "untouched dir must stay Unchanged")
+	assert.Equal(t, 0, app.IntroducedInLayer, "IntroducedInLayer must not change")
+}
+
+func TestStack_DirMetadataPropagatesToL2(t *testing.T) {
+	// Verifies cumulative carries the new metadata forward through cloneStructure.
+	layer0 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o755},
+	)
+	layer1 := makeTree(
+		&FileNode{Name: "app", Path: "/app", IsDir: true, Mode: 0o777},
+	)
+	layer2 := makeTree(
+		&FileNode{Name: "other", Path: "/other", IsDir: true, Mode: 0o755},
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+		{Index: 2, Tree: layer2},
+	}
+
+	r2 := Stack(layers)[2].Root
+	app := r2.FindChild("app")
+	require.NotNil(t, app)
+	assert.Equal(t, fs.FileMode(0o777), app.Mode, "L1's metadata change must be preserved at L2")
+	assert.Equal(t, Unchanged, app.DiffType, "no change at L2 itself")
 }

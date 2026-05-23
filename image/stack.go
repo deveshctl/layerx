@@ -46,6 +46,16 @@ func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
 		IntroducedInLayer: cumulative.IntroducedInLayer,
 	}
 
+	metadataChanged := cumulative.Mode != layerRoot.Mode ||
+		cumulative.UID != layerRoot.UID ||
+		cumulative.GID != layerRoot.GID
+	if metadataChanged {
+		merged.Mode = layerRoot.Mode
+		merged.UID = layerRoot.UID
+		merged.GID = layerRoot.GID
+		merged.IntroducedInLayer = layerIdx
+	}
+
 	whiteouts, opaque := extractWhiteouts(layerRoot)
 
 	if opaque {
@@ -119,7 +129,7 @@ func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
 	}
 
 	if merged.IsDir {
-		if hasChangedChildren(merged) {
+		if metadataChanged || hasChangedChildren(merged) {
 			merged.DiffType = Modified
 		} else {
 			merged.DiffType = Unchanged
