@@ -921,6 +921,24 @@ func (e *mockExtractor) ExtractRaw(_ context.Context, _ string, _ string) ([]byt
 	return []byte("mock raw content"), nil
 }
 
+func (e *mockExtractor) ExtractFromLayer(_ context.Context, _ string, path string, _ int) (*image.FileContent, error) {
+	return &image.FileContent{
+		Path: path,
+		Data: []byte("mock content"),
+		Size: 12,
+	}, nil
+}
+
+func (e *mockExtractor) ExtractRawFromLayer(_ context.Context, _ string, _ string, _ int) ([]byte, error) {
+	if e.extractRawErr != nil {
+		return nil, e.extractRawErr
+	}
+	if e.extractRawData != nil {
+		return e.extractRawData, nil
+	}
+	return []byte("mock raw content"), nil
+}
+
 func TestEnterOnFileTriggersViewing(t *testing.T) {
 	m := setupModel()
 	m.focus = focusTree
