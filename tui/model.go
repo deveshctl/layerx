@@ -1343,8 +1343,9 @@ func (m model) renderViewerStatusBar() string {
 func (m model) fetchFileContent(path string) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
+	layer := m.layerCursor
 	return func() tea.Msg {
-		content, err := extractor.Extract(context.Background(), imageRef, path)
+		content, err := extractor.ExtractFromLayer(context.Background(), imageRef, path, layer)
 		return fileContentMsg{content: content, err: err}
 	}
 }
@@ -1352,8 +1353,9 @@ func (m model) fetchFileContent(path string) tea.Cmd {
 func (m model) fetchFileRaw(path string) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
+	layer := m.layerCursor
 	return func() tea.Msg {
-		data, err := extractor.ExtractRaw(context.Background(), imageRef, path)
+		data, err := extractor.ExtractRawFromLayer(context.Background(), imageRef, path, layer)
 		return fileSaveMsg{filename: filepath.Base(path), data: data, err: err}
 	}
 }
