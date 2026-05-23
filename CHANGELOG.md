@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.2.1] — 2026-05-23
+
+Two correctness fixes in the layer-stacking and file-viewer paths.
+
+### Fixed
+- Directory metadata changes (mode, UID, GID) are now correctly attributed to the layer that introduced them. Previously, `RUN chmod 0777 /app` in a later layer was silently dropped from the stacked tree — the merged node always took its metadata from the cumulative state, never re-consulting the new layer.
+- File viewer (`Enter`) and save-to-disk (`x`) now extract the file as it exists at the selected layer, not as it exists in the final image. Previously both spawned a temporary container from the final image, so viewing `/etc/config` at Layer 2 always showed Layer 5's content. New `Extractor.ExtractFromLayer` and `ExtractRawFromLayer` methods walk back from the selected layer's tar to find the most recent version of the file.
+
+### Technical
+- New methods on `image.Extractor` interface; existing `Extract` / `ExtractRaw` retained for backward compatibility.
+- `image/stack.go` `mergeLayer` now compares `layerRoot.Mode/UID/GID` against `cumulative` and propagates changes through `IntroducedInLayer`. The trailing `hasChangedChildren` block now OR's metadata changes so a metadata-only change is not silently reverted to `Unchanged`.
+- No new caching, no `Analysis`-level state. `ExtractFromLayer` performs one `ImageSave` per call and discards bytes after return.
+
 ## [v1.2.0] — 2026-05-23
 
 Per-image-digest analysis cache — repeat runs against an unchanged image feel instant.
