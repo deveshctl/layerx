@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths.
+
+### Fixed
+- Waste overlay no longer silently jumps to layer 1 when a wasted file's intro layer is unknown. `buildIntroIndex` only walks the *last* stacked tree, so files whited out before the final layer were missing from the index — the bare map lookup returned Go's zero value (0), which the jump path then treated as "introduced at layer 1". The lookup now uses comma-ok and stores `-1` for unknowns; the row renders `L?`, and Enter shows `Intro layer unknown for <path>` instead of jumping.
+- File viewer no longer pops back open after Esc. A slow extract whose user pressed Esc mid-load would re-set `viewState = viewReady` when the goroutine finally delivered, overlaying the user's current screen. The model now carries a monotonic `viewRequestID` captured by each load goroutine; Esc bumps the ID, and any in-flight `fileContentMsg` whose ID doesn't match is dropped. Same pattern applied to `fileSaveMsg` (`x` save-to-disk) so a second `x` invalidates the first.
+- Efficiency calculation no longer counts hardlinks as 0-byte files. Tar `TypeLink` entries carry `hdr.Size == 0` by convention (the real bytes are at the link target), but the parser was inserting them as zero-byte file nodes that `Efficiency` then walked, inflating the file count without adding bytes. `FileNode` now carries `IsHardlink` / `Linkname`; `walkFiles` skips hardlinks, so per-layer waste reflects actual content bytes only.
+- Pull-progress sends in `image/docker.go` no longer deadlock the analyze pipeline on a busy TUI. `ResolveWithProgress`, `ensureImageWithProgress`, and `streamPullProgress` previously sent on the bounded `progress` channel with a bare `<-`. On a multi-arch pull (hundreds of JSON events) a brief Update-loop pause could fill the buffer and hang the entire pull. All four sends now go through the existing non-blocking `emitProgress` helper, matching the pattern in `image/analysis.go`. Dropped events for `Exporting`/`Parsing`/`Pulling` phase markers are a cosmetic loss only.
+- `layerx ci` no longer calls `os.Exit(1)` from inside the Cobra `RunE` handler. The bare `os.Exit` skipped deferred cleanup and made the failure path untestable. `executeCICheck` now returns a sentinel `*ErrCIFailed` on rule failure; `main.go` already exits with status 1 on any non-nil error from `cmd.Execute()`. The `ci` subcommand and the `CI=true` root path both set `SilenceErrors`/`SilenceUsage` so the returned error doesn't tack a redundant "Error: ..." line and usage block onto the already-printed report.
+
+### Technical
+- New `FileNode` fields: `IsHardlink bool`, `Linkname string`. Populated at parse time from `tar.TypeLink` and `hdr.Linkname`.
+- `model.viewRequestID` and `model.saveRequestID` are bumped on dispatch (and on Esc for the viewer); message handlers drop any message with a stale ID.
+- New exported `cmd.ErrCIFailed` sentinel error; CI failure path is now reachable from tests without killing the test process.
+
 ## [v1.2.1] — 2026-05-24
 
 Correctness fixes in the layer-stacking and file-viewer paths, plus loading-panel and waste-overlay polish.

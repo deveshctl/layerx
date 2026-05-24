@@ -28,6 +28,7 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 		}
 
 		isDir := hdr.Typeflag == tar.TypeDir
+		isHardlink := hdr.Typeflag == tar.TypeLink
 		size := hdr.Size
 		if isDir {
 			size = 0
@@ -37,7 +38,7 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 		uid := hdr.Uid
 		gid := hdr.Gid
 
-		insertNode(tree.Root, name, size, isDir, mode, uid, gid)
+		insertNode(tree.Root, name, size, isDir, isHardlink, hdr.Linkname, mode, uid, gid)
 	}
 
 	return tree, nil
@@ -49,7 +50,7 @@ func cleanTarPath(p string) string {
 	return p
 }
 
-func insertNode(root *FileNode, fullPath string, size int64, isDir bool, mode fs.FileMode, uid, gid int) {
+func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink bool, linkname string, mode fs.FileMode, uid, gid int) {
 	cleanPath := strings.TrimSuffix(fullPath, "/")
 	parts := strings.Split(cleanPath, "/")
 
@@ -74,15 +75,19 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir bool, mode fs
 				existing.Mode = mode
 				existing.UID = uid
 				existing.GID = gid
+				existing.IsHardlink = isHardlink
+				existing.Linkname = linkname
 			} else {
 				node := &FileNode{
-					Name:  part,
-					Path:  absPath,
-					Size:  size,
-					IsDir: isDir,
-					Mode:  mode,
-					UID:   uid,
-					GID:   gid,
+					Name:       part,
+					Path:       absPath,
+					Size:       size,
+					IsDir:      isDir,
+					IsHardlink: isHardlink,
+					Linkname:   linkname,
+					Mode:       mode,
+					UID:        uid,
+					GID:        gid,
 				}
 				current.AddChild(node)
 			}

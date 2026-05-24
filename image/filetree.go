@@ -21,6 +21,7 @@ type FileTree struct {
 type FileNode struct {
 	Name              string
 	Path              string
+	Linkname          string
 	Size              int64
 	Mode              fs.FileMode
 	UID               int
@@ -29,6 +30,7 @@ type FileNode struct {
 	IntroducedInLayer int
 	Children          []*FileNode
 	IsDir             bool
+	IsHardlink        bool
 }
 
 func NewFileTree() *FileTree {

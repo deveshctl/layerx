@@ -372,6 +372,11 @@ func TestWasteHelpBlocked(t *testing.T) {
 func TestWasteRenderNarrow(t *testing.T) {
 	m := setupModel()
 	m.width = 60 // boxWidth=56, innerWidth=54, wide check: 52 >= 60 → false
+
+	root := &image.FileNode{Name: "", Path: "/", IsDir: true}
+	root.AddChild(&image.FileNode{Name: "short.txt", Path: "/short.txt", IntroducedInLayer: 0})
+	m.analysis = &image.Analysis{StackedTrees: []*image.FileTree{{Root: root}}}
+
 	m.efficiency = &image.EfficiencyResult{
 		Score: 0.5, WastedBytes: 1024,
 		WastedFiles: []image.WastedFile{

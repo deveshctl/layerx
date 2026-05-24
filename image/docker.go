@@ -83,9 +83,7 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 		return nil, err
 	}
 
-	if progress != nil {
-		progress <- ProgressEvent{Phase: PhaseExporting}
-	}
+	emitProgress(progress, ProgressEvent{Phase: PhaseExporting})
 
 	rc, err := r.cli.ImageSave(ctx, []string{imageRef})
 	if err != nil {
@@ -93,9 +91,7 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 	}
 	defer rc.Close()
 
-	if progress != nil {
-		progress <- ProgressEvent{Phase: PhaseParsing}
-	}
+	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
 	return parseLayers(rc)
 }
@@ -112,9 +108,7 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		return nil
 	}
 
-	if progress != nil {
-		progress <- ProgressEvent{Phase: PhasePulling}
-	}
+	emitProgress(progress, ProgressEvent{Phase: PhasePulling})
 
 	rc, err := r.cli.ImagePull(ctx, imageRef, client.ImagePullOptions{})
 	if err != nil {
@@ -178,13 +172,13 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 			}
 		}
 
-		progress <- ProgressEvent{
+		emitProgress(progress, ProgressEvent{
 			Phase:       PhasePulling,
 			LayersDone:  done,
 			LayersTotal: len(layers),
 			BytesCurr:   currentBytes,
 			BytesTotal:  totalBytes,
-		}
+		})
 	}
 }
 

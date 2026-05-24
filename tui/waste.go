@@ -68,11 +68,15 @@ func (m *model) openWaste() {
 			if i >= wasteMaxRows {
 				break
 			}
+			intro := -1
+			if v, ok := introIdx[wf.Path]; ok {
+				intro = v
+			}
 			m.wasteRows = append(m.wasteRows, wasteRow{
 				Path:       wf.Path,
 				Wasted:     wf.TotalWasted,
 				LayerCount: wf.LayerCount,
-				IntroLayer: introIdx[wf.Path],
+				IntroLayer: intro,
 			})
 		}
 	}
@@ -179,8 +183,10 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 	m.filterQuery = ""
 
 	layers := m.layers()
+	jumped := false
 	if row.IntroLayer >= 0 && row.IntroLayer < len(layers) {
 		m.layerCursor = row.IntroLayer
+		jumped = true
 	}
 	mp := &m
 	mp.resetTreeForLayerChange()
@@ -194,10 +200,14 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 	}
 
 	var status string
-	if found < 0 {
+	switch {
+	case !jumped:
+		mp.treeCursor = 0
+		status = fmt.Sprintf("Intro layer unknown for %s", row.Path)
+	case found < 0:
 		mp.treeCursor = 0
 		status = "File not visible in current view"
-	} else {
+	default:
 		mp.treeCursor = found
 		status = fmt.Sprintf("Jumped → L%d %s", row.IntroLayer+1, row.Path)
 	}
@@ -332,6 +342,9 @@ func formatWasteRow(r wasteRow, selected bool, innerWidth int) string {
 
 	wastedStr := image.FormatBytes(r.Wasted)
 	layerStr := fmt.Sprintf("L%d", r.IntroLayer+1)
+	if r.IntroLayer < 0 {
+		layerStr = "L?"
+	}
 	countStr := fmt.Sprintf("x%d", r.LayerCount)
 
 	wide := innerWidth-2 >= narrowMin
