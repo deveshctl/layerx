@@ -87,6 +87,12 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	if os.Getenv("CI") == "true" {
+		// The CI report is already printed by executeCICheck; suppress
+		// cobra's default error/usage output so an ErrCIFailed return
+		// doesn't tack a redundant "Error: ..." line and usage block
+		// onto the report.
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
 		return executeCICheck(imageRef, cfg, ciCmd, noCacheRequested())
 	}
 

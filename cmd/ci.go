@@ -11,6 +11,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ErrCIFailed signals that one or more CI rules did not pass. The report
+// has already been printed to stdout by the time this is returned, so the
+// caller should not print the error message itself — main.go just needs
+// the non-nil error to exit with status 1.
+type ErrCIFailed struct{}
+
+func (e *ErrCIFailed) Error() string {
+	return "CI check failed"
+}
+
 var (
 	flagLowestEfficiency         float64
 	flagHighestWastedBytes       int64
@@ -52,8 +62,10 @@ Cache:
 
   # Force a fresh analysis, ignoring any cached result
   layerx ci --no-cache nginx:latest`,
-	Args: cobra.ExactArgs(1),
-	RunE: runCICmd,
+	Args:          cobra.ExactArgs(1),
+	RunE:          runCICmd,
+	SilenceErrors: true,
+	SilenceUsage:  true,
 }
 
 func init() {
@@ -93,7 +105,7 @@ func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noC
 	report.Print(os.Stdout)
 
 	if report.ExitCode() != 0 {
-		os.Exit(1)
+		return &ErrCIFailed{}
 	}
 	return nil
 }
