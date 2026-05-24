@@ -76,10 +76,10 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 		if i < len(lines) {
 			line = lines[i]
 		}
-		lineWidth := lipgloss.Width(line)
+		lineWidth := ansi.StringWidth(line)
 		if lineWidth > contentWidth {
 			line = ansi.Truncate(line, contentWidth, "")
-			lineWidth = lipgloss.Width(line)
+			lineWidth = ansi.StringWidth(line)
 		}
 		pad := contentWidth - lineWidth
 		if pad < 0 {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -66,6 +67,14 @@ func renderFileView(p viewerParams) string {
 	}
 
 	lines := strings.Split(string(p.content.Data), "\n")
+	syntaxHighlight := p.searchQuery == ""
+	if syntaxHighlight {
+		if highlighted := highlightFileLines(p.content.Path, p.content.Data); highlighted != nil {
+			lines = highlighted
+		} else {
+			syntaxHighlight = false
+		}
+	}
 
 	viewHeight := contentHeight
 	if p.content.Truncated {
@@ -77,7 +86,7 @@ func renderFileView(p viewerParams) string {
 	}
 
 	totalLines := len(lines)
-	gutterWidth := len(fmt.Sprintf("%d", totalLines)) + 1
+	gutterDigits := len(fmt.Sprintf("%d", totalLines)) + 1
 
 	var sb strings.Builder
 	end := p.offset + viewHeight
@@ -95,18 +104,28 @@ func renderFileView(p viewerParams) string {
 	for i, line := range visible {
 		lineNum := p.offset + i + 1
 		lineIdx := p.offset + i
-		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterWidth, lineNum))
+		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterDigits, lineNum))
+		gutterW := ansi.StringWidth(gutter)
 
-		maxLineWidth := contentWidth - gutterWidth - 1
+		maxLineWidth := contentWidth - gutterW
 		if maxLineWidth < 1 {
 			maxLineWidth = 1
 		}
-		if len([]rune(line)) > maxLineWidth {
-			line = string([]rune(line)[:maxLineWidth-1]) + "…"
+		if syntaxHighlight {
+			if ansi.StringWidth(line) > maxLineWidth {
+				line = ansi.Truncate(line, maxLineWidth, "…")
+			}
+		} else if ansi.StringWidth(line) > maxLineWidth {
+			line = ansi.Truncate(line, maxLineWidth, "…")
 		}
 
-		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor)
-		sb.WriteString(gutter + lineContent)
+		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
+		fullLine := gutter + lineContent
+		if w := ansi.StringWidth(fullLine); w > contentWidth {
+			lineContent = ansi.Truncate(lineContent, contentWidth-gutterW, "…")
+			fullLine = gutter + lineContent
+		}
+		sb.WriteString(fullLine)
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
 		}
@@ -134,8 +153,11 @@ func renderFileView(p viewerParams) string {
 	return renderPanel(sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
 }
 
-func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, matchCursor int) string {
+func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, matchCursor int, syntaxHighlight bool) string {
 	if query == "" || len(matches) == 0 {
+		if syntaxHighlight {
+			return line
+		}
 		return styleWithFg(fileNameColor).Render(line)
 	}
 

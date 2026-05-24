@@ -280,6 +280,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = ""
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		if m.quitting || m.showHelp || m.showWaste || m.filterActive {
+			return m, nil
+		}
+		if m.state != stateReady {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			if m.viewState == viewReady {
+				m.scrollViewUp()
+			} else if m.viewState == viewNone {
+				m.moveUp()
+			}
+		case tea.MouseWheelDown:
+			if m.viewState == viewReady {
+				m.scrollViewDown()
+			} else if m.viewState == viewNone {
+				m.moveDown()
+			}
+		}
+		return m, nil
+
 	case fileContentMsg:
 		if msg.requestID != m.viewRequestID {
 			return m, nil
@@ -1082,9 +1105,7 @@ func (m model) viewLoading() tea.View {
 	body := strings.Join(lines, "\n")
 	panel := renderPanel(body, "Loading", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
+	return finalizeView(tea.NewView(content))
 }
 
 func (m model) viewError() tea.View {
@@ -1092,27 +1113,21 @@ func (m model) viewError() tea.View {
 	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
+	return finalizeView(tea.NewView(content))
 }
 
 func (m model) viewReady() tea.View {
 	if m.width < 50 {
-		v := tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Terminal too narrow\n(need 50+ cols)"))
-		v.AltScreen = true
-		return v
+		return finalizeView(tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Terminal too narrow\n(need 50+ cols)")))
 	}
 
 	// chromeRows: header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1)
 	const chromeRows = 8
 	const minPanelRows = 3
 	if m.height < chromeRows+minPanelRows {
-		v := tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Terminal too short\n(need 11+ rows)"))
-		v.AltScreen = true
-		return v
+		return finalizeView(tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			"Terminal too short\n(need 11+ rows)")))
 	}
 
 	leftWidth := m.leftPanelWidth()
@@ -1165,9 +1180,7 @@ func (m model) viewReady() tea.View {
 		content = m.renderWasteOverlay()
 	}
 
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
+	return finalizeView(tea.NewView(content))
 }
 
 func (m model) leftPanelWidth() int {
