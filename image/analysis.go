@@ -106,26 +106,24 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		//     digest disagrees with pre-resolve, we don't know which set
 		//     of layers we actually exported, so refuse to cache.
 		postDigest, postErr := resolver.ImageID(ctx, imageRef)
-		switch {
-		case postErr != nil || postDigest == "":
-			// Cannot verify; skip cache write. Surface the gap so users
-			// know cold cost will repeat.
-			if cacheRoot != "" {
+		if cacheRoot != "" {
+			switch {
+			case postErr != nil || postDigest == "":
+				// Cannot verify; skip cache write. Surface the gap so users
+				// know cold cost will repeat.
 				emitCacheWarn(opts.Progress, "cache write skipped: post-resolve image digest unavailable")
-			}
-		case digestErr != nil:
-			// Pre-resolve digest was unknown (image was not local); the
-			// post-resolve digest is now authoritative.
-			digest = postDigest
-			if err := saveCache(cacheRoot, digest, layers); err != nil {
-				emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
-			}
-		case postDigest != digest:
-			// Tag flipped underneath us. Refuse to cache either way.
-			emitCacheWarn(opts.Progress,
-				"cache write skipped: image digest changed during analysis (concurrent pull?)")
-		default:
-			if cacheRoot != "" {
+			case digestErr != nil:
+				// Pre-resolve digest was unknown (image was not local); the
+				// post-resolve digest is now authoritative.
+				digest = postDigest
+				if err := saveCache(cacheRoot, digest, layers); err != nil {
+					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
+				}
+			case postDigest != digest:
+				// Tag flipped underneath us. Refuse to cache either way.
+				emitCacheWarn(opts.Progress,
+					"cache write skipped: image digest changed during analysis (concurrent pull?)")
+			default:
 				if err := saveCache(cacheRoot, digest, layers); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
