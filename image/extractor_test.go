@@ -307,6 +307,34 @@ func TestExtractFromLayer_GzippedBlob(t *testing.T) {
 	assert.Equal(t, "v0", string(fc.Data))
 }
 
+func TestExtractFromLayer_SingleLayerImage(t *testing.T) {
+	// Fence-post check: a 1-layer image at cursor=0 must succeed for both
+	// "found in this layer" and "not found" without iterating off the end.
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0"})
+
+	outer := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"only.txt": "solo"}),
+	})
+	cli := &fakeImageSaveClient{saveData: outer.Bytes()}
+	e := NewDockerExtractor(cli)
+
+	fc, err := e.ExtractFromLayer(context.Background(), "img", "/only.txt", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "solo", string(fc.Data))
+
+	_, err = e.ExtractFromLayer(context.Background(), "img", "/missing.txt", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in any layer")
+}
+
 func TestExtractRawFromLayer_NoTruncation(t *testing.T) {
 	// 2MB content > MaxViewSize (1MB) — Raw variant must return all bytes.
 	big := strings.Repeat("a", 2*1024*1024)

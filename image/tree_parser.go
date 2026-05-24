@@ -27,6 +27,17 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 			continue
 		}
 
+		switch hdr.Typeflag {
+		case tar.TypeReg, tar.TypeRegA, tar.TypeDir, tar.TypeSymlink, tar.TypeLink, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
+			// supported
+		default:
+			// Skip TypeXGlobalHeader, TypeXHeader, TypeGNULongName, TypeGNULongLink, etc.
+			// Go's tar reader merges most extended-header forms transparently; the
+			// remaining ones (notably XGlobalHeader) would otherwise appear as
+			// phantom directory entries.
+			continue
+		}
+
 		isDir := hdr.Typeflag == tar.TypeDir
 		isHardlink := hdr.Typeflag == tar.TypeLink
 		size := hdr.Size
@@ -47,6 +58,13 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 func cleanTarPath(p string) string {
 	p = strings.TrimPrefix(p, "/")
 	p = strings.TrimPrefix(p, "./")
+	if p == "" {
+		return ""
+	}
+	cleaned := path.Clean(p)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
 	return p
 }
 

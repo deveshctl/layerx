@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix.
+Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes.
 
 ### Fixed
 - Waste overlay no longer silently jumps to layer 1 when a wasted file's intro layer is unknown. `buildIntroIndex` only walks the *last* stacked tree, so files whited out before the final layer were missing from the index — the bare map lookup returned Go's zero value (0), which the jump path then treated as "introduced at layer 1". The lookup now uses comma-ok and stores `-1` for unknowns; the row renders `L?`, and Enter shows `Intro layer unknown for <path>` instead of jumping.
@@ -15,11 +15,24 @@ Three correctness fixes in waste overlay, file viewer, and efficiency calculatio
 - `loadLayerTars` no longer buffers the entire image archive in memory per extraction. The previous implementation read every blob in `manifest.json` into a `map[string][]byte` regardless of which layer the user requested — on an 8 GB ML image that meant 8 GB of heap per `Enter`/`x` keypress, with mashing keys producing concurrent multi-gigabyte allocations. The function now spools the `ImageSave` stream to a temp file, reads `manifest.json` in a first pass, then reads only the blobs in `manifest.Layers[0..layerCursor]` in a second pass. Peak heap is now bounded by the largest needed blob, not the whole image. Both `ExtractFromLayer` and `ExtractRawFromLayer` pass `layerCursor+1` as the cap.
 - Cache write in `AnalyzeWithOptions` no longer fires with an empty `cacheRoot`. The `digestErr != nil` branch (image was not local pre-resolve) called `saveCache(cacheRoot, …)` without the `cacheRoot != ""` guard that the default branch had, so a failure of `CacheDir()` at startup would produce a confusing `MkdirAll(<digest>)` against the current working directory. The post-resolve cache-write switch is now wrapped in a single `if cacheRoot != ""` outer guard covering all branches.
 - `loadCache` no longer leaves bad cache files on disk on Windows. The previous implementation called `os.Remove(path)` on schema/digest/gob mismatches while a `defer f.Close()` on the same path was still pending. Go's `os.Open` on Windows uses only `FILE_SHARE_READ | FILE_SHARE_WRITE` (no `FILE_SHARE_DELETE`), so the remove failed with `ERROR_SHARING_VIOLATION`, the `_ =` swallowed the error, and the bad file persisted — every subsequent run hit the same mismatch and re-paid the full cold cost. The open+decode is now in a separate `readCacheFile` helper that closes the handle on return, so the caller's `os.Remove` runs against a closed handle and succeeds on Windows. Linux/macOS behavior is unchanged.
+- File viewer search highlight no longer renders mojibake when `strings.ToLower` changes a rune's byte length (e.g. Turkish `İ`). `renderViewerLine` now indexes lines, lowercased lines, and the query as `[]rune` slices, matching the existing `renderNameWithHighlight` in the file tree. ASCII paths (the common case for Dockerfiles, configs, scripts) are unchanged.
+- Whiteout entries (`.wh.<name>`, `.wh..wh..opq`) no longer leak into `EfficiencyResult.WastedFiles`. `walkFiles` skipped them via `IsHardlink` for size, but two layers deleting the same path produced a phantom `WastedFile{TotalWasted:0, LayerCount:2}` in the user-visible waste overlay and JSON export. `walkFiles` now skips any node whose name satisfies `isWhiteoutName` before recursing.
+- `LAYERX_CACHE_DIR=~/foo` now expands to `$HOME/foo` instead of creating a literal `~` directory in the current working directory. `expandHome` resolves a leading `~` (or `~/...`) via `os.UserHomeDir`; `~user/...` forms are rejected with a stderr warning. Bare paths without `~` are unchanged.
+- `saveCache` now sweeps stale `layers.gob.tmp-*` files older than one hour from the digest directory before creating a new temp file. A SIGKILL during a previous write could orphan temp files; without the sweep, repeated crashes would accumulate them indefinitely.
+- `image/tree_parser.go` now whitelists tar typeflags (`TypeReg`, `TypeRegA`, `TypeDir`, `TypeSymlink`, `TypeLink`, `TypeChar`, `TypeBlock`, `TypeFifo`). A tar carrying `TypeXGlobalHeader` (rare but legal) would previously surface as a phantom `PaxHeaders.0/` directory in the rendered tree.
+- `IsBinary` now trusts `http.DetectContentType` for non-`octet-stream` results. UTF-16 text files (which carry null bytes in their high-byte half) were correctly classified as `text/plain; charset=utf-16le` by detection, then mis-overridden as binary by the unconditional null-byte scan. The scan now runs only when detection returns `application/octet-stream`.
+- `cleanTarPath` now rejects `..` segments via `path.Clean`. Defense-in-depth: the cache and extractor paths already validate independently, but a future consumer using tree paths to write to disk would have inherited the gap.
+
+### Test coverage
+- `TestJSONExport_SchemaRoundTrip` now marshals + unmarshals through a literal-named schema struct, locking the public JSON shape against silent tag renames or misplaced `omitempty`.
+- `TestLoadCache_TransientIOError_KeepsFile` no longer passes vacuously on Windows. `runtime.GOOS == "windows"` and root-uid checks now skip explicitly at the top; the assertion path runs unconditionally on Linux/macOS non-root.
+- `TestExtractFromLayer_SingleLayerImage` covers the cursor=0 walk-back boundary on a one-layer image, both for the "found" and "not found" branches.
 
 ### Technical
 - New `FileNode` fields: `IsHardlink bool`, `Linkname string`. Populated at parse time from `tar.TypeLink` and `hdr.Linkname`.
 - `model.viewRequestID` and `model.saveRequestID` are bumped on dispatch (and on Esc for the viewer); message handlers drop any message with a stale ID.
 - New exported `cmd.ErrCIFailed` sentinel error; CI failure path is now reachable from tests without killing the test process.
+- New `image.expandHome` and `image.sweepOrphanTempFiles` helpers in `image/cache.go`.
 
 ## [v1.2.1] — 2026-05-24
 

@@ -22,21 +22,48 @@ import (
 // subdirectories on demand with mode 0700.
 func CacheDir() (string, error) {
 	if override := os.Getenv("LAYERX_CACHE_DIR"); override != "" {
-		if usable, _ := dirIsUsable(override); usable {
-			return override, nil
+		expanded, expandErr := expandHome(override)
+		if expandErr != nil {
+			fmt.Fprintf(os.Stderr,
+				"layerx: ignoring LAYERX_CACHE_DIR=%q (%v); falling back to default\n",
+				override, expandErr)
+		} else {
+			if usable, _ := dirIsUsable(expanded); usable {
+				return expanded, nil
+			}
+			// Bad override is non-fatal but the user almost certainly wants to
+			// know — they set the env var on purpose. Fall back to the default
+			// after warning once on stderr.
+			fmt.Fprintf(os.Stderr,
+				"layerx: ignoring LAYERX_CACHE_DIR=%q (not a usable directory); falling back to default\n",
+				override)
 		}
-		// Bad override is non-fatal but the user almost certainly wants to
-		// know — they set the env var on purpose. Fall back to the default
-		// after warning once on stderr.
-		fmt.Fprintf(os.Stderr,
-			"layerx: ignoring LAYERX_CACHE_DIR=%q (not a usable directory); falling back to default\n",
-			override)
 	}
 	uc, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving user cache dir: %w", err)
 	}
 	return filepath.Join(uc, "layerx"), nil
+}
+
+// expandHome resolves a leading "~" or "~/..." to the user's home directory.
+// Paths without a "~" prefix are returned unchanged. Any other use of "~"
+// (e.g. "~user/foo") is rejected — Go has no portable getpwnam.
+func expandHome(p string) (string, error) {
+	if p == "" || p[0] != '~' {
+		return p, nil
+	}
+	if p != "~" && p[1] != '/' && p[1] != '\\' {
+		return "", fmt.Errorf("unsupported ~user form: %q", p)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home dir for ~ expansion: %w", err)
+	}
+	if p == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, p[2:]), nil
 }
 
 // dirIsUsable returns true if path is an existing directory or can be
@@ -188,6 +215,8 @@ func saveCache(root, digest string, layers []Layer) error {
 		return fmt.Errorf("creating cache dir %s: %w", dir, err)
 	}
 
+	sweepOrphanTempFiles(dir)
+
 	tmpName, err := tempFilename("layers.gob.tmp-")
 	if err != nil {
 		return fmt.Errorf("generating temp name: %w", err)
@@ -241,4 +270,24 @@ func tempFilename(prefix string) (string, error) {
 		return "", err
 	}
 	return prefix + hex.EncodeToString(buf[:]), nil
+}
+
+// sweepOrphanTempFiles removes layers.gob.tmp-* files older than one hour
+// from dir. Best effort: errors are ignored. A SIGKILL during saveCache can
+// orphan a temp file; without this sweep, repeated crashes accumulate.
+func sweepOrphanTempFiles(dir string) {
+	matches, err := filepath.Glob(filepath.Join(dir, "layers.gob.tmp-*"))
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-1 * time.Hour)
+	for _, m := range matches {
+		info, statErr := os.Stat(m)
+		if statErr != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(m)
+		}
+	}
 }

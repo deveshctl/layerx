@@ -40,7 +40,8 @@ type Extractor interface {
 }
 
 // IsBinary reports whether data appears to be binary content.
-// Uses net/http content detection plus null-byte scanning.
+// Trusts net/http content detection for text/* (covering UTF-8/16/32 with BOMs)
+// and only falls back to null-byte scanning when detection is inconclusive.
 func IsBinary(data []byte) bool {
 	if len(data) == 0 {
 		return false
@@ -48,6 +49,13 @@ func IsBinary(data []byte) bool {
 	ct := http.DetectContentType(data)
 	if strings.HasPrefix(ct, "text/") {
 		return false
+	}
+	// DetectContentType returns application/octet-stream when it cannot
+	// classify the bytes. Only in that case do we fall through to the
+	// null-byte heuristic — trusting non-text classifications (image/*,
+	// application/pdf, etc.) directly avoids overriding correct results.
+	if ct != "application/octet-stream" {
+		return true
 	}
 	for _, b := range data {
 		if b == 0 {

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -383,33 +384,26 @@ func TestSaveCache_RejectsBadDigest(t *testing.T) {
 }
 
 func TestLoadCache_TransientIOError_KeepsFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not block file open on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; chmod 0o000 does not block open")
+	}
 	root := t.TempDir()
 	digest := "sha256:transient"
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 
-	// Make the file unreadable to simulate a permission flip mid-flight.
-	// On Windows os.Chmod has limited effect; this test runs meaningfully
-	// on Linux CI where Gate B exercises it.
 	require.NoError(t, os.WriteFile(path, []byte("anything"), 0o000))
 	defer func() { _ = os.Chmod(path, 0o600) }()
 
 	_, ok, err := loadCache(root, digest)
-	if err == nil && runtimeIsRestrictivePosix() {
-		t.Skip("file open succeeded despite 0o000; skipping (likely Windows or root)")
-	}
-	if err != nil {
-		assert.False(t, ok)
-		// Crucially: the file was NOT removed. Restore perms so cleanup works.
-		require.NoError(t, os.Chmod(path, 0o600))
-		_, statErr := os.Stat(path)
-		assert.NoError(t, statErr, "transient I/O failure must NOT evict cache")
-	}
-}
+	require.Error(t, err, "0o000 file must surface as transient I/O error")
+	assert.False(t, ok)
 
-func runtimeIsRestrictivePosix() bool {
-	// Heuristic: if we're running as root or on Windows, chmod 0o000 won't
-	// block the open. Tests that rely on it should skip.
-	return os.Geteuid() == 0
+	require.NoError(t, os.Chmod(path, 0o600))
+	_, statErr := os.Stat(path)
+	assert.NoError(t, statErr, "transient I/O failure must NOT evict cache")
 }

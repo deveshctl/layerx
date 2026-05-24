@@ -161,9 +161,10 @@ func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, 
 		return styleWithFg(fileNameColor).Render(line)
 	}
 
-	lowerLine := strings.ToLower(line)
-	lowerQuery := strings.ToLower(query)
-	queryLen := len(lowerQuery)
+	lineRunes := []rune(line)
+	lowerLineRunes := []rune(strings.ToLower(line))
+	queryRunes := []rune(strings.ToLower(query))
+	queryLen := len(queryRunes)
 
 	// Determine which occurrence on this line (if any) is the current match.
 	currentOccurrence := -1
@@ -194,25 +195,30 @@ func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, 
 	var segments []segment
 	pos := 0
 	occurrence := 0
-	for {
-		idx := strings.Index(lowerLine[pos:], lowerQuery)
+	for pos <= len(lowerLineRunes)-queryLen {
+		idx := -1
+		for i := pos; i <= len(lowerLineRunes)-queryLen; i++ {
+			if string(lowerLineRunes[i:i+queryLen]) == string(queryRunes) {
+				idx = i
+				break
+			}
+		}
 		if idx < 0 {
 			break
 		}
-		matchStart := pos + idx
-		matchEnd := matchStart + queryLen
+		matchEnd := idx + queryLen
 
-		if matchStart > pos {
-			segments = append(segments, segment{text: line[pos:matchStart]})
+		if idx > pos {
+			segments = append(segments, segment{text: string(lineRunes[pos:idx])})
 		}
 
 		isCurrent := occurrence == currentOccurrence
-		segments = append(segments, segment{text: line[matchStart:matchEnd], match: true, current: isCurrent})
+		segments = append(segments, segment{text: string(lineRunes[idx:matchEnd]), match: true, current: isCurrent})
 		pos = matchEnd
 		occurrence++
 	}
-	if pos < len(line) {
-		segments = append(segments, segment{text: line[pos:]})
+	if pos < len(lineRunes) {
+		segments = append(segments, segment{text: string(lineRunes[pos:])})
 	}
 	if len(segments) == 0 {
 		return styleWithFg(fileNameColor).Render(line)
