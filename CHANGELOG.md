@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.2.2] — 2026-05-24
+
+Waste overlay navigation feels continuous and tells the user where they are.
+
+### Fixed
+- Waste overlay: pressing `j` past the collapsed top-20 list now silently auto-expands to the full list and continues scrolling, instead of silently stopping at row 20. `G` from a collapsed view now jumps to the true last row, auto-expanding when needed. Manual `a` toggle is unchanged.
+- Waste overlay panel border title now reads `Wasted Files 14/30` to match the `Layers 14/30` and `File Tree 14/30` convention. Body header simplified to `5.6 MB wasted across 31 files`; the redundant `Top 20 of N` framing is gone now that the title carries the count. Empty state shows `Wasted Files 0/0`.
+
 ## [v1.2.1] — 2026-05-23
 
 Two correctness fixes in the layer-stacking and file-viewer paths.
