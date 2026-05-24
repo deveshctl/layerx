@@ -79,12 +79,15 @@ func Efficiency(layers []Layer) *EfficiencyResult {
 	}
 }
 
-// walkFiles recursively visits all non-directory file nodes.
+// walkFiles recursively visits all non-directory file nodes. Hardlinks are
+// skipped because their content lives at the link target — counting them
+// would double-count bytes (size 0 in tar) and inflate the file count
+// without adding real data.
 func walkFiles(node *FileNode, fn func(path string, size int64)) {
 	for _, child := range node.Children {
 		if child.IsDir {
 			walkFiles(child, fn)
-		} else {
+		} else if !child.IsHardlink {
 			fn(child.Path, child.Size)
 		}
 	}

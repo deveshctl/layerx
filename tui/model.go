@@ -64,8 +64,9 @@ const (
 
 // fileContentMsg is sent when async file extraction completes.
 type fileContentMsg struct {
-	content *image.FileContent
-	err     error
+	requestID uint64
+	content   *image.FileContent
+	err       error
 }
 
 // analysisMsg is sent when the background fetch completes.
@@ -96,9 +97,10 @@ type clearStatusMsg struct{}
 
 // fileSaveMsg is sent when async file extraction for save-to-disk completes.
 type fileSaveMsg struct {
-	filename string
-	data     []byte
-	err      error
+	requestID uint64
+	filename  string
+	data      []byte
+	err       error
 }
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -142,6 +144,8 @@ type model struct {
 	viewSearchQuery  string
 	viewSearchMatches [][2]int
 	viewSearchCursor int
+	viewRequestID    uint64
+	saveRequestID    uint64
 	extractor        image.Extractor
 	efficiency       *image.EfficiencyResult
 	writeFile        func(string, []byte, os.FileMode) error
@@ -277,6 +281,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case fileContentMsg:
+		if msg.requestID != m.viewRequestID {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.viewState = viewNone
 			m.statusMsg = "Error: " + msg.err.Error()
@@ -290,6 +297,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case fileSaveMsg:
+		if msg.requestID != m.saveRequestID {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.statusMsg = "Error: " + msg.err.Error()
 			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
@@ -328,6 +338,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewState = viewNone
 				m.viewContent = nil
 				m.viewOffset = 0
+				m.viewRequestID++
 				return m, nil
 			}
 			if m.showWaste {
@@ -601,7 +612,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			m.statusMsg = "Extracting..."
-			return m, m.fetchFileRaw(f.Path)
+			m.saveRequestID++
+			return m, m.fetchFileRaw(f.Path, m.saveRequestID)
 		}
 	}
 
@@ -745,7 +757,8 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 	} else {
 		m.viewOriginCmd = ""
 	}
-	return m, tea.Batch(m.fetchFileContent(f.Path), m.spinnerTick())
+	m.viewRequestID++
+	return m, tea.Batch(m.fetchFileContent(f.Path, m.viewRequestID), m.spinnerTick())
 }
 
 func (m model) layers() []image.Layer {
@@ -1356,23 +1369,23 @@ func (m model) renderViewerStatusBar() string {
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
 }
 
-func (m model) fetchFileContent(path string) tea.Cmd {
+func (m model) fetchFileContent(path string, requestID uint64) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
 	layer := m.layerCursor
 	return func() tea.Msg {
 		content, err := extractor.ExtractFromLayer(context.Background(), imageRef, path, layer)
-		return fileContentMsg{content: content, err: err}
+		return fileContentMsg{requestID: requestID, content: content, err: err}
 	}
 }
 
-func (m model) fetchFileRaw(path string) tea.Cmd {
+func (m model) fetchFileRaw(path string, requestID uint64) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
 	layer := m.layerCursor
 	return func() tea.Msg {
 		data, err := extractor.ExtractRawFromLayer(context.Background(), imageRef, path, layer)
-		return fileSaveMsg{filename: filepath.Base(path), data: data, err: err}
+		return fileSaveMsg{requestID: requestID, filename: filepath.Base(path), data: data, err: err}
 	}
 }
 
