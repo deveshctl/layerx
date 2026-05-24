@@ -131,6 +131,10 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.wasteCursor < len(rows)-1 {
 			m.wasteCursor++
 			m.adjustWasteScroll(visibleHeight)
+		} else if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
+			m.wasteExpanded = true
+			m.wasteCursor++
+			m.adjustWasteScroll(visibleHeight)
 		}
 	case key.Matches(msg, m.keys.Up):
 		if m.wasteCursor > 0 {
@@ -141,8 +145,11 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.wasteCursor = 0
 		m.wasteOffset = 0
 	case key.Matches(msg, m.keys.Bottom):
-		if len(rows) > 0 {
-			m.wasteCursor = len(rows) - 1
+		if len(m.wasteRows) > 0 {
+			if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
+				m.wasteExpanded = true
+			}
+			m.wasteCursor = len(m.wasteRows) - 1
 			m.adjustWasteScroll(visibleHeight)
 		}
 	case msg.Code == tea.KeyEnter:
@@ -215,11 +222,16 @@ func (m model) renderWasteOverlay() string {
 	innerWidth := boxWidth - 2
 
 	rows := m.visibleWasteRows()
-	totalAvailable := len(m.wasteRows)
 	originalCount := 0
 	if m.efficiency != nil {
 		originalCount = len(m.efficiency.WastedFiles)
 	}
+
+	posNum := 0
+	if originalCount > 0 {
+		posNum = m.wasteCursor + 1
+	}
+	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, originalCount)
 
 	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
@@ -245,19 +257,8 @@ func (m model) renderWasteOverlay() string {
 			}
 		}
 	} else {
-		var header string
-		switch {
-		case m.wasteExpanded && totalAvailable < originalCount:
-			header = fmt.Sprintf("All %d of %d wasted files (truncated) | %s wasted",
-				totalAvailable, originalCount, image.FormatBytes(m.efficiency.WastedBytes))
-		case m.wasteExpanded:
-			header = fmt.Sprintf("All %d wasted files | %s wasted",
-				totalAvailable, image.FormatBytes(m.efficiency.WastedBytes))
-		default:
-			limit := min(originalCount, wasteDefaultLimit)
-			header = fmt.Sprintf("Top %d of %d wasted files | %s wasted",
-				limit, originalCount, image.FormatBytes(m.efficiency.WastedBytes))
-		}
+		header := fmt.Sprintf("%s wasted across %d files",
+			image.FormatBytes(m.efficiency.WastedBytes), originalCount)
 		lines = append(lines, "  "+titleStyle.Render(header))
 		lines = append(lines, "")
 
@@ -314,7 +315,7 @@ func (m model) renderWasteOverlay() string {
 		boxHeight = m.height - 2
 	}
 
-	panel := renderPanel(body, "Wasted Files", true, innerWidth, boxHeight, false, false)
+	panel := renderPanel(body, panelTitle, true, innerWidth, boxHeight, false, false)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 }
 
