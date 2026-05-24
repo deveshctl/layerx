@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/moby/moby/client"
@@ -206,52 +207,41 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 var errWhiteoutStop = errors.New("path removed by whiteout")
 
 // loadLayerTars exports the image via ImageSave and returns the ordered
-// manifest.Layers list and a map from layer path to raw (possibly gzipped)
-// tar bytes. Bytes are buffered in memory only for the lifetime of the
-// calling method.
-func (e *DockerExtractor) loadLayerTars(ctx context.Context, imageRef string) ([]string, map[string][]byte, error) {
+// manifest.Layers list along with raw (possibly gzipped) tar bytes for
+// only the first maxLayers entries.
+//
+// Memory bound: the ImageSave stream is spooled to a temp file (cleaned up
+// before return). After that, only the requested layers' bytes are held in
+// memory, so peak heap is on the order of the largest needed blob — not the
+// whole image. This matters for the TUI extraction path where mashing keys
+// can fire concurrent calls; without the cap an 8 GB image would peak at
+// 8 GB of heap per call.
+//
+// maxLayers must be > 0 and is clamped to len(manifest.Layers).
+func (e *DockerExtractor) loadLayerTars(ctx context.Context, imageRef string, maxLayers int) ([]string, map[string][]byte, error) {
 	rc, err := e.cli.ImageSave(ctx, []string{imageRef})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
 	defer rc.Close()
 
-	var manifestData []byte
-	blobs := make(map[string][]byte)
+	spool, err := os.CreateTemp("", "layerx-extract-*.tar")
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating temp spool: %w", err)
+	}
+	spoolPath := spool.Name()
+	defer os.Remove(spoolPath)
+	defer spool.Close()
 
-	tr := tar.NewReader(rc)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("reading image archive: %w", err)
-		}
-		switch {
-		case hdr.Name == "manifest.json":
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, nil, fmt.Errorf("reading manifest.json: %w", err)
-			}
-			manifestData = data
-		case strings.HasPrefix(hdr.Name, "blobs/sha256/"):
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-			}
-			blobs[hdr.Name] = data
-		case strings.HasSuffix(hdr.Name, "/layer.tar"):
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-			}
-			blobs[hdr.Name] = data
-		}
+	if _, err := io.Copy(spool, rc); err != nil {
+		return nil, nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 
-	if manifestData == nil {
-		return nil, nil, fmt.Errorf("invalid image archive: manifest.json not found")
+	// Pass 1: parse manifest only. Blob bodies are streamed past via
+	// io.Copy(io.Discard, tr) — no allocation per blob.
+	manifestData, err := readManifestFromSpool(spool)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var manifests []dockerManifest
@@ -261,8 +251,79 @@ func (e *DockerExtractor) loadLayerTars(ctx context.Context, imageRef string) ([
 	if len(manifests) == 0 {
 		return nil, nil, fmt.Errorf("invalid image archive: empty manifest")
 	}
+	layerPaths := manifests[0].Layers
 
-	return manifests[0].Layers, blobs, nil
+	if maxLayers <= 0 {
+		return nil, nil, fmt.Errorf("loadLayerTars: maxLayers must be > 0, got %d", maxLayers)
+	}
+	keepCount := min(maxLayers, len(layerPaths))
+	keep := make(map[string]struct{}, keepCount)
+	for _, p := range layerPaths[:keepCount] {
+		keep[p] = struct{}{}
+	}
+
+	// Pass 2: read only blobs in the keep-set.
+	blobs, err := readBlobsFromSpool(spool, keep)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return layerPaths, blobs, nil
+}
+
+// readManifestFromSpool walks the spooled outer tar from the beginning and
+// returns the manifest.json bytes. Non-manifest entries are streamed past
+// without buffering.
+func readManifestFromSpool(spool *os.File) ([]byte, error) {
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek spool: %w", err)
+	}
+	tr := tar.NewReader(spool)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("invalid image archive: manifest.json not found")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		if hdr.Name == "manifest.json" {
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("reading manifest.json: %w", err)
+			}
+			return data, nil
+		}
+	}
+}
+
+// readBlobsFromSpool walks the spooled outer tar from the beginning and
+// returns a map of name -> raw bytes for entries whose name is in keep.
+// Entries not in keep are streamed past without buffering.
+func readBlobsFromSpool(spool *os.File, keep map[string]struct{}) (map[string][]byte, error) {
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek spool: %w", err)
+	}
+	blobs := make(map[string][]byte, len(keep))
+	tr := tar.NewReader(spool)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		if _, want := keep[hdr.Name]; !want {
+			continue
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+		}
+		blobs[hdr.Name] = data
+	}
+	return blobs, nil
 }
 
 // findFileInLayer walks one layer's tar bytes (decompressing if gzipped) and
@@ -345,7 +406,7 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, blobs, err := e.loadLayerTars(ctx, imageRef)
+	layerPaths, blobs, err := e.loadLayerTars(ctx, imageRef, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +441,7 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, blobs, err := e.loadLayerTars(ctx, imageRef)
+	layerPaths, blobs, err := e.loadLayerTars(ctx, imageRef, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
