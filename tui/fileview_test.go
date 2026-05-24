@@ -26,15 +26,17 @@ func TestHighlightFileLinesUnknownExtension(t *testing.T) {
 }
 
 func TestRenderFileViewSyntaxHighlighting(t *testing.T) {
+	src := []byte("package main\n")
 	body := renderFileView(viewerParams{
 		content: &image.FileContent{
 			Path: "app.go",
-			Data: []byte("package main\n"),
+			Data: src,
 			Size: 13,
 		},
-		offset: 0,
-		width:  80,
-		height: 10,
+		offset:           0,
+		width:            80,
+		height:           10,
+		highlightedLines: highlightFileLines("app.go", src),
 	})
 	assert.Contains(t, body, "\x1b[")
 }
@@ -47,9 +49,10 @@ func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 			Data: data,
 			Size: int64(len(data)),
 		},
-		offset: 36,
-		width:  120,
-		height: 30,
+		offset:           36,
+		width:            120,
+		height:           30,
+		highlightedLines: highlightFileLines("/etc/security/pam_env.conf", data),
 	})
 
 	max := 0
@@ -62,16 +65,18 @@ func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 }
 
 func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {
+	src := []byte("package main\n")
 	body := renderFileView(viewerParams{
 		content: &image.FileContent{
 			Path: "app.go",
-			Data: []byte("package main\n"),
+			Data: src,
 			Size: 13,
 		},
-		offset:      0,
-		width:       80,
-		height:      10,
-		searchQuery: "main",
+		offset:           0,
+		width:            80,
+		height:           10,
+		searchQuery:      "main",
+		highlightedLines: highlightFileLines("app.go", src),
 	})
 	assert.NotContains(t, body, "\x1b[38;5;")
 }

@@ -24,6 +24,10 @@ type viewerParams struct {
 	searchMatches [][2]int
 	searchCursor int
 	searchActive bool
+	// highlightedLines is the cached chroma output for content.Data, or nil if
+	// highlighting hasn't been computed yet or is unavailable. When non-nil and
+	// no search is active, it is used directly to skip per-frame chroma work.
+	highlightedLines []string
 }
 
 func renderFileView(p viewerParams) string {
@@ -69,8 +73,8 @@ func renderFileView(p viewerParams) string {
 	lines := strings.Split(string(p.content.Data), "\n")
 	syntaxHighlight := p.searchQuery == ""
 	if syntaxHighlight {
-		if highlighted := highlightFileLines(p.content.Path, p.content.Data); highlighted != nil {
-			lines = highlighted
+		if p.highlightedLines != nil {
+			lines = p.highlightedLines
 		} else {
 			syntaxHighlight = false
 		}

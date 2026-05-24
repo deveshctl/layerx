@@ -4,9 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes.
+Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes. Five further bug-scan fixes covering tar-path normalization, CI-rule disable semantics, pull-error propagation, file-viewer chroma cost, and extractor goroutine cancellation.
 
 ### Fixed
+- `cleanTarPath` now returns the cleaned path instead of the original. The validator computed `path.Clean(p)` and then returned `p`, so a tar entry like `usr/./bin/sh` (legal output of busybox tar and some `--transform` rules) was inserted into the tree under a phantom `.` node. Whiteout matching missed `.wh.bin` entries against such paths, the TUI rendered ugly `/usr/./bin/sh` rows, and efficiency comparisons silently under-reported waste when one layer used the clean form and another the dotted form. One-character fix at `image/tree_parser.go:68` plus a `TestParseLayerTar_EmbeddedDotSegmentNormalized` regression.
+- `layerx ci --highest-user-wasted-percent 0` now disables the rule, matching its own help text. `cmd/ci.go` guarded `HighestWastedBytes` with `if hwb > 0` but appended `HighestUserWastedPercent` unconditionally, and the rule's `Evaluate` had no internal bypass — so passing `0` (or setting it in `.layerx.yaml`) failed any image with any waste at all. `cmd/ci.go` now mirrors the existing guard, and `HighestUserWastedPercent.Evaluate` itself bypasses on `Threshold <= 0` for belt-and-suspenders coverage of direct callers (e.g. future MCP).
+- `streamPullProgress` now returns its stream error instead of swallowing it. `ensureImageWithProgress` ignored the result, so a network failure or invalid manifest mid-pull would surface to the user as the misleading downstream `failed to export image: No such image` instead of the actual pull failure. The function signature now returns `error`; the caller wraps the error in `*ErrPullFailed{Ref, Cause}`, matching the non-progress branch.
+- File viewer no longer re-runs chroma syntax highlighting on every TUI frame. `renderFileView` called `highlightFileLines(path, data)` unconditionally inside the View pipeline, so each keystroke, spinner tick, or resize re-tokenized the entire file from scratch — a 500 KB file (within the 1 MB viewer cap) added 200–400 ms of latency per frame. Highlighting is now computed once when `fileContentMsg` arrives and cached on the model as `viewHighlightedLines`; `renderFileView` accepts the slice via `viewerParams` and skips chroma in the render hot path. The cache is invalidated on Esc and on each new content load.
+- Pressing Esc during a slow file extraction now cancels the in-flight Docker container work. `fetchFileContent` and `fetchFileRaw` previously used `context.Background()`, so the temp-container create/copy/remove round-trip kept running even after the user moved on; rapid Enter→Esc→Enter sequences could race two extractions at once. The model now carries `viewerCancel` and `saveCancel` `context.CancelFunc`s that are wired through `ExtractFromLayer`/`ExtractRawFromLayer`. Each new fetch cancels any prior context; Esc on the viewer also cancels; arrival of the matching message clears the func.
 - Waste overlay no longer silently jumps to layer 1 when a wasted file's intro layer is unknown. `buildIntroIndex` only walks the *last* stacked tree, so files whited out before the final layer were missing from the index — the bare map lookup returned Go's zero value (0), which the jump path then treated as "introduced at layer 1". The lookup now uses comma-ok and stores `-1` for unknowns; the row renders `L?`, and Enter shows `Intro layer unknown for <path>` instead of jumping.
 - File viewer no longer pops back open after Esc. A slow extract whose user pressed Esc mid-load would re-set `viewState = viewReady` when the goroutine finally delivered, overlaying the user's current screen. The model now carries a monotonic `viewRequestID` captured by each load goroutine; Esc bumps the ID, and any in-flight `fileContentMsg` whose ID doesn't match is dropped. Same pattern applied to `fileSaveMsg` (`x` save-to-disk) so a second `x` invalidates the first.
 - Efficiency calculation no longer counts hardlinks as 0-byte files. Tar `TypeLink` entries carry `hdr.Size == 0` by convention (the real bytes are at the link target), but the parser was inserting them as zero-byte file nodes that `Efficiency` then walked, inflating the file count without adding bytes. `FileNode` now carries `IsHardlink` / `Linkname`; `walkFiles` skips hardlinks, so per-layer waste reflects actual content bytes only.
@@ -27,12 +32,18 @@ Three correctness fixes in waste overlay, file viewer, and efficiency calculatio
 - `TestJSONExport_SchemaRoundTrip` now marshals + unmarshals through a literal-named schema struct, locking the public JSON shape against silent tag renames or misplaced `omitempty`.
 - `TestLoadCache_TransientIOError_KeepsFile` no longer passes vacuously on Windows. `runtime.GOOS == "windows"` and root-uid checks now skip explicitly at the top; the assertion path runs unconditionally on Linux/macOS non-root.
 - `TestExtractFromLayer_SingleLayerImage` covers the cursor=0 walk-back boundary on a one-layer image, both for the "found" and "not found" branches.
+- `TestParseLayerTar_EmbeddedDotSegmentNormalized` covers `cleanTarPath` collapsing embedded `./` segments.
+- `TestHighestUserWastedPercent_DisabledWhenZero` covers `Threshold == 0` bypass.
+- `TestFileContentMsgPopulatesHighlightCache` and `TestEscClearsHighlightCache` cover the lifecycle of the new chroma cache.
 
 ### Technical
 - New `FileNode` fields: `IsHardlink bool`, `Linkname string`. Populated at parse time from `tar.TypeLink` and `hdr.Linkname`.
 - `model.viewRequestID` and `model.saveRequestID` are bumped on dispatch (and on Esc for the viewer); message handlers drop any message with a stale ID.
 - New exported `cmd.ErrCIFailed` sentinel error; CI failure path is now reachable from tests without killing the test process.
 - New `image.expandHome` and `image.sweepOrphanTempFiles` helpers in `image/cache.go`.
+- New `viewerParams.highlightedLines` field; `renderFileView` consumes pre-computed chroma output instead of computing it inline.
+- New model fields `viewHighlightedLines []string`, `viewerCancel context.CancelFunc`, and `saveCancel context.CancelFunc`.
+- `fetchFileContent` and `fetchFileRaw` now take `ctx context.Context` as a parameter.
 
 ## [v1.2.1] — 2026-05-24
 

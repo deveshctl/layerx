@@ -65,7 +65,7 @@ func cleanTarPath(p string) string {
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return ""
 	}
-	return p
+	return cleaned
 }
 
 func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink bool, linkname string, mode fs.FileMode, uid, gid int) {

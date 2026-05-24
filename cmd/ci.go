@@ -132,7 +132,9 @@ func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {
 	if hwb > 0 {
 		rules = append(rules, ci.HighestWastedBytes{Threshold: hwb})
 	}
-	rules = append(rules, ci.HighestUserWastedPercent{Threshold: huwp})
+	if huwp > 0 {
+		rules = append(rules, ci.HighestUserWastedPercent{Threshold: huwp})
+	}
 
 	return rules
 }
