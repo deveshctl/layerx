@@ -148,6 +148,7 @@ type model struct {
 	keys             keyMap
 	showWaste     bool
 	wasteCursor   int
+	wasteOffset   int
 	wasteExpanded bool
 	wasteRows     []wasteRow
 	sizeMode      sizeColMode
