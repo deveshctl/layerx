@@ -86,7 +86,7 @@ func renderFileView(p viewerParams) string {
 	}
 
 	totalLines := len(lines)
-	gutterWidth := len(fmt.Sprintf("%d", totalLines)) + 1
+	gutterDigits := len(fmt.Sprintf("%d", totalLines)) + 1
 
 	var sb strings.Builder
 	end := p.offset + viewHeight
@@ -104,9 +104,10 @@ func renderFileView(p viewerParams) string {
 	for i, line := range visible {
 		lineNum := p.offset + i + 1
 		lineIdx := p.offset + i
-		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterWidth, lineNum))
+		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterDigits, lineNum))
+		gutterW := ansi.StringWidth(gutter)
 
-		maxLineWidth := contentWidth - gutterWidth - 1
+		maxLineWidth := contentWidth - gutterW
 		if maxLineWidth < 1 {
 			maxLineWidth = 1
 		}
@@ -114,12 +115,17 @@ func renderFileView(p viewerParams) string {
 			if ansi.StringWidth(line) > maxLineWidth {
 				line = ansi.Truncate(line, maxLineWidth, "…")
 			}
-		} else if len([]rune(line)) > maxLineWidth {
-			line = string([]rune(line)[:maxLineWidth-1]) + "…"
+		} else if ansi.StringWidth(line) > maxLineWidth {
+			line = ansi.Truncate(line, maxLineWidth, "…")
 		}
 
 		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
-		sb.WriteString(gutter + lineContent)
+		fullLine := gutter + lineContent
+		if w := ansi.StringWidth(fullLine); w > contentWidth {
+			lineContent = ansi.Truncate(lineContent, contentWidth-gutterW, "…")
+			fullLine = gutter + lineContent
+		}
+		sb.WriteString(fullLine)
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
 		}

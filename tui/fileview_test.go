@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,28 @@ func TestRenderFileViewSyntaxHighlighting(t *testing.T) {
 		height: 10,
 	})
 	assert.Contains(t, body, "\x1b[")
+}
+
+func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
+	data := []byte(strings.Repeat("# comment line with some text\n", 74))
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path: "/etc/security/pam_env.conf",
+			Data: data,
+			Size: int64(len(data)),
+		},
+		offset: 36,
+		width:  120,
+		height: 30,
+	})
+
+	max := 0
+	for _, ln := range strings.Split(body, "\n") {
+		if w := ansi.StringWidth(ln); w > max {
+			max = w
+		}
+	}
+	require.LessOrEqual(t, max, 120)
 }
 
 func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {
