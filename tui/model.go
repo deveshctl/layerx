@@ -148,6 +148,7 @@ type model struct {
 	keys             keyMap
 	showWaste     bool
 	wasteCursor   int
+	wasteOffset   int
 	wasteExpanded bool
 	wasteRows     []wasteRow
 	sizeMode      sizeColMode
@@ -1001,14 +1002,24 @@ func (m model) viewLoading() tea.View {
 			detail := fmt.Sprintf("    Layer %d/%d", m.pullLayers, m.pullTotal)
 			if m.pullBytesMax > 0 {
 				pct := int(m.pullBytes * 100 / m.pullBytesMax)
-				barWidth := 20
-				filled := barWidth * pct / 100
-				bar := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", filled)) +
-					lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", barWidth-filled))
-				detail += fmt.Sprintf("  [%s]  %s / %s",
-					bar,
+				bytesText := fmt.Sprintf("  %s / %s",
 					image.FormatBytes(m.pullBytes),
 					image.FormatBytes(m.pullBytesMax))
+				barWidth := 20
+				if m.width > 0 {
+					budget := m.width - 4 - lipgloss.Width(detail) - len("  []") - lipgloss.Width(bytesText)
+					if budget < barWidth {
+						barWidth = budget
+					}
+				}
+				if barWidth >= 4 {
+					filled := barWidth * pct / 100
+					bar := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", filled)) +
+						lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", barWidth-filled))
+					detail += fmt.Sprintf("  [%s]%s", bar, bytesText)
+				} else {
+					detail += bytesText
+				}
 			}
 			lines = append(lines, detail)
 		}
@@ -1039,6 +1050,11 @@ func (m model) viewLoading() tea.View {
 	lines = append(lines, "")
 
 	boxWidth := 52
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w+2 > boxWidth {
+			boxWidth = w + 2
+		}
+	}
 	if m.width > 0 && m.width-2 < boxWidth {
 		boxWidth = m.width - 2
 	}
@@ -1343,8 +1359,9 @@ func (m model) renderViewerStatusBar() string {
 func (m model) fetchFileContent(path string) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
+	layer := m.layerCursor
 	return func() tea.Msg {
-		content, err := extractor.Extract(context.Background(), imageRef, path)
+		content, err := extractor.ExtractFromLayer(context.Background(), imageRef, path, layer)
 		return fileContentMsg{content: content, err: err}
 	}
 }
@@ -1352,8 +1369,9 @@ func (m model) fetchFileContent(path string) tea.Cmd {
 func (m model) fetchFileRaw(path string) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
+	layer := m.layerCursor
 	return func() tea.Msg {
-		data, err := extractor.ExtractRaw(context.Background(), imageRef, path)
+		data, err := extractor.ExtractRawFromLayer(context.Background(), imageRef, path, layer)
 		return fileSaveMsg{filename: filepath.Base(path), data: data, err: err}
 	}
 }

@@ -47,6 +47,7 @@ func buildIntroIndex(root *image.FileNode) map[string]int {
 func (m *model) openWaste() {
 	m.wasteRows = nil
 	m.wasteCursor = 0
+	m.wasteOffset = 0
 	m.wasteExpanded = false
 
 	if m.efficiency != nil && len(m.efficiency.WastedFiles) > 0 {
@@ -82,6 +83,7 @@ func (m *model) closeWaste() {
 	m.showWaste = false
 	m.wasteRows = nil
 	m.wasteCursor = 0
+	m.wasteOffset = 0
 	m.wasteExpanded = false
 }
 
@@ -92,26 +94,63 @@ func (m model) visibleWasteRows() []wasteRow {
 	return m.wasteRows
 }
 
+// wasteVisibleHeight returns how many row lines fit inside the overlay
+// body. The overlay chrome is: top blank + title + blank + blank + footer
+// + bottom blank = 6 lines, plus the panel's 2 border rows and the
+// surrounding 1-row margin from lipgloss.Place clamping (boxHeight ≤
+// m.height - 2). That works out to m.height - 10.
+func (m *model) wasteVisibleHeight() int {
+	h := m.height - 10
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+func (m *model) adjustWasteScroll(visibleHeight int) {
+	if visibleHeight <= 0 {
+		return
+	}
+	if m.wasteCursor < m.wasteOffset {
+		m.wasteOffset = m.wasteCursor
+	}
+	if m.wasteCursor >= m.wasteOffset+visibleHeight {
+		m.wasteOffset = m.wasteCursor - visibleHeight + 1
+	}
+}
+
 func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Quit) {
 		m.quitting = true
 		return m, tea.Quit
 	}
 	rows := m.visibleWasteRows()
+	visibleHeight := m.wasteVisibleHeight()
 	switch {
 	case key.Matches(msg, m.keys.Down):
 		if m.wasteCursor < len(rows)-1 {
 			m.wasteCursor++
+			m.adjustWasteScroll(visibleHeight)
+		} else if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
+			m.wasteExpanded = true
+			m.wasteCursor++
+			m.adjustWasteScroll(visibleHeight)
 		}
 	case key.Matches(msg, m.keys.Up):
 		if m.wasteCursor > 0 {
 			m.wasteCursor--
+			m.adjustWasteScroll(visibleHeight)
 		}
 	case key.Matches(msg, m.keys.Top):
 		m.wasteCursor = 0
+		m.wasteOffset = 0
 	case key.Matches(msg, m.keys.Bottom):
-		if len(rows) > 0 {
-			m.wasteCursor = len(rows) - 1
+		if len(m.wasteRows) > 0 {
+			if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
+				m.wasteExpanded = true
+			}
+			m.wasteCursor = len(m.wasteRows) - 1
+			m.adjustWasteScroll(visibleHeight)
 		}
 	case msg.Code == tea.KeyEnter:
 		if len(rows) == 0 {
@@ -121,6 +160,7 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case msg.Text == "a":
 		m.wasteExpanded = !m.wasteExpanded
 		m.wasteCursor = 0
+		m.wasteOffset = 0
 	case key.Matches(msg, m.keys.CopyPath):
 		if len(rows) == 0 {
 			return m, nil
@@ -182,11 +222,16 @@ func (m model) renderWasteOverlay() string {
 	innerWidth := boxWidth - 2
 
 	rows := m.visibleWasteRows()
-	totalAvailable := len(m.wasteRows)
 	originalCount := 0
 	if m.efficiency != nil {
 		originalCount = len(m.efficiency.WastedFiles)
 	}
+
+	posNum := 0
+	if originalCount > 0 {
+		posNum = m.wasteCursor + 1
+	}
+	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, originalCount)
 
 	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
@@ -212,24 +257,25 @@ func (m model) renderWasteOverlay() string {
 			}
 		}
 	} else {
-		var header string
-		switch {
-		case m.wasteExpanded && totalAvailable < originalCount:
-			header = fmt.Sprintf("All %d of %d wasted files (truncated) | %s wasted",
-				totalAvailable, originalCount, image.FormatBytes(m.efficiency.WastedBytes))
-		case m.wasteExpanded:
-			header = fmt.Sprintf("All %d wasted files | %s wasted",
-				totalAvailable, image.FormatBytes(m.efficiency.WastedBytes))
-		default:
-			limit := min(originalCount, wasteDefaultLimit)
-			header = fmt.Sprintf("Top %d of %d wasted files | %s wasted",
-				limit, originalCount, image.FormatBytes(m.efficiency.WastedBytes))
-		}
+		header := fmt.Sprintf("%s wasted across %d files",
+			image.FormatBytes(m.efficiency.WastedBytes), originalCount)
 		lines = append(lines, "  "+titleStyle.Render(header))
 		lines = append(lines, "")
 
-		for i, r := range rows {
-			lines = append(lines, formatWasteRow(r, i == m.wasteCursor, innerWidth))
+		visibleHeight := m.height - 10
+		if visibleHeight < 1 {
+			visibleHeight = 1
+		}
+		start := m.wasteOffset
+		if start > len(rows) {
+			start = len(rows)
+		}
+		end := start + visibleHeight
+		if end > len(rows) {
+			end = len(rows)
+		}
+		for i := start; i < end; i++ {
+			lines = append(lines, formatWasteRow(rows[i], i == m.wasteCursor, innerWidth))
 		}
 	}
 
@@ -269,7 +315,7 @@ func (m model) renderWasteOverlay() string {
 		boxHeight = m.height - 2
 	}
 
-	panel := renderPanel(body, "Wasted Files", true, innerWidth, boxHeight, false, false)
+	panel := renderPanel(body, panelTitle, true, innerWidth, boxHeight, false, false)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 }
 

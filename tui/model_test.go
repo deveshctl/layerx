@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -341,6 +342,147 @@ func TestViewLoadingContainsLoadingAndImageRef(t *testing.T) {
 	content := viewContent(v)
 	assert.Contains(t, content, "Pulling")
 	assert.Contains(t, content, "nginx:latest")
+}
+
+// maxPanelLineWidth returns the widest visible line in the rendered view,
+// measured with lipgloss.Width so ANSI styling is excluded.
+func maxPanelLineWidth(content string) int {
+	max := 0
+	for _, ln := range strings.Split(content, "\n") {
+		if w := lipgloss.Width(ln); w > max {
+			max = w
+		}
+	}
+	return max
+}
+
+// TestViewLoadingPullProgressFitsInBox asserts that a multi-GB pull-progress
+// line — long enough to overflow the legacy 52-col box — is rendered without
+// truncating the bytes-total. Regression: prior to the fix, the bytes-total
+// was clipped mid-value because boxWidth was hard-coded to 52.
+func TestViewLoadingPullProgressFitsInBox(t *testing.T) {
+	m := NewModel(Config{ImageRef: "ai/qwen3"})
+	m.width = 120
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullLayers = 1
+	m.pullTotal = 3
+	m.pullBytes = 254 * 1024 * 1024     // "254.0 MB"
+	m.pullBytesMax = 4 * 1024 * 1024 * 1024 // "4.0 GB"
+
+	content := viewContent(m.View())
+
+	assert.Contains(t, content, "254.0 MB", "current bytes must render in full")
+	assert.Contains(t, content, "4.0 GB", "total bytes must render in full")
+	assert.Contains(t, content, "Layer 1/3", "layer counter must render in full")
+}
+
+// TestViewLoadingLongImageRefFitsInBox asserts a long registry/path image ref
+// is not truncated by the loading box. dive users frequently inspect images
+// like registry.example.com/team/service:tag-2026-05-23.
+func TestViewLoadingLongImageRefFitsInBox(t *testing.T) {
+	longRef := "registry.example.com/platform/services/inference-engine:v2026.05.23-rc1"
+	m := NewModel(Config{ImageRef: longRef})
+	m.width = 200
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+
+	content := viewContent(m.View())
+
+	assert.Contains(t, content, longRef, "full image ref must be visible")
+}
+
+// TestViewLoadingPanelNeverExceedsTerminalWidth asserts the loading panel
+// never renders wider than the terminal, even when content would naturally
+// overflow. Worst-case: long ref + GB-scale progress on a typical 100-col term.
+func TestViewLoadingPanelNeverExceedsTerminalWidth(t *testing.T) {
+	cases := []struct {
+		name  string
+		width int
+	}{
+		{"narrow 60", 60},
+		{"typical 100", 100},
+		{"wide 200", 200},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(Config{ImageRef: "registry.example.com/platform/inference:v2026.05.23"})
+			m.width = tc.width
+			m.height = 40
+			m.loadPhase = image.PhasePulling
+			m.pullLayers = 7
+			m.pullTotal = 12
+			m.pullBytes = 8 * 1024 * 1024 * 1024
+			m.pullBytesMax = 12 * 1024 * 1024 * 1024
+
+			content := viewContent(m.View())
+			require.LessOrEqual(t, maxPanelLineWidth(content), tc.width,
+				"no rendered line may be wider than terminal width %d", tc.width)
+		})
+	}
+}
+
+// TestViewLoadingPullProgressNoBytesTotal exercises the branch where
+// pullTotal>0 but pullBytesMax is still 0 (Docker has reported the layer
+// count but not the total size yet). The "Layer N/M" line alone must render.
+func TestViewLoadingPullProgressNoBytesTotal(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.width = 120
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullLayers = 2
+	m.pullTotal = 5
+	m.pullBytes = 0
+	m.pullBytesMax = 0
+
+	content := viewContent(m.View())
+	assert.Contains(t, content, "Layer 2/5")
+	assert.NotContains(t, content, "━", "no progress bar when total bytes unknown")
+	assert.NotContains(t, content, "MB", "no byte counts when total bytes unknown")
+}
+
+// TestViewLoadingPullProgressShrinksBarOnNarrowTerminal asserts the progress
+// bar shrinks (rather than overflowing or being truncated) when the terminal
+// is too narrow for the default 20-cell bar plus counter and bytes.
+// Regression: the bytes-total ("4.7 GB") was being clipped mid-value because
+// the bar was hard-coded to 20 cells regardless of terminal width.
+func TestViewLoadingPullProgressShrinksBarOnNarrowTerminal(t *testing.T) {
+	m := NewModel(Config{ImageRef: "ai/qwen3"})
+	m.width = 50
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullLayers = 1
+	m.pullTotal = 3
+	m.pullBytes = 69 * 1024 * 1024
+	m.pullBytesMax = 5046586573 // ~4.7 GB
+
+	content := viewContent(m.View())
+
+	assert.Contains(t, content, "4.7 GB", "bytes-total must not be truncated on narrow terminal")
+	assert.Contains(t, content, "Layer 1/3")
+	require.LessOrEqual(t, maxPanelLineWidth(content), 50,
+		"panel must not exceed terminal width")
+}
+
+// TestViewLoadingPullProgressDropsBarWhenTooNarrow asserts that on a very
+// narrow terminal the bar is dropped entirely (rather than rendered with
+// fewer than 4 cells, which looks broken).
+func TestViewLoadingPullProgressDropsBarWhenTooNarrow(t *testing.T) {
+	m := NewModel(Config{ImageRef: "x"})
+	m.width = 40
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullLayers = 1
+	m.pullTotal = 3
+	m.pullBytes = 69 * 1024 * 1024
+	m.pullBytesMax = 5046586573 // ~4.7 GB
+
+	content := viewContent(m.View())
+
+	assert.Contains(t, content, "4.7 GB")
+	assert.Contains(t, content, "Layer 1/3")
+	assert.NotContains(t, content, "━", "bar should be omitted when terminal cannot fit ≥4 cells")
+	require.LessOrEqual(t, maxPanelLineWidth(content), 40)
 }
 
 // --- View: error state -------------------------------------------------------
@@ -912,6 +1054,24 @@ func (e *mockExtractor) Extract(_ context.Context, _ string, path string) (*imag
 }
 
 func (e *mockExtractor) ExtractRaw(_ context.Context, _ string, _ string) ([]byte, error) {
+	if e.extractRawErr != nil {
+		return nil, e.extractRawErr
+	}
+	if e.extractRawData != nil {
+		return e.extractRawData, nil
+	}
+	return []byte("mock raw content"), nil
+}
+
+func (e *mockExtractor) ExtractFromLayer(_ context.Context, _ string, path string, _ int) (*image.FileContent, error) {
+	return &image.FileContent{
+		Path: path,
+		Data: []byte("mock content"),
+		Size: 12,
+	}, nil
+}
+
+func (e *mockExtractor) ExtractRawFromLayer(_ context.Context, _ string, _ string, _ int) ([]byte, error) {
 	if e.extractRawErr != nil {
 		return nil, e.extractRawErr
 	}

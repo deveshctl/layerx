@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.2.1] — 2026-05-24
+
+Correctness fixes in the layer-stacking and file-viewer paths, plus loading-panel and waste-overlay polish.
+
+### Fixed
+- Directory metadata changes (mode, UID, GID) are now correctly attributed to the layer that introduced them. Previously, `RUN chmod 0777 /app` in a later layer was silently dropped from the stacked tree — the merged node always took its metadata from the cumulative state, never re-consulting the new layer.
+- File viewer (`Enter`) and save-to-disk (`x`) now extract the file as it exists at the selected layer, not as it exists in the final image. Previously both spawned a temporary container from the final image, so viewing `/etc/config` at Layer 2 always showed Layer 5's content. New `Extractor.ExtractFromLayer` and `ExtractRawFromLayer` methods walk back from the selected layer's tar to find the most recent version of the file.
+- Loading panel no longer truncates the pull-progress line on large images. The box width is sized to fit the longest content line; on narrow terminals the progress bar shrinks to whatever space remains after the layer counter and bytes total, and is dropped entirely below 4 cells so the bytes total (e.g. `4.7 GB`) is never clipped.
+- Waste overlay: pressing `j` past the collapsed top-20 list now silently auto-expands to the full list and continues scrolling, instead of silently stopping at row 20. `G` from a collapsed view now jumps to the true last row, auto-expanding when needed. Manual `a` toggle is unchanged.
+- Waste overlay panel border title now reads `Wasted Files 14/30` to match the `Layers 14/30` and `File Tree 14/30` convention. Body header simplified to `5.6 MB wasted across 31 files`; the redundant `Top 20 of N` framing is gone now that the title carries the count. Empty state shows `Wasted Files 0/0`.
+
+### Technical
+- New methods on `image.Extractor` interface; existing `Extract` / `ExtractRaw` retained for backward compatibility.
+- `image/stack.go` `mergeLayer` now compares `layerRoot.Mode/UID/GID` against `cumulative` and propagates changes through `IntroducedInLayer`. The trailing `hasChangedChildren` block now OR's metadata changes so a metadata-only change is not silently reverted to `Unchanged`.
+- No new caching, no `Analysis`-level state. `ExtractFromLayer` performs one `ImageSave` per call and discards bytes after return.
+
 ## [v1.2.0] — 2026-05-23
 
 Per-image-digest analysis cache — repeat runs against an unchanged image feel instant.

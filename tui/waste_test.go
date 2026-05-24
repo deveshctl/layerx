@@ -156,6 +156,85 @@ func TestWasteExpand(t *testing.T) {
 	assert.Equal(t, 0, m.wasteCursor)
 }
 
+func TestWasteAutoExpandOnDown(t *testing.T) {
+	m := setupModel()
+	m.efficiency = efficiencyOf(25)
+	m.openWaste()
+
+	require.False(t, m.wasteExpanded)
+	require.Len(t, m.visibleWasteRows(), 20)
+	m.wasteCursor = 19
+
+	m = send(m, keyPress('j'))
+
+	assert.True(t, m.wasteExpanded, "auto-expand on Down past collapsed limit")
+	assert.Equal(t, 20, m.wasteCursor, "cursor advances by 1 across the boundary")
+	assert.Len(t, m.visibleWasteRows(), 25, "now showing the full list")
+	assert.LessOrEqual(t, m.wasteOffset, m.wasteCursor)
+	assert.Less(t, m.wasteCursor, m.wasteOffset+m.wasteVisibleHeight())
+}
+
+func TestWasteAutoExpandOnBottom(t *testing.T) {
+	m := setupModel()
+	m.efficiency = efficiencyOf(25)
+	m.openWaste()
+
+	require.False(t, m.wasteExpanded)
+	require.Equal(t, 0, m.wasteCursor)
+
+	m = send(m, keyPress('G'))
+
+	assert.True(t, m.wasteExpanded, "auto-expand on Bottom from collapsed list")
+	assert.Equal(t, 24, m.wasteCursor, "cursor jumps to last row of full list, not collapsed slice")
+	assert.LessOrEqual(t, m.wasteOffset, m.wasteCursor)
+	assert.Less(t, m.wasteCursor, m.wasteOffset+m.wasteVisibleHeight())
+}
+
+func TestWasteNoAutoExpandWhenFullListFits(t *testing.T) {
+	m := setupModel()
+	m.efficiency = efficiencyOf(12)
+	m.openWaste()
+
+	for range 11 {
+		m = send(m, keyPress('j'))
+	}
+	require.Equal(t, 11, m.wasteCursor)
+	require.False(t, m.wasteExpanded)
+
+	m = send(m, keyPress('j'))
+	assert.Equal(t, 11, m.wasteCursor, "cursor clamped, no movement past end")
+	assert.False(t, m.wasteExpanded, "no expansion needed — already showing everything")
+
+	m = send(m, keyPress('G'))
+	assert.False(t, m.wasteExpanded, "Bottom is no-op when collapsed view already covers full list")
+	assert.Equal(t, 11, m.wasteCursor)
+}
+
+func TestWasteTitleShowsPositionCounter(t *testing.T) {
+	m := setupModel()
+	m.efficiency = efficiencyOf(31)
+	m.openWaste()
+	m.wasteCursor = 4
+
+	out := m.renderWasteOverlay()
+
+	assert.Contains(t, out, "Wasted Files 5/31",
+		"panel title shows 1-based cursor position over total wasted files")
+	assert.NotContains(t, out, "Top 20 of",
+		"body header should no longer use Top 20 framing")
+}
+
+func TestWasteTitleEmptyState(t *testing.T) {
+	m := setupModel()
+	m.efficiency = &image.EfficiencyResult{Score: 1.0, WastedBytes: 0}
+	m.openWaste()
+
+	out := m.renderWasteOverlay()
+
+	assert.Contains(t, out, "Wasted Files 0/0",
+		"empty waste list shows 0/0 in panel title")
+}
+
 func TestWasteJumpClearsFilter(t *testing.T) {
 	m := setupModel()
 	m.efficiency = image.Efficiency(m.analysis.Layers)
