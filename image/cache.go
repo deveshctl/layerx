@@ -101,28 +101,22 @@ func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+
+	env, readErr, transient := readCacheFile(path)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
 			return nil, false, nil
 		}
-		return nil, false, fmt.Errorf("opening cache %s: %w", path, err)
-	}
-	defer f.Close()
-
-	var env cacheEnvelope
-	if decErr := gob.NewDecoder(f).Decode(&env); decErr != nil {
-		// Distinguish gob corruption (delete + miss) from transient I/O
-		// during read (keep file, surface error). io.ErrUnexpectedEOF can
-		// arrive from either source — the safe call is to treat it as
-		// corruption since the temp+rename pattern means a successful
-		// rename always produced a complete file.
-		if isTransientIOError(decErr) {
-			return nil, false, fmt.Errorf("reading cache %s: %w", path, decErr)
+		if transient {
+			return nil, false, readErr
 		}
+		// Confirmed corruption. The handle is already closed by readCacheFile,
+		// so os.Remove succeeds on Windows (which holds a sharing lock for as
+		// long as a handle is open without FILE_SHARE_DELETE).
 		_ = os.Remove(path)
 		return nil, false, nil
 	}
+
 	if env.SchemaVersion != SchemaVersion {
 		_ = os.Remove(path)
 		return nil, false, nil
@@ -133,6 +127,36 @@ func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
 		return nil, false, nil
 	}
 	return fromCachedLayers(env.Layers), true, nil
+}
+
+// readCacheFile opens path, decodes one cacheEnvelope, and closes the file
+// before returning. Splitting this out of loadCache guarantees the OS handle
+// is released before any os.Remove call — required on Windows, where files
+// opened by the os package do not include FILE_SHARE_DELETE in their sharing
+// mode and cannot be deleted while a handle is still open.
+//
+// Returns (env, nil, false) on success, (zero, err, true) on transient I/O
+// (caller should NOT remove the file), and (zero, err, false) on confirmed
+// corruption or missing-file (caller may remove).
+func readCacheFile(path string) (cacheEnvelope, error, bool) {
+	var env cacheEnvelope
+	f, err := os.Open(path)
+	if err != nil {
+		return env, fmt.Errorf("opening cache %s: %w", path, err), false
+	}
+	defer f.Close()
+	if decErr := gob.NewDecoder(f).Decode(&env); decErr != nil {
+		// Distinguish gob corruption (delete + miss) from transient I/O
+		// during read (keep file, surface error). io.ErrUnexpectedEOF can
+		// arrive from either source — the safe call is to treat it as
+		// corruption since the temp+rename pattern means a successful
+		// rename always produced a complete file.
+		if isTransientIOError(decErr) {
+			return env, fmt.Errorf("reading cache %s: %w", path, decErr), true
+		}
+		return env, decErr, false
+	}
+	return env, nil, false
 }
 
 // isTransientIOError returns true when err looks like a recoverable I/O
