@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -66,6 +67,14 @@ func renderFileView(p viewerParams) string {
 	}
 
 	lines := strings.Split(string(p.content.Data), "\n")
+	syntaxHighlight := p.searchQuery == ""
+	if syntaxHighlight {
+		if highlighted := highlightFileLines(p.content.Path, p.content.Data); highlighted != nil {
+			lines = highlighted
+		} else {
+			syntaxHighlight = false
+		}
+	}
 
 	viewHeight := contentHeight
 	if p.content.Truncated {
@@ -101,11 +110,15 @@ func renderFileView(p viewerParams) string {
 		if maxLineWidth < 1 {
 			maxLineWidth = 1
 		}
-		if len([]rune(line)) > maxLineWidth {
+		if syntaxHighlight {
+			if ansi.StringWidth(line) > maxLineWidth {
+				line = ansi.Truncate(line, maxLineWidth, "…")
+			}
+		} else if len([]rune(line)) > maxLineWidth {
 			line = string([]rune(line)[:maxLineWidth-1]) + "…"
 		}
 
-		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor)
+		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
 		sb.WriteString(gutter + lineContent)
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
@@ -134,8 +147,11 @@ func renderFileView(p viewerParams) string {
 	return renderPanel(sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
 }
 
-func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, matchCursor int) string {
+func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, matchCursor int, syntaxHighlight bool) string {
 	if query == "" || len(matches) == 0 {
+		if syntaxHighlight {
+			return line
+		}
 		return styleWithFg(fileNameColor).Render(line)
 	}
 

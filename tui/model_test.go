@@ -512,6 +512,7 @@ func TestViewReadyHasAltScreen(t *testing.T) {
 	m := setupModel()
 	v := m.View()
 	assert.True(t, v.AltScreen)
+	assert.Equal(t, tea.MouseModeCellMotion, v.MouseMode)
 }
 
 // --- View: terminal too narrow -----------------------------------------------
@@ -1605,4 +1606,56 @@ func TestViewerEscCascadeWithSearch(t *testing.T) {
 	updated2, _ := um.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	um2 := updated2.(model)
 	assert.Equal(t, viewNone, um2.viewState, "viewer closed")
+}
+
+func TestMouseWheelDownScrollsViewer(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	var lines []string
+	for i := 1; i <= 30; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+	data := []byte(strings.Join(lines, "\n") + "\n")
+	m.viewContent = &image.FileContent{
+		Path: "test.txt",
+		Data: data,
+		Size: int64(len(data)),
+	}
+	m.height = 20
+
+	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	assert.Equal(t, 1, m.viewOffset)
+}
+
+func TestMouseWheelUpScrollsViewer(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "test.txt",
+		Data: []byte("line1\nline2\nline3\n"),
+		Size: 18,
+	}
+	m.viewOffset = 1
+	m.height = 20
+
+	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	assert.Equal(t, 0, m.viewOffset)
+}
+
+func TestMouseWheelMovesLayerCursor(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus = focusLayers
+	m.layerCursor = 0
+
+	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	assert.Equal(t, 1, m.layerCursor)
+}
+
+func TestMouseWheelIgnoredWhenHelpOpen(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.showHelp = true
+	m.layerCursor = 0
+
+	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	assert.Equal(t, 0, m.layerCursor)
 }
