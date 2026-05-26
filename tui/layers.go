@@ -182,14 +182,13 @@ func formatLayerLine(l image.Layer, selected bool, maxWidth int, mode sizeColMod
 	fixedCols := 3 + indexWidth + 2 + sizeWidth + 2
 	cmdSpace := maxWidth - fixedCols
 	cmd := l.Command
-	cmdRunes := []rune(cmd)
 	if cmdSpace <= 0 {
 		cmd = ""
-	} else if len(cmdRunes) > cmdSpace {
+	} else if lipgloss.Width(cmd) > cmdSpace {
 		if cmdSpace > 1 {
-			cmd = string(cmdRunes[:cmdSpace-1]) + "…"
+			cmd = ansi.Truncate(cmd, cmdSpace, "…")
 		} else {
-			cmd = string(cmdRunes[:cmdSpace])
+			cmd = ansi.Truncate(cmd, cmdSpace, "")
 		}
 	}
 
@@ -201,9 +200,8 @@ func formatLayerLine(l image.Layer, selected bool, maxWidth int, mode sizeColMod
 	if selected {
 		cursor := lipgloss.NewStyle().Foreground(accentColor).Render("▸")
 		plain := " " + index + indexPad + "  " + sizeText + "  " + cmd
-		plainRunes := []rune(plain)
-		if len(plainRunes) > maxWidth-1 {
-			plain = string(plainRunes[:maxWidth-1])
+		if lipgloss.Width(plain) > maxWidth-1 {
+			plain = ansi.Truncate(plain, maxWidth-1, "")
 		}
 		inner := cursor + lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(plain)
 		return inner

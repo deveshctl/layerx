@@ -56,6 +56,12 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 }
 
 func cleanTarPath(p string) string {
+	// Normalize backslashes to forward slashes for the rare case of an image
+	// built on Windows that lands a tar entry like "etc\\foo". Tar archives
+	// are nominally forward-slash, but Windows-native build tooling has
+	// historically emitted backslashes; normalize once so downstream tree
+	// insertion treats segments correctly.
+	p = strings.ReplaceAll(p, "\\", "/")
 	p = strings.TrimPrefix(p, "/")
 	p = strings.TrimPrefix(p, "./")
 	if p == "" {
@@ -121,6 +127,16 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink b
 					Mode:  fs.ModeDir | 0755,
 				}
 				current.AddChild(existing)
+			} else if !existing.IsDir {
+				// A prior tar entry inserted this path as a regular file, but a
+				// later entry treats it as a directory. Promote the node so the
+				// AddChild below doesn't graft children onto a non-directory.
+				existing.IsDir = true
+				existing.Size = 0
+				existing.Children = nil
+				existing.Linkname = ""
+				existing.IsHardlink = false
+				existing.Mode = fs.ModeDir | 0755
 			}
 			current = existing
 		}

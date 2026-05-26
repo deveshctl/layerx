@@ -43,6 +43,16 @@ var (
 const largeStepGrowthFraction = 0.10
 
 func renderPanel(content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
+	// Defensive: callers can compute negative widths/heights when the
+	// terminal is unusually small (m.width-2 with m.width=1, etc.).
+	// strings.Repeat panics on negative counts; clamp here so every code
+	// path that reaches the panel renderer is safe.
+	if contentWidth < 0 {
+		contentWidth = 0
+	}
+	if height < 0 {
+		height = 0
+	}
 	borderColor := unfocusedBorderColor
 	if focused {
 		borderColor = focusedBorderColor

@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 
 	"github.com/goccy/go-yaml"
@@ -52,7 +54,8 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	cfg := Default()
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data), yaml.Strict())
+	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	if err := cfg.validate(); err != nil {
@@ -62,11 +65,13 @@ func LoadFrom(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	if c.Rules.LowestEfficiency < 0 || c.Rules.LowestEfficiency > 1 {
-		return fmt.Errorf("rules.lowest-efficiency must be in [0, 1]; got %v", c.Rules.LowestEfficiency)
+	le := c.Rules.LowestEfficiency
+	if math.IsNaN(le) || math.IsInf(le, 0) || le < 0 || le > 1 {
+		return fmt.Errorf("rules.lowest-efficiency must be a finite number in [0, 1]; got %v", le)
 	}
-	if c.Rules.HighestUserWastedPercent < 0 || c.Rules.HighestUserWastedPercent > 1 {
-		return fmt.Errorf("rules.highest-user-wasted-percent must be in [0, 1]; got %v", c.Rules.HighestUserWastedPercent)
+	huwp := c.Rules.HighestUserWastedPercent
+	if math.IsNaN(huwp) || math.IsInf(huwp, 0) || huwp < 0 || huwp > 1 {
+		return fmt.Errorf("rules.highest-user-wasted-percent must be a finite number in [0, 1]; got %v", huwp)
 	}
 	if c.Rules.HighestWastedBytes < 0 {
 		return fmt.Errorf("rules.highest-wasted-bytes must be >= 0; got %d", c.Rules.HighestWastedBytes)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 
 	"github.com/deveshctl/layerx/ci"
@@ -85,6 +86,10 @@ func init() {
 
 func runCICmd(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
+
+	if err := validateCLIThresholdFlags(cmd); err != nil {
+		return err
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -174,4 +179,30 @@ func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {
 	}
 
 	return rules
+}
+
+// validateCLIThresholdFlags rejects out-of-range or non-finite CLI values for
+// the three threshold flags. Config-file path is already checked by
+// config.validate(); this mirrors that for command-line input so a typo like
+// "--lowest-efficiency -0.5" surfaces as an error instead of silently
+// disabling the rule.
+func validateCLIThresholdFlags(cmd *cobra.Command) error {
+	if cmd.Flags().Changed("lowest-efficiency") {
+		v := flagLowestEfficiency
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
+			return fmt.Errorf("--lowest-efficiency must be a finite number in [0, 1]; got %v", v)
+		}
+	}
+	if cmd.Flags().Changed("highest-wasted-bytes") {
+		if flagHighestWastedBytes < 0 {
+			return fmt.Errorf("--highest-wasted-bytes must be >= 0; got %d", flagHighestWastedBytes)
+		}
+	}
+	if cmd.Flags().Changed("highest-user-wasted-percent") {
+		v := flagHighestUserWastedPercent
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
+			return fmt.Errorf("--highest-user-wasted-percent must be a finite number in [0, 1]; got %v", v)
+		}
+	}
+	return nil
 }

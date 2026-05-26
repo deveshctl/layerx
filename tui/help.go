@@ -119,11 +119,11 @@ func newHelpStyles() helpStyles {
 const helpKeyWidth = 12
 
 func padHelpKey(key string) string {
-	r := []rune(key)
-	if len(r) >= helpKeyWidth {
+	w := lipgloss.Width(key)
+	if w >= helpKeyWidth {
 		return key
 	}
-	return key + strings.Repeat(" ", helpKeyWidth-len(r))
+	return key + strings.Repeat(" ", helpKeyWidth-w)
 }
 
 func renderHelpSection(sec helpSection, st helpStyles) string {

@@ -153,6 +153,14 @@ func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
 		_ = os.Remove(path)
 		return nil, false, nil
 	}
+	// A successfully-decoded envelope with zero layers is impossible for any
+	// real Docker image. Treat it as cache corruption (truncated write,
+	// concurrent modification, manual edit) rather than a legitimate empty
+	// image — otherwise the TUI silently presents an empty filesystem.
+	if len(env.Layers) == 0 {
+		_ = os.Remove(path)
+		return nil, false, nil
+	}
 	return fromCachedLayers(env.Layers), true, nil
 }
 
@@ -194,14 +202,15 @@ func readCacheFile(path string) (cacheEnvelope, error, bool) {
 }
 
 // isTransientIOError returns true when err looks like a recoverable I/O
-// failure (permission denied, device busy, network share glitch) rather
-// than confirmed file corruption.
+// failure (network share glitch, closed pipe) rather than confirmed file
+// corruption. *os.PathError surfacing from gob.Decode on an already-open
+// handle means a partial/broken read — the saveCache temp+rename pattern
+// guarantees a successful rename produced a complete file, so a read error
+// after open is corruption, not a transient glitch worth retrying forever.
 func isTransientIOError(err error) bool {
-	if _, ok := errors.AsType[*os.PathError](err); ok {
-		return true
-	}
-	// Bare syscall errors and io.ErrClosedPipe are also transient. Plain
-	// EOF without context is treated as corruption (file truncated).
+	// Bare syscall errors and io.ErrClosedPipe are transient. Plain EOF
+	// without context, *os.PathError, and gob's own decode errors are
+	// treated as corruption (file truncated or otherwise unreadable).
 	if errors.Is(err, io.ErrClosedPipe) {
 		return true
 	}

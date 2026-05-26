@@ -171,6 +171,8 @@ func (e *DockerExtractor) ExtractRaw(ctx context.Context, imageRef string, fileP
 
 // readFirstFileFromTar reads the first regular file from a tar stream.
 // Docker's CopyFromContainer wraps the file in a single-entry tar.
+// Non-regular entries (directories, symlinks, hardlinks, devices, fifos) are
+// skipped — the contract is "read the first *regular file* in the stream".
 func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 	tr := tar.NewReader(r)
 	for {
@@ -181,7 +183,7 @@ func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Typeflag == tar.TypeDir {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 
@@ -201,6 +203,8 @@ func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 // Bounded by MaxSaveSize to protect against OOM on huge tar entries; the
 // header is consulted first as a fast-fail path, and io.LimitReader caps
 // the worst case where the header understates the actual stream length.
+// Non-regular entries (directories, symlinks, hardlinks, devices, fifos) are
+// skipped — the contract is "read the first *regular file* in the stream".
 func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	tr := tar.NewReader(r)
 	for {
@@ -211,7 +215,7 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Typeflag == tar.TypeDir {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		if hdr.Size > MaxSaveSize {
@@ -382,10 +386,23 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 	// filePath is already cleaned (no leading slash) by the caller.
 
 	tr := tar.NewReader(r)
+
+	// Walk the full layer once. A regular entry for filePath in the same
+	// layer wins over an earlier-positioned whiteout for the same path —
+	// overlayfs upper-layer semantics permit `.wh.X` followed by `X` in
+	// one layer (the readd shadows the deletion). Recording state and
+	// resolving at end of walk mirrors the opaque-whiteout handling in
+	// Stack.
+	var (
+		whiteoutHit  bool
+		nonRegular   error
+		regularData  []byte
+		foundRegular bool
+	)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
-			return nil, false, nil
+		if errors.Is(err, io.EOF) {
+			break
 		}
 		if err != nil {
 			return nil, false, fmt.Errorf("reading layer tar: %w", err)
@@ -403,8 +420,9 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 		// (e.g. ".wh..wh..opq") and must not be treated as regular whiteouts.
 		if deleted, ok := regularWhiteoutTarget(name); ok {
 			if filePath == deleted || strings.HasPrefix(filePath, deleted+"/") {
-				return nil, false, errWhiteoutStop
+				whiteoutHit = true
 			}
+			continue
 		}
 
 		// Opaque whiteout in any ancestor of the path
@@ -412,23 +430,37 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			ancestor := strings.TrimSuffix(name, ".wh..wh..opq")
 			ancestor = strings.TrimSuffix(ancestor, "/")
 			if ancestor == "" || strings.HasPrefix(filePath, ancestor+"/") || filePath == ancestor {
-				return nil, false, errWhiteoutStop
+				whiteoutHit = true
 			}
+			continue
 		}
 
 		if name != filePath {
 			continue
 		}
 		if hdr.Typeflag != tar.TypeReg {
-			return nil, false, fmt.Errorf("%w: typeflag %d", errPathNotRegular, hdr.Typeflag)
+			nonRegular = fmt.Errorf("%w: typeflag %d", errPathNotRegular, hdr.Typeflag)
+			continue
 		}
 
 		data, err := io.ReadAll(tr)
 		if err != nil {
 			return nil, false, fmt.Errorf("reading file from layer: %w", err)
 		}
-		return data, true, nil
+		regularData = data
+		foundRegular = true
 	}
+
+	if foundRegular {
+		return regularData, true, nil
+	}
+	if nonRegular != nil {
+		return nil, false, nonRegular
+	}
+	if whiteoutHit {
+		return nil, false, errWhiteoutStop
+	}
+	return nil, false, nil
 }
 
 // regularWhiteoutTarget returns the path that a regular whiteout tar entry
@@ -486,7 +518,7 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 			return nil, fmt.Errorf("file %s was removed in layer %d", filePath, j)
 		}
 		if errors.Is(err, errPathNotRegular) {
-			return nil, fmt.Errorf("file %s is not a regular file at layer %d (%w)", filePath, j, err)
+			return nil, fmt.Errorf("file %s is not a regular file at layer %d", filePath, j)
 		}
 		if err != nil {
 			return nil, err
@@ -527,7 +559,7 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 			return nil, fmt.Errorf("file %s was removed in layer %d", filePath, j)
 		}
 		if errors.Is(err, errPathNotRegular) {
-			return nil, fmt.Errorf("file %s is not a regular file at layer %d (%w)", filePath, j, err)
+			return nil, fmt.Errorf("file %s is not a regular file at layer %d", filePath, j)
 		}
 		if err != nil {
 			return nil, err

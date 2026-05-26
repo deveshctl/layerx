@@ -2,6 +2,7 @@ package ci
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -21,6 +22,9 @@ type RuleResult struct {
 }
 
 // LowestEfficiency fails if the efficiency score is below the threshold.
+// A threshold of 0 (or any non-positive value) disables this rule. A NaN
+// score (e.g. an empty image with zero total bytes) is treated as a pass —
+// the rule cannot meaningfully evaluate a non-finite score.
 type LowestEfficiency struct {
 	Threshold float64
 }
@@ -28,8 +32,12 @@ type LowestEfficiency struct {
 func (r LowestEfficiency) Name() string { return "efficiency" }
 
 func (r LowestEfficiency) Evaluate(result *image.EfficiencyResult, _ int64) RuleResult {
+	passed := true
+	if r.Threshold > 0 && !math.IsNaN(result.Score) {
+		passed = result.Score >= r.Threshold
+	}
 	return RuleResult{
-		Passed:    result.Score >= r.Threshold,
+		Passed:    passed,
 		Name:      r.Name(),
 		Actual:    fmt.Sprintf("%.2f", result.Score),
 		Threshold: fmt.Sprintf("%.2f", r.Threshold),

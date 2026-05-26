@@ -95,7 +95,27 @@ type spinnerTickMsg struct{}
 type clearCopyMsg struct{}
 
 // clearStatusMsg clears the transient status bar message after a timeout.
-type clearStatusMsg struct{}
+// gen identifies which status set scheduled this tick; an older tick
+// whose gen no longer matches m.statusGen is ignored so it cannot erase
+// a newer message that overwrote the original mid-window.
+type clearStatusMsg struct{ gen uint64 }
+
+// setStatus assigns msg to the status bar and bumps statusGen so any
+// previously-scheduled clearStatusMsg ticks become stale and no-ops.
+func (m *model) setStatus(msg string) {
+	m.statusMsg = msg
+	m.statusGen++
+}
+
+// scheduleStatusClear returns a tea.Cmd that clears the *current* status
+// message after d. The bumped gen is captured by value, so a later
+// setStatus invalidates this tick before it fires.
+func (m *model) scheduleStatusClear(d time.Duration) tea.Cmd {
+	gen := m.statusGen
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return clearStatusMsg{gen: gen}
+	})
+}
 
 // fileSaveMsg is sent when async file extraction for save-to-disk completes.
 type fileSaveMsg struct {
@@ -141,6 +161,7 @@ type model struct {
 	progressCh   chan image.ProgressEvent
 	copyConfirm  bool
 	statusMsg    string
+	statusGen    uint64
 	showHelp     bool
 	filterActive bool
 	filterQuery  string
@@ -267,12 +288,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// overwriting the active loading phase — the analyze pipeline is
 		// still running and the user wants to see what it's doing.
 		if msg.event.Phase == image.PhaseCacheWarn {
-			m.statusMsg = "cache: " + msg.event.Message
+			m.setStatus("cache: " + msg.event.Message)
 			return m, tea.Batch(
 				listenForProgress(m.progressCh),
-				tea.Tick(4*time.Second, func(time.Time) tea.Msg {
-					return clearStatusMsg{}
-				}),
+				m.scheduleStatusClear(4*time.Second),
 			)
 		}
 		m.loadPhase = msg.event.Phase
@@ -302,7 +321,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case clearStatusMsg:
-		m.statusMsg = ""
+		if msg.gen == m.statusGen {
+			m.statusMsg = ""
+		}
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -340,10 +361,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.viewState = viewNone
-			m.statusMsg = "Error: " + msg.err.Error()
-			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-				return clearStatusMsg{}
-			})
+			m.setStatus("Error: " + msg.err.Error())
+			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		m.viewState = viewReady
 		m.viewContent = msg.content
@@ -363,33 +382,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveCancel = nil
 		}
 		if msg.err != nil {
-			m.statusMsg = "Error: " + msg.err.Error()
-			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-				return clearStatusMsg{}
-			})
+			m.setStatus("Error: " + msg.err.Error())
+			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		// Run stat + write off-thread so a slow disk (network mount, encrypted
-		// volume, USB) can't freeze the TUI.
-		return m, saveFileCmd(m.statFile, m.writeFile, msg.requestID, msg.filename, msg.data)
+		// volume, USB) can't freeze the TUI. Re-arm saveCancel against a fresh
+		// context so quit/Esc aborts the probe-and-write phase as well, not
+		// just the prior extract phase.
+		ctx, cancel := context.WithCancel(m.fetchCtx)
+		m.saveCancel = cancel
+		return m, saveFileCmd(ctx, m.statFile, m.writeFile, msg.requestID, msg.filename, msg.data)
 
 	case fileSavedMsg:
 		if msg.requestID != m.saveRequestID {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.statusMsg = "Error: " + msg.err.Error()
-			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-				return clearStatusMsg{}
-			})
+			m.setStatus("Error: " + msg.err.Error())
+			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		if msg.target != msg.original {
-			m.statusMsg = fmt.Sprintf("Saved: %s (existed → wrote %s)", msg.original, msg.target)
+			m.setStatus(fmt.Sprintf("Saved: %s (existed → wrote %s)", msg.original, msg.target))
 		} else {
-			m.statusMsg = "Saved: " + msg.target
+			m.setStatus("Saved: " + msg.target)
 		}
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return clearStatusMsg{}
-		})
+		return m, m.scheduleStatusClear(2 * time.Second)
 
 	case tea.KeyPressMsg:
 		// Esc has precedence: viewer search → viewer → filter (active) → filter (confirmed) → help → quit
@@ -441,9 +458,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.quitting = true
-			if m.fetchCancel != nil {
-				m.fetchCancel()
-			}
+			m.cancelInflight()
 			return m, tea.Quit
 		}
 
@@ -454,9 +469,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			inTextInput := m.filterActive || (m.viewState == viewReady && m.viewSearchActive)
 			if !inTextInput || msg.String() == "ctrl+c" {
 				m.quitting = true
-				if m.fetchCancel != nil {
-					m.fetchCancel()
-				}
+				m.cancelInflight()
 				return m, tea.Quit
 			}
 		}
@@ -675,29 +688,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			f := files[m.treeCursor]
 			if f.IsDir {
-				m.statusMsg = "Cannot extract directory"
-				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return clearStatusMsg{}
-				})
+				m.setStatus("Cannot extract directory")
+				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if f.DiffType == image.Removed {
-				m.statusMsg = "File removed in this layer"
-				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return clearStatusMsg{}
-				})
+				m.setStatus("File removed in this layer")
+				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if m.extractor == nil {
-				m.statusMsg = "Extractor unavailable"
-				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return clearStatusMsg{}
-				})
+				m.setStatus("Extractor unavailable")
+				return m, m.scheduleStatusClear(2 * time.Second)
 			}
-			m.statusMsg = "Extracting..."
+			m.setStatus("Extracting...")
 			m.saveRequestID++
 			if m.saveCancel != nil {
 				m.saveCancel()
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(m.fetchCtx)
 			m.saveCancel = cancel
 			return m, m.fetchFileRaw(ctx, f.Path, m.saveRequestID)
 		}
@@ -723,10 +730,16 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		if msg.Text != "" {
-			if len([]rune(m.filterQuery))+len([]rune(msg.Text)) > maxFilterLen {
+			queryRunes := []rune(m.filterQuery)
+			textRunes := []rune(msg.Text)
+			remaining := maxFilterLen - len(queryRunes)
+			if remaining <= 0 {
 				return m, nil
 			}
-			m.filterQuery += msg.Text
+			if len(textRunes) > remaining {
+				textRunes = textRunes[:remaining]
+			}
+			m.filterQuery += string(textRunes)
 			m.treeCursor = 0
 			m.treeOffset = 0
 		}
@@ -750,7 +763,16 @@ func (m model) handleViewerSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return m, nil
 	default:
 		if msg.Text != "" {
-			m.viewSearchQuery += msg.Text
+			queryRunes := []rune(m.viewSearchQuery)
+			textRunes := []rune(msg.Text)
+			remaining := maxFilterLen - len(queryRunes)
+			if remaining <= 0 {
+				return m, nil
+			}
+			if len(textRunes) > remaining {
+				textRunes = textRunes[:remaining]
+			}
+			m.viewSearchQuery += string(textRunes)
 			m.recomputeViewerMatches()
 		}
 		return m, nil
@@ -815,22 +837,16 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 		case m.diffOnly:
 			msg = "Collapse unavailable in diff-only mode"
 		}
-		m.statusMsg = msg
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return clearStatusMsg{}
-		})
+		m.setStatus(msg)
+		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	if f.DiffType == image.Removed {
-		m.statusMsg = "File removed in this layer"
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return clearStatusMsg{}
-		})
+		m.setStatus("File removed in this layer")
+		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	if m.extractor == nil {
-		m.statusMsg = "Extractor unavailable"
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return clearStatusMsg{}
-		})
+		m.setStatus("Extractor unavailable")
+		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	m.viewState = viewLoading
 	m.viewOriginLayer = f.IntroducedInLayer
@@ -844,9 +860,30 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 	if m.viewerCancel != nil {
 		m.viewerCancel()
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.fetchCtx)
 	m.viewerCancel = cancel
-	return m, tea.Batch(m.fetchFileContent(ctx, f.Path, m.viewRequestID), m.spinnerTick())
+	// The Init() spinner tick keeps firing while viewState == viewLoading,
+	// so don't dispatch a second ticker here — doubling the tick rate also
+	// doubles the cmd queue per file open.
+	return m, m.fetchFileContent(ctx, f.Path, m.viewRequestID)
+}
+
+// cancelInflight tears down every in-flight Docker SDK call: the analysis
+// fetch, the file viewer extract, and the save-to-disk extract. The viewer
+// and save contexts are children of fetchCtx, so cancelling fetchCtx
+// already propagates — but cancel is idempotent and keeping all three
+// explicit guards against future re-parenting that would silently break
+// the quit-cancels-everything contract.
+func (m model) cancelInflight() {
+	if m.fetchCancel != nil {
+		m.fetchCancel()
+	}
+	if m.viewerCancel != nil {
+		m.viewerCancel()
+	}
+	if m.saveCancel != nil {
+		m.saveCancel()
+	}
 }
 
 func (m model) layers() []image.Layer {
@@ -1089,6 +1126,9 @@ func (m model) View() tea.View {
 }
 
 func (m model) viewLoading() tea.View {
+	if m.width > 0 && m.width < 10 {
+		return finalizeView(tea.NewView("loading…"))
+	}
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 
 	var lines []string
@@ -1467,11 +1507,17 @@ func (m model) fetchFileRaw(ctx context.Context, path string, requestID uint64) 
 // caller's Update returns immediately so the TUI does not block on slow
 // I/O. 0644 is honoured on POSIX; on Windows os.WriteFile ignores the
 // mode bits beyond the read-only attribute.
-func saveFileCmd(stat func(string) (os.FileInfo, error),
+func saveFileCmd(ctx context.Context, stat func(string) (os.FileInfo, error),
 	write func(string, []byte, os.FileMode) error,
 	requestID uint64, filename string, data []byte) tea.Cmd {
 	return func() tea.Msg {
-		target := uniquePath(stat, filename)
+		target, err := uniquePath(ctx, stat, filename)
+		if err != nil {
+			return fileSavedMsg{requestID: requestID, original: filename, target: filename, err: err}
+		}
+		if err := ctx.Err(); err != nil {
+			return fileSavedMsg{requestID: requestID, original: filename, target: target, err: err}
+		}
 		if err := write(target, data, 0644); err != nil {
 			return fileSavedMsg{requestID: requestID, original: filename, target: target, err: err}
 		}
@@ -1481,24 +1527,28 @@ func saveFileCmd(stat func(string) (os.FileInfo, error),
 
 // uniquePath returns filename if no file exists at that path, otherwise
 // the first available "<name>.<N>" (or "<name>.<N><ext>") variant. Probes
-// up to 1000 candidates; falls back to the highest-N attempt to avoid
-// looping forever on pathological filesystems.
-func uniquePath(stat func(string) (os.FileInfo, error), filename string) string {
+// up to 1000 candidates and returns an error if all are taken — never
+// silently clobbers a pre-existing file by reusing the .999 candidate.
+// The probe loop honours ctx so a quit can abort a slow filesystem.
+func uniquePath(ctx context.Context, stat func(string) (os.FileInfo, error), filename string) (string, error) {
 	if stat == nil {
-		return filename
+		return filename, nil
 	}
 	if _, err := stat(filename); errors.Is(err, os.ErrNotExist) {
-		return filename
+		return filename, nil
 	}
 	ext := filepath.Ext(filename)
 	base := strings.TrimSuffix(filename, ext)
 	for i := 1; i < 1000; i++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		candidate := fmt.Sprintf("%s.%d%s", base, i, ext)
 		if _, err := stat(candidate); errors.Is(err, os.ErrNotExist) {
-			return candidate
+			return candidate, nil
 		}
 	}
-	return fmt.Sprintf("%s.%d%s", base, 999, ext)
+	return "", fmt.Errorf("save target busy: 1000 candidates already exist for %s", filename)
 }
 
 func (m *model) scrollViewDown() {

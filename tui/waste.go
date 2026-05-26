@@ -126,9 +126,7 @@ func (m *model) adjustWasteScroll(visibleHeight int) {
 func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Quit) {
 		m.quitting = true
-		if m.fetchCancel != nil {
-			m.fetchCancel()
-		}
+		m.cancelInflight()
 		return m, tea.Quit
 	}
 	rows := m.visibleWasteRows()
@@ -214,9 +212,9 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 		status = fmt.Sprintf("Jumped → L%d %s", row.IntroLayer+1, row.Path)
 	}
 	mp.adjustTreeScroll()
-	mp.statusMsg = status
+	mp.setStatus(status)
 	mp.closeWaste()
-	return *mp, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+	return *mp, mp.scheduleStatusClear(2 * time.Second)
 }
 
 func indexOfPath(files []*image.FileNode, path string) int {
@@ -338,9 +336,11 @@ func formatWasteRow(r wasteRow, selected bool, innerWidth int) string {
 	)
 
 	wastedStr := image.FormatBytes(r.Wasted)
-	layerStr := fmt.Sprintf("L%d", r.IntroLayer+1)
+	var layerStr string
 	if r.IntroLayer < 0 {
 		layerStr = "L?"
+	} else {
+		layerStr = fmt.Sprintf("L%d", r.IntroLayer+1)
 	}
 	countStr := fmt.Sprintf("x%d", r.LayerCount)
 

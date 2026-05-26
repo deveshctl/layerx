@@ -41,6 +41,7 @@ func highlightFileLines(path string, data []byte) []string {
 
 	lexer = chroma.Coalesce(lexer)
 	src := strings.ReplaceAll(string(data), "\r\n", "\n")
+	src = strings.ReplaceAll(src, "\r", "")
 	it, err := lexer.Tokenise(nil, src)
 	if err != nil {
 		return nil

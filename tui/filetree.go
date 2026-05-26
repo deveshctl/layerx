@@ -119,8 +119,8 @@ func renderTreeHeader(maxWidth int) string {
 		header = "  Filetree"
 	}
 
-	if len(header) > maxWidth {
-		header = header[:maxWidth]
+	if lipgloss.Width(header) > maxWidth {
+		header = ansi.Truncate(header, maxWidth, "")
 	}
 	return styleWithFg(metaDimColor).Render(header)
 }
@@ -206,15 +206,15 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 	}
 
 	fullName := treePrefix + displayName
-	nameRunes := []rune(fullName)
-	availableForName := nameSpace - len([]rune(originSuffix))
+	availableForName := nameSpace - lipgloss.Width(originSuffix)
 	if availableForName < 4 {
 		availableForName = 4
 		originSuffix = ""
 		showOrigin = false
 	}
-	if len(nameRunes) > availableForName {
-		fullName = string(nameRunes[:availableForName-1]) + "…"
+	wasTruncated := lipgloss.Width(fullName) > availableForName
+	if wasTruncated {
+		fullName = ansi.Truncate(fullName, availableForName, "…")
 	}
 
 	nameWidth := len([]rune(fullName)) + len([]rune(originSuffix))
@@ -273,7 +273,6 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 	var nameRendered string
 	prefixRuneLen := len([]rune(treePrefix))
 	fullNameRuneLen := len([]rune(fullName))
-	wasTruncated := len(nameRunes) > availableForName
 
 	if flat || (wasTruncated && prefixRuneLen >= fullNameRuneLen) {
 		nameRendered = renderNameWithHighlight(fullName, filterQuery, diffColorForNode(f))
