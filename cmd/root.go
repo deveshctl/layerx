@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/image"
@@ -42,9 +43,11 @@ Cache:
   refreshes the cache on success.
 
 Environment:
-  CI=true   When set, "layerx IMAGE" runs the ci subcommand instead of
-            launching the TUI. Useful for pipelines that invoke layerx
-            without a subcommand.`,
+  CI=true   When set, "layerx IMAGE" runs the ci subcommand with default
+            (or config-file) thresholds instead of launching the TUI.
+            Useful for pipelines that invoke layerx without a subcommand.
+            To override thresholds on the command line, invoke the ci
+            subcommand directly: "layerx ci --lowest-efficiency 0.95 IMG".`,
 	Example: `  # Inspect an image interactively
   layerx nginx:latest
 
@@ -68,6 +71,8 @@ func init() {
 }
 
 func SetVersionInfo(v, c, d string) {
+	c = sanitizeVersionField(c)
+	d = sanitizeVersionField(d)
 	if c == "" || c == "none" {
 		rootCmd.Version = v
 		return
@@ -77,6 +82,21 @@ func SetVersionInfo(v, c, d string) {
 		return
 	}
 	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", v, c, d)
+}
+
+// sanitizeVersionField trims surrounding whitespace, strips control characters
+// (CR/LF/tab) that would smash a single-line --version output, and bounds
+// the length so a malformed build-time inject of multi-KB junk can't blow up
+// the help block. The return is intended for direct interpolation into the
+// version string by SetVersionInfo.
+func sanitizeVersionField(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.NewReplacer("\r", "", "\n", " ", "\t", " ").Replace(s)
+	const maxLen = 64
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return s
 }
 
 func Execute() error {
@@ -94,6 +114,9 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	noCache := noCacheRequested()
 
 	if os.Getenv("CI") == "true" {
+		if err := validateCLIThresholdFlags(ciCmd); err != nil {
+			return err
+		}
 		// The CI report is already printed by executeCICheck; suppress
 		// cobra's default error/usage output so an ErrCIFailed return
 		// doesn't tack a redundant "Error: ..." line and usage block

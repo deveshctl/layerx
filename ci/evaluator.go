@@ -16,7 +16,13 @@ type Report struct {
 }
 
 // Evaluate runs all rules against the efficiency result and returns a report.
+// A nil efficiency argument is treated as a zero-value result (score 0, no
+// wasted files); rules still run, which lets callers surface "no analysis
+// available" cleanly without needing to nil-guard at every call site.
 func Evaluate(efficiency *image.EfficiencyResult, totalSize int64, rules []Rule) *Report {
+	if efficiency == nil {
+		efficiency = &image.EfficiencyResult{}
+	}
 	report := &Report{
 		Passed: true,
 		Score:  efficiency.Score,

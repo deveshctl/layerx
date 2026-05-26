@@ -279,11 +279,14 @@ func fileViewLineCount(content *image.FileContent) int {
 	return len(lines)
 }
 
-// splitFileLines normalizes CRLF→LF, drops a single trailing newline, and
-// splits the content into rendered viewer lines. Shared by the renderer and
-// search match indexing so both agree on line count and indices.
+// splitFileLines normalizes CRLF→LF, strips bare CRs, drops a single
+// trailing newline, and splits the content into rendered viewer lines.
+// Shared by the renderer and search match indexing so both agree on line
+// count and indices. Bare CR (Mac classic line endings, mixed-source
+// files) would otherwise reach the terminal and reset the cursor mid-row.
 func splitFileLines(data []byte) []string {
 	s := strings.ReplaceAll(string(data), "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "")
 	s = strings.TrimSuffix(s, "\n")
 	if s == "" {
 		return nil

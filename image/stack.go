@@ -174,7 +174,15 @@ func extractWhiteouts(node *FileNode) (map[string]struct{}, bool) {
 	for _, child := range node.Children {
 		if child.Name == ".wh..wh..opq" {
 			opaque = true
-		} else if target, ok := strings.CutPrefix(child.Name, ".wh."); ok {
+			continue
+		}
+		// Reserved control entries (".wh..wh.*") are not regular whiteouts.
+		// Treating one as a whiteout against ".wh..*" produces a phantom
+		// removal entry. Mirrors regularWhiteoutTarget in extractor.go.
+		if strings.HasPrefix(child.Name, ".wh..wh.") {
+			continue
+		}
+		if target, ok := strings.CutPrefix(child.Name, ".wh."); ok {
 			whiteouts[target] = struct{}{}
 		}
 	}
