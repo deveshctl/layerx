@@ -67,7 +67,11 @@ func init() {
 }
 
 func SetVersionInfo(v, c, d string) {
-	rootCmd.Version = v
+	if c == "" || c == "none" {
+		rootCmd.Version = v
+		return
+	}
+	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", v, c, d)
 }
 
 func Execute() error {

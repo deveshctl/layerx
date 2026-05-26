@@ -161,7 +161,7 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.wasteJump(rows[m.wasteCursor])
-	case msg.Text == "a":
+	case msg.Text == "a" || msg.Text == "A":
 		m.wasteExpanded = !m.wasteExpanded
 		m.wasteCursor = 0
 		m.wasteOffset = 0
@@ -179,12 +179,11 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
-	m.filterActive = false
-	m.filterQuery = ""
-
 	layers := m.layers()
 	jumped := false
 	if row.IntroLayer >= 0 && row.IntroLayer < len(layers) {
+		m.filterActive = false
+		m.filterQuery = ""
 		m.layerCursor = row.IntroLayer
 		jumped = true
 	}
@@ -238,10 +237,10 @@ func (m model) renderWasteOverlay() string {
 	}
 
 	posNum := 0
-	if len(rows) > 0 {
+	if originalCount > 0 {
 		posNum = m.wasteCursor + 1
 	}
-	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, len(rows))
+	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, originalCount)
 
 	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)

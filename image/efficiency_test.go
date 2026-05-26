@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEfficiency_NilLayers(t *testing.T) {
@@ -108,4 +109,32 @@ func TestEfficiency_WastedFilesSortedBySize(t *testing.T) {
 	// /big waste = 1000 (layer 0 copy), /small waste = 10 (layer 0 copy)
 	assert.Equal(t, "/big", result.WastedFiles[0].Path)
 	assert.Equal(t, "/small", result.WastedFiles[1].Path)
+}
+
+func TestEfficiency_StableOrderOnEqualWaste(t *testing.T) {
+	// Three files with identical size. Each appears in two layers, so each
+	// produces identical TotalWasted. Without the Path tiebreaker, sort.Slice
+	// (pdqsort) reorders runs non-deterministically — 50 runs catches it.
+	build := func() []Layer {
+		return []Layer{
+			{Index: 0, Size: 300, Tree: makeTree(
+				makeFile("c", "/c", 100),
+				makeFile("a", "/a", 100),
+				makeFile("b", "/b", 100),
+			)},
+			{Index: 1, Size: 300, Tree: makeTree(
+				makeFile("c", "/c", 100),
+				makeFile("a", "/a", 100),
+				makeFile("b", "/b", 100),
+			)},
+		}
+	}
+
+	for range 50 {
+		result := Efficiency(build())
+		require.Len(t, result.WastedFiles, 3)
+		assert.Equal(t, "/a", result.WastedFiles[0].Path)
+		assert.Equal(t, "/b", result.WastedFiles[1].Path)
+		assert.Equal(t, "/c", result.WastedFiles[2].Path)
+	}
 }

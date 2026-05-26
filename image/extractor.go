@@ -346,6 +346,7 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("decompressing layer: %w", err)
 	}
+	defer r.Close()
 
 	// filePath is already cleaned (no leading slash) by the caller.
 

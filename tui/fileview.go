@@ -48,8 +48,8 @@ func renderFileView(p viewerParams) string {
 	title := p.content.Path
 	if p.originLayer != p.currentLayer && p.originCmd != "" {
 		cmd := p.originCmd
-		if len([]rune(cmd)) > 40 {
-			cmd = string([]rune(cmd)[:39]) + "…"
+		if lipgloss.Width(cmd) > 40 {
+			cmd = ansi.Truncate(cmd, 40, "…")
 		}
 		title = fmt.Sprintf("%s  ← L%d: %s", p.content.Path, p.originLayer, cmd)
 	}
@@ -70,7 +70,8 @@ func renderFileView(p viewerParams) string {
 		return renderPanel(body, title, true, contentWidth, p.height, false, false)
 	}
 
-	lines := strings.Split(string(p.content.Data), "\n")
+	data := strings.TrimSuffix(string(p.content.Data), "\n")
+	lines := strings.Split(data, "\n")
 	syntaxHighlight := p.searchQuery == ""
 	if syntaxHighlight {
 		if p.highlightedLines != nil {
@@ -268,5 +269,10 @@ func fileViewLineCount(content *image.FileContent) int {
 	if content == nil || content.Binary || len(content.Data) == 0 {
 		return 0
 	}
-	return strings.Count(string(content.Data), "\n") + 1
+	data := strings.TrimSuffix(string(content.Data), "\n")
+	if data == "" {
+		// Content was just a single trailing newline — semantically one empty line.
+		return 1
+	}
+	return strings.Count(data, "\n") + 1
 }

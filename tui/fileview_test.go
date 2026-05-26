@@ -80,3 +80,70 @@ func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {
 	})
 	assert.NotContains(t, body, "\x1b[38;5;")
 }
+
+func TestRenderFileView_TitleTruncation_WideChar(t *testing.T) {
+	// 30 CJK characters → display width 60. Title budget is 40 columns
+	// of cmd, so the rendered cmd segment must fit within 40 cols and
+	// end in an ellipsis. Use ansi.Truncate's behavior as the contract.
+	wideCmd := strings.Repeat("中", 30)
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path: "/etc/hosts",
+			Data: []byte("a\n"),
+			Size: 2,
+		},
+		originLayer:  1,
+		originCmd:    wideCmd,
+		currentLayer: 2,
+		offset:       0,
+		width:        120,
+		height:       10,
+	})
+
+	// Sanity: no rendered line exceeds the panel width.
+	for ln := range strings.SplitSeq(body, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(ln), 120, "panel width must not be exceeded")
+	}
+	// The title contains the ellipsis (proof of truncation, not raw cmd).
+	assert.Contains(t, body, "…", "wide-char title must be truncated with an ellipsis")
+}
+
+func TestFileViewLineCount_TrailingNewline(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{"trailing newline (terminator)", []byte("a\nb\n"), 2},
+		{"no trailing newline", []byte("a\nb"), 2},
+		{"single newline", []byte("\n"), 1},
+		{"single line", []byte("hello"), 1},
+		{"empty", []byte{}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			content := &image.FileContent{Data: tc.data, Size: int64(len(tc.data))}
+			assert.Equal(t, tc.want, fileViewLineCount(content))
+		})
+	}
+}
+
+func TestRenderFileView_TrailingNewlineLineCount(t *testing.T) {
+	// Both rendered output (gutter rows) and fileViewLineCount must report 2
+	// lines for "a\nb\n" — trailing newline is a terminator, not a separator.
+	data := []byte("a\nb\n")
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{Path: "x.txt", Data: data, Size: int64(len(data))},
+		offset:  0,
+		width:   80,
+		height:  20,
+	})
+
+	// Gutter prefix uses width = len("2") + 1 = 2 chars padded right;
+	// the simplest invariant is "exactly two non-empty content lines."
+	// Search for the gutter prefixes using width-2 padding:
+	// "%*d " with totalLines=2 → "%2d " → " 1 " and " 2 ".
+	assert.Equal(t, 1, strings.Count(body, " 1 "), "exactly one '1' gutter row")
+	assert.Equal(t, 1, strings.Count(body, " 2 "), "exactly one '2' gutter row")
+	assert.Equal(t, 0, strings.Count(body, " 3 "), "no phantom '3' row from trailing \\n")
+}

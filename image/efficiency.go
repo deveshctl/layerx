@@ -61,7 +61,10 @@ func Efficiency(layers []Layer) *EfficiencyResult {
 	}
 
 	sort.Slice(wastedFiles, func(i, j int) bool {
-		return wastedFiles[i].TotalWasted > wastedFiles[j].TotalWasted
+		if wastedFiles[i].TotalWasted != wastedFiles[j].TotalWasted {
+			return wastedFiles[i].TotalWasted > wastedFiles[j].TotalWasted
+		}
+		return wastedFiles[i].Path < wastedFiles[j].Path
 	})
 
 	score := 1.0

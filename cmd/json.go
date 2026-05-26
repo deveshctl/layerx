@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -141,11 +142,12 @@ func diffTypeString(dt image.DiffType) string {
 }
 
 func writeJSONAtomic(targetPath string, data []byte) error {
-	tmp := targetPath + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	dir := filepath.Dir(targetPath)
+	f, err := os.CreateTemp(dir, ".layerx-json-*.tmp")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		os.Remove(tmp)
