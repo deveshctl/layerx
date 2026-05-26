@@ -1680,3 +1680,44 @@ func TestMouseWheelIgnoredWhenHelpOpen(t *testing.T) {
 	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	assert.Equal(t, 0, m.layerCursor)
 }
+
+// --- Status bar Enter hint ---------------------------------------------------
+
+func TestStatusBarEnterHintFileShowsView(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	files := m.displayTree()
+	found := false
+	for i, f := range files {
+		if !f.IsDir {
+			m.treeCursor = i
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected at least one regular file in fixture tree")
+	bar := m.renderStatusBar(files)
+	assert.Contains(t, bar, "view")
+	assert.NotContains(t, bar, "toggle")
+}
+
+func TestStatusBarEnterHintDirShowsToggleNotView(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	files := m.displayTree()
+	found := false
+	for i, f := range files {
+		if f.IsDir {
+			m.treeCursor = i
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected at least one directory in fixture tree")
+	bar := m.renderStatusBar(files)
+	assert.Contains(t, bar, "toggle")
+	// "view" must not appear as a hint description; the trailing-space anchor
+	// avoids false matches on words like "viewport" if any other hint text
+	// grows that way later.
+	assert.NotContains(t, bar, " view")
+}

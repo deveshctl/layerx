@@ -1267,6 +1267,11 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"q", "quit"},
 		}
 	} else {
+		enterDesc := "view"
+		if !compact && m.useTreeCollapse() &&
+			m.treeCursor < len(treeFiles) && treeFiles[m.treeCursor].IsDir {
+			enterDesc = "toggle"
+		}
 		hints = []hint{
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
@@ -1274,15 +1279,10 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"d", "diff"},
 			{"s", "sort"},
 			{"w", "wasted"},
-			{"Enter", "view"},
+			{"Enter", enterDesc},
 			{"x", "save"},
 			{"y", "copy path"},
 			{"?", "help"},
-		}
-		if !compact && m.useTreeCollapse() {
-			if m.treeCursor < len(treeFiles) && treeFiles[m.treeCursor].IsDir {
-				hints = append(hints, hint{"Enter", "toggle"})
-			}
 		}
 	}
 

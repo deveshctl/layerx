@@ -360,7 +360,10 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			return nil, false, fmt.Errorf("reading layer tar: %w", err)
 		}
 
-		name := strings.TrimPrefix(hdr.Name, "./")
+		name := cleanTarPath(hdr.Name)
+		if name == "" {
+			continue
+		}
 
 		// Regular whiteout (.wh.<seg>) on the file itself or on any ancestor
 		// directory. A tar entry "<dir>/.wh.<seg>" deletes "<dir>/<seg>" and
@@ -438,7 +441,10 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
 	}
 
-	cleanPath := strings.TrimPrefix(filePath, "/")
+	cleanPath := cleanTarPath(filePath)
+	if cleanPath == "" {
+		return nil, fmt.Errorf("invalid file path: %s", filePath)
+	}
 
 	for j := layerCursor; j >= 0; j-- {
 		blob := blobs[layerPaths[j]]
@@ -473,7 +479,10 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
 	}
 
-	cleanPath := strings.TrimPrefix(filePath, "/")
+	cleanPath := cleanTarPath(filePath)
+	if cleanPath == "" {
+		return nil, fmt.Errorf("invalid file path: %s", filePath)
+	}
 
 	for j := layerCursor; j >= 0; j-- {
 		blob := blobs[layerPaths[j]]
