@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.2] - 2026-05-26
+
 A correctness and reliability release across the TUI, CI mode, config, and
 large-image handling.
 
