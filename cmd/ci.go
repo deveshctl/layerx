@@ -12,10 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ErrCIFailed signals that one or more CI rules did not pass. The report
-// has already been printed to stdout by the time this is returned, so the
-// caller should not print the error message itself — main.go just needs
-// the non-nil error to exit with status 1.
+// ErrCIFailed signals that one or more CI rules did not pass. main.go
+// maps this sentinel to exit code 1; any other non-nil error returned
+// from cobra exits 2. The report has already been printed to stdout by
+// the time this is returned, so the caller should not print the error
+// message itself.
 type ErrCIFailed struct{}
 
 func (e *ErrCIFailed) Error() string {
@@ -35,6 +36,11 @@ var ciCmd = &cobra.Command{
 
 Exits 0 when all rules pass, 1 when any rule fails. Output is plain text
 suitable for CI logs.
+
+Exit codes:
+  0  all rules passed
+  1  one or more rules failed
+  2  internal error (Docker daemon down, malformed config, etc.)
 
 Thresholds can be set via flags or a .layerx.yaml file in the working
 directory. Flags take precedence over config values. A missing config
@@ -70,7 +76,7 @@ Cache:
 }
 
 func init() {
-	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (config default: 0.9)")
+	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (0 disables the rule; config default: 0.9)")
 	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum allowed wasted bytes (0 disables the rule)")
 	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule)")
 
@@ -85,7 +91,19 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	return executeCICheck(imageRef, cfg, cmd, noCacheRequested())
+	if err := executeCICheck(imageRef, cfg, cmd, noCacheRequested()); err != nil {
+		// CI rule failure still triggers JSON export so pipelines can
+		// inspect the failing analysis. Internal errors (Docker down,
+		// etc.) skip JSON since there is nothing to export.
+		if _, ok := errors.AsType[*ErrCIFailed](err); ok && flagJSON != "" {
+			_ = runJSONExport(imageRef, flagJSON, noCacheRequested())
+		}
+		return err
+	}
+	if flagJSON != "" {
+		return runJSONExport(imageRef, flagJSON, noCacheRequested())
+	}
+	return nil
 }
 
 func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {
@@ -94,9 +112,10 @@ func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noC
 	// so cobra will not print anything for us. Surface non-CIFailed errors
 	// (e.g. Docker daemon down) to stderr ourselves; the CIFailed sentinel
 	// stays silent because executeCICheck has already printed the report.
-	var ciFail *ErrCIFailed
-	if err != nil && !errors.As(err, &ciFail) {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	if err != nil {
+		if _, ok := errors.AsType[*ErrCIFailed](err); !ok {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 	}
 	return err
 }
@@ -140,8 +159,9 @@ func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {
 		huwp = flagHighestUserWastedPercent
 	}
 
-	rules := []ci.Rule{
-		ci.LowestEfficiency{Threshold: le},
+	rules := []ci.Rule{}
+	if le > 0 {
+		rules = append(rules, ci.LowestEfficiency{Threshold: le})
 	}
 	if hwb > 0 {
 		rules = append(rules, ci.HighestWastedBytes{Threshold: hwb})

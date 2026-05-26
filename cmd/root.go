@@ -60,7 +60,7 @@ Environment:
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON and exit (skips TUI)")
+	rootCmd.PersistentFlags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().BoolVar(&flagRefresh, "refresh", false, "alias for --no-cache")
 	_ = rootCmd.PersistentFlags().MarkHidden("refresh")
@@ -77,14 +77,12 @@ func Execute() error {
 func runInspect(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
 
-	if flagJSON != "" {
-		return runJSONExport(imageRef, flagJSON, noCacheRequested())
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+
+	noCache := noCacheRequested()
 
 	if os.Getenv("CI") == "true" {
 		// The CI report is already printed by executeCICheck; suppress
@@ -93,7 +91,16 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		// onto the report.
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
-		return executeCICheck(imageRef, cfg, ciCmd, noCacheRequested())
+		ciErr := executeCICheck(imageRef, cfg, ciCmd, noCache)
+		if flagJSON != "" {
+			// Always write JSON when requested; CI exit code wins.
+			_ = runJSONExport(imageRef, flagJSON, noCache)
+		}
+		return ciErr
+	}
+
+	if flagJSON != "" {
+		return runJSONExport(imageRef, flagJSON, noCache)
 	}
 
 	resolver, err := image.NewDockerResolver()
@@ -104,6 +111,6 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
-		NoCache:  noCacheRequested(),
+		NoCache:  noCache,
 	})
 }

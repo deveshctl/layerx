@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -181,4 +185,19 @@ func TestJSONExport_SchemaRoundTrip(t *testing.T) {
 	require.Len(t, schema.Layers, 1)
 	assert.Equal(t, "abc", schema.Layers[0].ID)
 	assert.Equal(t, int64(100), schema.Layers[0].NetDelta)
+}
+
+func TestWriteJSONAtomic_OverwritesAndCleansTmp(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.json")
+	require.NoError(t, os.WriteFile(target, []byte(`{"prev":true}`), 0644))
+
+	require.NoError(t, writeJSONAtomic(target, []byte("new")))
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("new"), got)
+
+	_, err = os.Stat(target + ".tmp")
+	assert.True(t, errors.Is(err, fs.ErrNotExist), "tmp file must be cleaned up after success")
 }

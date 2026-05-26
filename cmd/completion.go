@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -57,7 +59,9 @@ func completeImageRefs(cmd *cobra.Command, args []string, toComplete string) ([]
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	out, err := exec.Command("docker", "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

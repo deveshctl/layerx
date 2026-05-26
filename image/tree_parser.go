@@ -85,8 +85,8 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink b
 			if existing != nil {
 				if isDir {
 					existing.IsDir = true
-				}
-				if size > 0 {
+					existing.Size = 0
+				} else if size > 0 {
 					existing.Size = size
 				}
 				existing.Path = absPath

@@ -238,10 +238,10 @@ func (m model) renderWasteOverlay() string {
 	}
 
 	posNum := 0
-	if originalCount > 0 {
+	if len(rows) > 0 {
 		posNum = m.wasteCursor + 1
 	}
-	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, originalCount)
+	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, len(rows))
 
 	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
