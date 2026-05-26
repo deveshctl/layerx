@@ -79,7 +79,6 @@ func TestCacheEnvelope_HoldsMetadata(t *testing.T) {
 		Digest:        "ff00",
 		SchemaVersion: SchemaVersion,
 		CachedAt:      now,
-		Layers:        nil,
 	}
 	assert.Equal(t, "ff00", env.Digest)
 	assert.Equal(t, SchemaVersion, env.SchemaVersion)

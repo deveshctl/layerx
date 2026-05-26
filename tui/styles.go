@@ -58,10 +58,7 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 	vLine := borderFg.Render("│")
 
 	titleLen := lipgloss.Width(title)
-	fillCount := contentWidth - titleLen - 3
-	if fillCount < 0 {
-		fillCount = 0
-	}
+	fillCount := max(contentWidth-titleLen-3, 0)
 	topBorder := topLeft + borderFg.Render("─") + " " + titleRendered + " " + borderFg.Render(strings.Repeat("─", fillCount)) + topRight
 
 	bottomBorder := bottomLeft + borderFg.Render(strings.Repeat("─", contentWidth)) + bottomRight
@@ -71,7 +68,7 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 	sb.WriteString(topBorder)
 	sb.WriteString("\n")
 
-	for i := 0; i < height; i++ {
+	for i := range height {
 		line := ""
 		if i < len(lines) {
 			line = lines[i]
@@ -81,10 +78,7 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 			line = ansi.Truncate(line, contentWidth, "")
 			lineWidth = ansi.StringWidth(line)
 		}
-		pad := contentWidth - lineWidth
-		if pad < 0 {
-			pad = 0
-		}
+		pad := max(contentWidth-lineWidth, 0)
 
 		sb.WriteString(vLine)
 		sb.WriteString(line)

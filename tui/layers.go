@@ -15,10 +15,7 @@ func renderLayers(layers []image.Layer, cursor int, offset int, width, height in
 	contentWidth := width - 2
 	listHeight := height
 
-	end := offset + listHeight
-	if end > len(layers) {
-		end = len(layers)
-	}
+	end := min(offset+listHeight, len(layers))
 	if offset > end {
 		offset = end
 	}
@@ -101,7 +98,7 @@ func wrapCommandLines(cmd string, width int, maxLines int) []string {
 	lines := make([]string, maxLines)
 	runes := []rune(cmd)
 
-	for i := 0; i < maxLines; i++ {
+	for i := range maxLines {
 		if len(runes) == 0 {
 			break
 		}
@@ -177,10 +174,7 @@ func deltaColor(delta int64, finalLiveSize int64) color.Color {
 func formatLayerLine(l image.Layer, selected bool, maxWidth int, mode sizeColMode, finalLiveSize int64) string {
 	index := fmt.Sprintf("#%d", l.Index)
 
-	indexWidth := len([]rune(index))
-	if indexWidth < 3 {
-		indexWidth = 3
-	}
+	indexWidth := max(len([]rune(index)), 3)
 
 	sizeText, sizeWidth := sizeColumnText(l, mode)
 

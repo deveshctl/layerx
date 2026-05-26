@@ -9,13 +9,13 @@ import (
 )
 
 func maxVisibleLineWidth(content string) int {
-	max := 0
-	for _, ln := range strings.Split(content, "\n") {
-		if w := ansi.StringWidth(ln); w > max {
-			max = w
+	maxW := 0
+	for ln := range strings.SplitSeq(content, "\n") {
+		if w := ansi.StringWidth(ln); w > maxW {
+			maxW = w
 		}
 	}
-	return max
+	return maxW
 }
 
 func TestRenderPanel_SyntaxHighlightedContentFitsWidth(t *testing.T) {

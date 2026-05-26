@@ -46,10 +46,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 			}
 		}
 	} else {
-		end := offset + contentHeight
-		if end > len(files) {
-			end = len(files)
-		}
+		end := min(offset+contentHeight, len(files))
 		visible := files[offset:end]
 
 		for i, f := range visible {
@@ -79,10 +76,7 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 	}
 
 	hasAbove := offset > 0
-	end := offset + contentHeight
-	if end > len(files) {
-		end = len(files)
-	}
+	end := min(offset+contentHeight, len(files))
 	hasBelow := end < len(files)
 
 	content := sb.String()
@@ -168,10 +162,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 		metaWidth = diffGlyphCol
 	}
 
-	nameSpace := maxWidth - metaWidth
-	if nameSpace < 4 {
-		nameSpace = 4
-	}
+	nameSpace := max(maxWidth-metaWidth, 4)
 
 	var displayName string
 	var treePrefix string
@@ -217,10 +208,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 	}
 
 	nameWidth := len([]rune(fullName)) + len([]rune(originSuffix))
-	namePad := nameSpace - nameWidth
-	if namePad < 0 {
-		namePad = 0
-	}
+	namePad := max(nameSpace-nameWidth, 0)
 
 	var diffGlyph string
 	switch f.DiffType {
@@ -297,10 +285,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 
 	nameRenderedWidth := lipgloss.Width(nameRendered) + lipgloss.Width(originRendered)
 	diffGlyphWidth := lipgloss.Width(diffGlyph)
-	actualNamePad := nameSpace - nameRenderedWidth + diffGlyphWidth - 2
-	if actualNamePad < 0 {
-		actualNamePad = 0
-	}
+	actualNamePad := max(nameSpace-nameRenderedWidth+diffGlyphWidth-2, 0)
 
 	fullLine := diffGlyph + metaCols + nameRendered + originRendered + strings.Repeat(" ", actualNamePad)
 

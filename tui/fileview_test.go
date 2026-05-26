@@ -55,13 +55,13 @@ func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 		highlightedLines: highlightFileLines("/etc/security/pam_env.conf", data),
 	})
 
-	max := 0
-	for _, ln := range strings.Split(body, "\n") {
-		if w := ansi.StringWidth(ln); w > max {
-			max = w
+	maxW := 0
+	for ln := range strings.SplitSeq(body, "\n") {
+		if w := ansi.StringWidth(ln); w > maxW {
+			maxW = w
 		}
 	}
-	require.LessOrEqual(t, max, 120)
+	require.LessOrEqual(t, maxW, 120)
 }
 
 func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/moby/moby/client"
@@ -57,10 +58,8 @@ func IsBinary(data []byte) bool {
 	if ct != "application/octet-stream" {
 		return true
 	}
-	for _, b := range data {
-		if b == 0 {
-			return true
-		}
+	if slices.Contains(data, 0) {
+		return true
 	}
 	return false
 }
@@ -385,7 +384,7 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 		if name != filePath {
 			continue
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			// Symlink, hardlink, dir entry — let walk-back continue.
 			return nil, false, nil
 		}

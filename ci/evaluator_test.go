@@ -98,7 +98,7 @@ func TestReport_Print_Fail(t *testing.T) {
 
 func TestEvaluate_TopWasteLimitedTo10(t *testing.T) {
 	var files []image.WastedFile
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		files = append(files, image.WastedFile{
 			Path:        fmt.Sprintf("/file%d", i),
 			TotalWasted: int64(100 - i),

@@ -292,15 +292,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			if m.viewState == viewReady {
+			switch m.viewState {
+			case viewReady:
 				m.scrollViewUp()
-			} else if m.viewState == viewNone {
+			case viewNone:
 				m.moveUp()
 			}
 		case tea.MouseWheelDown:
-			if m.viewState == viewReady {
+			switch m.viewState {
+			case viewReady:
 				m.scrollViewDown()
-			} else if m.viewState == viewNone {
+			case viewNone:
 				m.moveDown()
 			}
 		}
@@ -480,10 +482,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Top):
 				m.viewOffset = 0
 			case key.Matches(msg, m.keys.Bottom):
-				maxOffset := fileViewLineCount(m.viewContent) - m.viewVisibleHeight()
-				if maxOffset < 0 {
-					maxOffset = 0
-				}
+				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
 				m.viewOffset = maxOffset
 			}
 			return m, nil
@@ -669,11 +668,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case msg.Code == tea.KeyEnter:
+	switch msg.Code {
+	case tea.KeyEnter:
 		m.filterActive = false
 		return m, nil
-	case msg.Code == tea.KeyBackspace:
+	case tea.KeyBackspace:
 		if len(m.filterQuery) > 0 {
 			runes := []rune(m.filterQuery)
 			m.filterQuery = string(runes[:len(runes)-1])
@@ -694,11 +693,11 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleViewerSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case msg.Code == tea.KeyEnter:
+	switch msg.Code {
+	case tea.KeyEnter:
 		m.viewSearchActive = false
 		return m, nil
-	case msg.Code == tea.KeyBackspace:
+	case tea.KeyBackspace:
 		if len(m.viewSearchQuery) > 0 {
 			runes := []rune(m.viewSearchQuery)
 			m.viewSearchQuery = string(runes[:len(runes)-1])
@@ -744,14 +743,8 @@ func (m *model) scrollToViewerMatch() {
 	}
 	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
 	visHeight := m.viewVisibleHeight()
-	desired := targetLine - visHeight/2
-	if desired < 0 {
-		desired = 0
-	}
-	maxOffset := fileViewLineCount(m.viewContent) - visHeight
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	desired := max(targetLine-visHeight/2, 0)
+	maxOffset := max(fileViewLineCount(m.viewContent)-visHeight, 0)
 	if desired > maxOffset {
 		desired = maxOffset
 	}
@@ -1242,10 +1235,7 @@ func (m model) renderHeader() string {
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
 	right := lipgloss.NewStyle().Foreground(headerDimColor).Background(statusBgColor).Render(layerCount + " · " + totalSize)
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
 
 	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
 	return bgStyle.Render(" " + left + strings.Repeat(" ", gap) + right)
@@ -1359,10 +1349,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		right = badges + rightHighlight + rightDim + " "
 	}
 
-	gap := m.width - lipgloss.Width(hintStr) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
-	}
+	gap := max(m.width-lipgloss.Width(hintStr)-lipgloss.Width(right), 0)
 
 	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
 	return bgStyle.Render(hintStr + strings.Repeat(" ", gap) + right)
@@ -1404,10 +1391,7 @@ func (m model) renderViewerStatusBar() string {
 		right = rightDim.Render(fmt.Sprintf("Line %d/%d (%d%%) ", line, total, pct))
 	}
 
-	gap := m.width - lipgloss.Width(hints) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
-	}
+	gap := max(m.width-lipgloss.Width(hints)-lipgloss.Width(right), 0)
 
 	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
@@ -1434,10 +1418,7 @@ func (m model) fetchFileRaw(ctx context.Context, path string, requestID uint64) 
 }
 
 func (m *model) scrollViewDown() {
-	maxOffset := fileViewLineCount(m.viewContent) - m.viewVisibleHeight()
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
 	if m.viewOffset < maxOffset {
 		m.viewOffset++
 	}
@@ -1464,16 +1445,13 @@ func (m *model) viewVisibleHeight() int {
 }
 
 func friendlyError(err error) string {
-	var daemonErr *image.ErrDaemonNotRunning
-	if errors.As(err, &daemonErr) {
+	if _, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
 		return "Docker is not running. Please start Docker and try again."
 	}
-	var pullErr *image.ErrPullFailed
-	if errors.As(err, &pullErr) {
+	if pullErr, ok := errors.AsType[*image.ErrPullFailed](err); ok {
 		return fmt.Sprintf("Failed to pull image %q. Check the image name and your network.", pullErr.Ref)
 	}
-	var notFoundErr *image.ErrImageNotFound
-	if errors.As(err, &notFoundErr) {
+	if notFoundErr, ok := errors.AsType[*image.ErrImageNotFound](err); ok {
 		return fmt.Sprintf("Image %q not found.", notFoundErr.Ref)
 	}
 	return err.Error()
