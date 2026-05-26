@@ -205,6 +205,28 @@ func TestParseLayerTar_DotSlashPrefixNormalized(t *testing.T) {
 	assert.Equal(t, "/etc/hostname", host.Path)
 }
 
+func TestParseLayerTar_EmbeddedDotSegmentNormalized(t *testing.T) {
+	// Tar entries with embedded "./" segments (e.g. from busybox tar or hand-rolled
+	// archives) must collapse to the clean path; otherwise a phantom "." node is
+	// created and downstream whiteout matching and waste detection silently miss.
+	entries := []tarEntry{
+		{Name: "usr/./bin/sh", Size: 64, Type: tar.TypeReg},
+	}
+	buf := buildLayerTar(t, entries)
+	tree, err := ParseLayerTar(buf)
+	require.NoError(t, err)
+
+	usr := tree.Root.FindChild("usr")
+	require.NotNil(t, usr)
+	assert.Nil(t, usr.FindChild("."), "phantom '.' node must not be created")
+
+	bin := usr.FindChild("bin")
+	require.NotNil(t, bin, "bin must be a direct child of usr after path cleaning")
+	sh := bin.FindChild("sh")
+	require.NotNil(t, sh)
+	assert.Equal(t, "/usr/bin/sh", sh.Path)
+}
+
 func TestParseLayerTar_PathAlwaysHasLeadingSlash(t *testing.T) {
 	entries := []tarEntry{
 		{Name: "a/b/c", Size: 1, Type: tar.TypeReg},

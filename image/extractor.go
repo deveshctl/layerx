@@ -40,7 +40,8 @@ type Extractor interface {
 }
 
 // IsBinary reports whether data appears to be binary content.
-// Uses net/http content detection plus null-byte scanning.
+// Trusts net/http content detection for text/* (covering UTF-8/16/32 with BOMs)
+// and only falls back to null-byte scanning when detection is inconclusive.
 func IsBinary(data []byte) bool {
 	if len(data) == 0 {
 		return false
@@ -48,6 +49,13 @@ func IsBinary(data []byte) bool {
 	ct := http.DetectContentType(data)
 	if strings.HasPrefix(ct, "text/") {
 		return false
+	}
+	// DetectContentType returns application/octet-stream when it cannot
+	// classify the bytes. Only in that case do we fall through to the
+	// null-byte heuristic — trusting non-text classifications (image/*,
+	// application/pdf, etc.) directly avoids overriding correct results.
+	if ct != "application/octet-stream" {
+		return true
 	}
 	for _, b := range data {
 		if b == 0 {
@@ -341,7 +349,6 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 	}
 
 	// filePath is already cleaned (no leading slash) by the caller.
-	parent, base := splitParent(filePath)
 
 	tr := tar.NewReader(r)
 	for {
@@ -355,13 +362,15 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 
 		name := strings.TrimPrefix(hdr.Name, "./")
 
-		// Whiteout for the exact target file: parent + "/.wh." + base
-		if parent == "" {
-			if name == ".wh."+base {
+		// Regular whiteout (.wh.<seg>) on the file itself or on any ancestor
+		// directory. A tar entry "<dir>/.wh.<seg>" deletes "<dir>/<seg>" and
+		// everything beneath it, per the overlay-fs whiteout convention.
+		// Names beginning with ".wh..wh." are reserved control entries
+		// (e.g. ".wh..wh..opq") and must not be treated as regular whiteouts.
+		if deleted, ok := regularWhiteoutTarget(name); ok {
+			if filePath == deleted || strings.HasPrefix(filePath, deleted+"/") {
 				return nil, false, errWhiteoutStop
 			}
-		} else if name == parent+"/.wh."+base {
-			return nil, false, errWhiteoutStop
 		}
 
 		// Opaque whiteout in any ancestor of the path
@@ -389,13 +398,28 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 	}
 }
 
-// splitParent splits "tmp/a.txt" into ("tmp", "a.txt"); "a.txt" into ("", "a.txt").
-func splitParent(p string) (string, string) {
-	idx := strings.LastIndex(p, "/")
-	if idx < 0 {
-		return "", p
+// regularWhiteoutTarget returns the path that a regular whiteout tar entry
+// deletes. For an entry "<dir>/.wh.<seg>" the deleted path is "<dir>/<seg>";
+// for ".wh.<seg>" at the root it is "<seg>". Returns ok=false for entries
+// that are not regular whiteouts, including opaque whiteouts and any other
+// reserved ".wh..wh.*" control entries.
+func regularWhiteoutTarget(name string) (string, bool) {
+	if idx := strings.LastIndex(name, "/.wh."); idx >= 0 {
+		ancestorDir := name[:idx]
+		segment := name[idx+len("/.wh."):]
+		if segment == "" || strings.Contains(segment, "/") || strings.HasPrefix(segment, ".wh.") {
+			return "", false
+		}
+		return ancestorDir + "/" + segment, true
 	}
-	return p[:idx], p[idx+1:]
+	if strings.HasPrefix(name, ".wh.") && !strings.HasPrefix(name, ".wh..wh.") {
+		segment := name[len(".wh."):]
+		if segment == "" || strings.Contains(segment, "/") {
+			return "", false
+		}
+		return segment, true
+	}
+	return "", false
 }
 
 // ExtractFromLayer extracts a file as it exists at the given layer cursor.

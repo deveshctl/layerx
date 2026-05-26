@@ -85,6 +85,9 @@ func Efficiency(layers []Layer) *EfficiencyResult {
 // without adding real data.
 func walkFiles(node *FileNode, fn func(path string, size int64)) {
 	for _, child := range node.Children {
+		if isWhiteoutName(child.Name) {
+			continue
+		}
 		if child.IsDir {
 			walkFiles(child, fn)
 		} else if !child.IsHardlink {

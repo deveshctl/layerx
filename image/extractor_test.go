@@ -307,6 +307,34 @@ func TestExtractFromLayer_GzippedBlob(t *testing.T) {
 	assert.Equal(t, "v0", string(fc.Data))
 }
 
+func TestExtractFromLayer_SingleLayerImage(t *testing.T) {
+	// Fence-post check: a 1-layer image at cursor=0 must succeed for both
+	// "found in this layer" and "not found" without iterating off the end.
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0"})
+
+	outer := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"only.txt": "solo"}),
+	})
+	cli := &fakeImageSaveClient{saveData: outer.Bytes()}
+	e := NewDockerExtractor(cli)
+
+	fc, err := e.ExtractFromLayer(context.Background(), "img", "/only.txt", 0)
+	require.NoError(t, err)
+	assert.Equal(t, "solo", string(fc.Data))
+
+	_, err = e.ExtractFromLayer(context.Background(), "img", "/missing.txt", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in any layer")
+}
+
 func TestExtractRawFromLayer_NoTruncation(t *testing.T) {
 	// 2MB content > MaxViewSize (1MB) — Raw variant must return all bytes.
 	big := strings.Repeat("a", 2*1024*1024)
@@ -331,4 +359,126 @@ func TestExtractRawFromLayer_NoTruncation(t *testing.T) {
 	data, err := e.ExtractRawFromLayer(context.Background(), "img", "/big.dat", 0)
 	require.NoError(t, err)
 	assert.Equal(t, len(big), len(data))
+}
+
+// --- findFileInLayer whiteout coverage (bug-scan 2026-05-25 #1) -------------
+
+// buildRawTar writes the given headers (with their bodies) to a raw
+// uncompressed tar. Used for whiteout entries with empty bodies.
+func buildRawTar(t *testing.T, entries []struct {
+	name string
+	body string
+}) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, e := range entries {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     e.name,
+			Size:     int64(len(e.body)),
+			Mode:     0o644,
+			Typeflag: tar.TypeReg,
+		}))
+		_, err := tw.Write([]byte(e.body))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+func TestFindFileInLayer_AncestorRegularWhiteout(t *testing.T) {
+	// "tmp/.wh.sub" deletes "tmp/sub/" — looking up "tmp/sub/a.txt" must stop.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "tmp/.wh.sub", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp/sub/a.txt")
+	assert.False(t, found)
+	require.ErrorIs(t, err, errWhiteoutStop)
+}
+
+func TestFindFileInLayer_RootRegularWhiteout(t *testing.T) {
+	// ".wh.tmp" at the root deletes "/tmp" — "tmp/foo/bar" must stop.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: ".wh.tmp", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp/foo/bar")
+	assert.False(t, found)
+	require.ErrorIs(t, err, errWhiteoutStop)
+}
+
+func TestFindFileInLayer_ExactFileWhiteoutStillStops(t *testing.T) {
+	// Regression: existing exact-file whiteout case must keep working.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "tmp/sub/.wh.a.txt", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp/sub/a.txt")
+	assert.False(t, found)
+	require.ErrorIs(t, err, errWhiteoutStop)
+}
+
+func TestFindFileInLayer_FakeWhWhPrefixDoesNotMatch(t *testing.T) {
+	// Names beginning with ".wh..wh." are reserved control entries (e.g. opq);
+	// a non-opq one must NOT be treated as a regular whiteout for any path.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "tmp/.wh..wh.fake", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp/sub/a.txt")
+	assert.False(t, found)
+	require.NoError(t, err)
+}
+
+func TestFindFileInLayer_OpaqueWhiteoutAncestorRegression(t *testing.T) {
+	// Existing opaque-whiteout behavior must remain intact.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "tmp/.wh..wh..opq", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp/sub/a.txt")
+	assert.False(t, found)
+	require.ErrorIs(t, err, errWhiteoutStop)
+}
+
+func TestExtractFromLayer_AncestorWhiteoutBlocksWalkBack(t *testing.T) {
+	// L0 has tmp/sub/a.txt. L1 deletes tmp/sub via "tmp/.wh.sub".
+	// At cursor=1 the walk-back must stop at L1, not return L0's bytes.
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar", "layer1/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0", "L1"})
+
+	outer := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/sub/a.txt": "v0"}),
+		"layer1/layer.tar": buildRawTar(t, []struct {
+			name string
+			body string
+		}{
+			{name: "tmp/.wh.sub", body: ""},
+		}),
+	})
+
+	cli := &fakeImageSaveClient{saveData: outer.Bytes()}
+	e := NewDockerExtractor(cli)
+
+	_, err = e.ExtractFromLayer(context.Background(), "img", "/tmp/sub/a.txt", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "removed in layer")
 }
