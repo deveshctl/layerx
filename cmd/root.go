@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/deveshctl/layerx/config"
@@ -71,6 +72,10 @@ func SetVersionInfo(v, c, d string) {
 		rootCmd.Version = v
 		return
 	}
+	if d == "" || d == "unknown" {
+		rootCmd.Version = fmt.Sprintf("%s (commit %s)", v, c)
+		return
+	}
 	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", v, c, d)
 }
 
@@ -97,8 +102,8 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		ciErr := executeCICheck(imageRef, cfg, ciCmd, noCache)
 		if flagJSON != "" {
-			// Always write JSON when requested; CI exit code wins.
-			_ = runJSONExport(imageRef, flagJSON, noCache)
+			jsonErr := runJSONExport(imageRef, flagJSON, noCache)
+			return combineCIAndJSONErr(ciErr, jsonErr, os.Stderr)
 		}
 		return ciErr
 	}
@@ -117,4 +122,19 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		Resolver: resolver,
 		NoCache:  noCache,
 	})
+}
+
+// combineCIAndJSONErr decides which error wins when CI=true is paired with
+// --json. The CI exit code wins on CI failure (a failing CI rule must stay
+// the user-visible result), but a JSON write failure on a CI-pass run must
+// not be silent — it becomes the returned error and is also surfaced as a
+// warning on stderr regardless of which error wins.
+func combineCIAndJSONErr(ciErr, jsonErr error, stderr io.Writer) error {
+	if jsonErr != nil {
+		fmt.Fprintf(stderr, "warning: JSON export failed: %v\n", jsonErr)
+		if ciErr == nil {
+			return jsonErr
+		}
+	}
+	return ciErr
 }

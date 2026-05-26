@@ -277,11 +277,13 @@ func TestWasteJumpUnknownIntroPreservesFilter(t *testing.T) {
 	m.efficiency = image.Efficiency(m.analysis.Layers)
 	m.openWaste()
 	// Row with IntroLayer=-1 (intro unknown) — jump should be a no-op,
-	// preserving the user's filter rather than wiping it.
+	// preserving the user's persisted filter rather than wiping it.
+	// The realistic scenario mirrors TestWasteJumpClearsFilter: filterActive
+	// is false (the user pressed `w` while the filter wasn't being typed)
+	// but filterQuery still holds the persisted text.
 	m.wasteRows = []wasteRow{
 		{Path: "/some/path", Wasted: 1024, LayerCount: 2, IntroLayer: -1},
 	}
-	m.filterActive = true
 	m.filterQuery = "important"
 	m.layerCursor = 1
 
@@ -289,7 +291,7 @@ func TestWasteJumpUnknownIntroPreservesFilter(t *testing.T) {
 	um := updated.(model)
 
 	assert.False(t, um.showWaste, "overlay still closes")
-	assert.True(t, um.filterActive, "filterActive must be preserved on no-op jump")
+	assert.False(t, um.filterActive, "filterActive remains false")
 	assert.Equal(t, "important", um.filterQuery, "filterQuery must be preserved on no-op jump")
 	assert.Equal(t, 1, um.layerCursor, "layerCursor must not change on no-op jump")
 	assert.Contains(t, um.statusMsg, "Intro layer unknown")

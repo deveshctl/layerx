@@ -452,6 +452,38 @@ func TestFindFileInLayer_OpaqueWhiteoutAncestorRegression(t *testing.T) {
 	require.ErrorIs(t, err, errWhiteoutStop)
 }
 
+func TestFindFileInLayer_EmbeddedDotSegmentNormalized(t *testing.T) {
+	// Layer tar can produce entries like "usr/./bin/sh" (busybox tar, BuildKit
+	// edge cases). cleanTarPath collapses that to "usr/bin/sh"; findFileInLayer
+	// must apply the same normalization so callers using the cleaned path can
+	// match the entry.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "usr/./bin/sh", body: "shellbody"},
+	})
+	data, found, err := findFileInLayer(layer, "usr/bin/sh")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "shellbody", string(data))
+}
+
+func TestFindFileInLayer_LeadingSlashOnEntry(t *testing.T) {
+	// Some tars emit "/etc/passwd" with a leading slash; the cleaned filePath
+	// is "etc/passwd" — these must match.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "/etc/passwd", body: "root:x:0:0::/root:/bin/sh"},
+	})
+	data, found, err := findFileInLayer(layer, "etc/passwd")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Contains(t, string(data), "root")
+}
+
 func TestExtractFromLayer_AncestorWhiteoutBlocksWalkBack(t *testing.T) {
 	// L0 has tmp/sub/a.txt. L1 deletes tmp/sub via "tmp/.wh.sub".
 	// At cursor=1 the walk-back must stop at L1, not return L0's bytes.

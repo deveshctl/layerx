@@ -79,6 +79,15 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 	end := min(offset+contentHeight, len(files))
 	hasBelow := end < len(files)
 
+	// renderPanel paints the ▾ scroll indicator on the right border at row
+	// height-1. When the filter bar is shown it occupies that row, so the
+	// ▾ would overwrite the filter-bar border. Suppress it; the title's
+	// match-count and natural cursor advancement already signal "more below"
+	// once the user starts navigating.
+	if showFilterBar {
+		hasBelow = false
+	}
+
 	content := sb.String()
 	return renderPanel(content, title, focused, contentWidth, height, hasAbove, hasBelow)
 }
