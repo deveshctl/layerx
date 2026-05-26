@@ -399,7 +399,8 @@ func TestLoadCache_TransientIOError_KeepsFile(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 
-	require.NoError(t, os.WriteFile(path, []byte("anything"), 0o000))
+	require.NoError(t, os.WriteFile(path, []byte("anything"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o000))
 	defer func() { _ = os.Chmod(path, 0o600) }()
 
 	_, ok, err := loadCache(root, digest)

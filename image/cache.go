@@ -169,7 +169,14 @@ func readCacheFile(path string) (cacheEnvelope, error, bool) {
 	var env cacheEnvelope
 	f, err := os.Open(path)
 	if err != nil {
-		return env, fmt.Errorf("opening cache %s: %w", path, err), false
+		// os.ErrNotExist is a soft miss (caller returns no error).
+		// Anything else from os.Open — EACCES, EBUSY, network share
+		// hiccup — is a transient I/O failure: the cache file may be
+		// fine, we just couldn't read it right now. Do NOT delete it.
+		if errors.Is(err, os.ErrNotExist) {
+			return env, fmt.Errorf("opening cache %s: %w", path, err), false
+		}
+		return env, fmt.Errorf("opening cache %s: %w", path, err), true
 	}
 	defer f.Close()
 	if decErr := gob.NewDecoder(f).Decode(&env); decErr != nil {
