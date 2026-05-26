@@ -206,12 +206,16 @@ func TestParseLayers_HistoryMismatch(t *testing.T) {
 		"/bin/sh -c echo hello",
 	}, 0)
 
+	// Inner layer.tar contents must be at least 1024 bytes of zeros so
+	// archive/tar reads two end-of-archive blocks instead of EOFing mid-header.
+	// The Size assertion below comes from the OUTER tar header (set by
+	// buildTar), so the inner length is irrelevant to what parseLayers reports.
 	tarBuf := buildTar(t, map[string][]byte{
 		"manifest.json":                      manifestData,
 		"config.json":                        configData,
-		"aaaa00000000000000000000/layer.tar": make([]byte, 100),
-		"bbbb00000000000000000000/layer.tar": make([]byte, 200),
-		"cccc00000000000000000000/layer.tar": make([]byte, 300),
+		"aaaa00000000000000000000/layer.tar": make([]byte, 1024),
+		"bbbb00000000000000000000/layer.tar": make([]byte, 1024),
+		"cccc00000000000000000000/layer.tar": make([]byte, 1024),
 	})
 
 	layers, err := parseLayers(tarBuf)
@@ -222,9 +226,9 @@ func TestParseLayers_HistoryMismatch(t *testing.T) {
 	assert.Equal(t, "", layers[1].Command)
 	assert.Equal(t, "", layers[2].Command)
 
-	assert.Equal(t, int64(100), layers[0].Size)
-	assert.Equal(t, int64(200), layers[1].Size)
-	assert.Equal(t, int64(300), layers[2].Size)
+	assert.Equal(t, int64(1024), layers[0].Size)
+	assert.Equal(t, int64(1024), layers[1].Size)
+	assert.Equal(t, int64(1024), layers[2].Size)
 }
 
 func TestParseLayers_MissingConfig(t *testing.T) {
