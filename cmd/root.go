@@ -100,9 +100,17 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		// onto the report.
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
-		ciErr := executeCICheck(imageRef, cfg, ciCmd, noCache)
+		analysis, ciErr := executeCICheck(imageRef, cfg, ciCmd, noCache)
 		if flagJSON != "" {
-			jsonErr := runJSONExport(imageRef, flagJSON, noCache)
+			var jsonErr error
+			switch {
+			case analysis != nil:
+				jsonErr = runJSONExportFromAnalysis(analysis, flagJSON)
+			case ciErr != nil:
+				jsonErr = nil
+			default:
+				jsonErr = runJSONExport(imageRef, flagJSON, noCache)
+			}
 			return combineCIAndJSONErr(ciErr, jsonErr, os.Stderr)
 		}
 		return ciErr

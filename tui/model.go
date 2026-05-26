@@ -160,19 +160,25 @@ type model struct {
 	wasteRows     []wasteRow
 	sizeMode      sizeColMode
 	noCache       bool
+
+	fetchCtx    context.Context
+	fetchCancel context.CancelFunc
 }
 
 // NewModel creates a new model wired to real Docker data.
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
+	ctx, cancel := context.WithCancel(context.Background())
 	return model{
-		state:      stateLoading,
-		imageRef:   cfg.ImageRef,
-		resolver:   cfg.Resolver,
-		progressCh: ch,
-		writeFile:  os.WriteFile,
-		keys:       defaultKeys(),
-		noCache:    cfg.NoCache,
+		state:       stateLoading,
+		imageRef:    cfg.ImageRef,
+		resolver:    cfg.Resolver,
+		progressCh:  ch,
+		writeFile:   os.WriteFile,
+		keys:        defaultKeys(),
+		noCache:     cfg.NoCache,
+		fetchCtx:    ctx,
+		fetchCancel: cancel,
 	}
 }
 
@@ -183,8 +189,9 @@ func (m model) Init() tea.Cmd {
 func (m model) fetchInspect() tea.Cmd {
 	resolver := m.resolver
 	imageRef := m.imageRef
+	ctx := m.fetchCtx
 	return func() tea.Msg {
-		meta, err := resolver.Inspect(context.Background(), imageRef)
+		meta, err := resolver.Inspect(ctx, imageRef)
 		return inspectMsg{meta: meta, err: err}
 	}
 }
@@ -199,9 +206,10 @@ func (m model) fetchAnalysisWithProgress(progressCh chan<- image.ProgressEvent) 
 	resolver := m.resolver
 	imageRef := m.imageRef
 	noCache := m.noCache
+	ctx := m.fetchCtx
 	return func() tea.Msg {
 		defer close(progressCh)
-		result, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+		result, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
 			image.AnalyzeOptions{NoCache: noCache, Progress: progressCh})
 		return analysisMsg{analysis: result, err: err}
 	}
@@ -408,6 +416,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.quitting = true
+			if m.fetchCancel != nil {
+				m.fetchCancel()
+			}
 			return m, tea.Quit
 		}
 
@@ -418,6 +429,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			inTextInput := m.filterActive || (m.viewState == viewReady && m.viewSearchActive)
 			if !inTextInput || msg.String() == "ctrl+c" {
 				m.quitting = true
+				if m.fetchCancel != nil {
+					m.fetchCancel()
+				}
 				return m, tea.Quit
 			}
 		}
@@ -722,7 +736,7 @@ func (m *model) recomputeViewerMatches() {
 		return
 	}
 	query := strings.ToLower(m.viewSearchQuery)
-	lines := strings.Split(string(m.viewContent.Data), "\n")
+	lines := splitFileLines(m.viewContent.Data)
 	for lineIdx, line := range lines {
 		lower := strings.ToLower(line)
 		offset := 0
@@ -1459,7 +1473,9 @@ func friendlyError(err error) string {
 
 // Run starts the TUI program with the given configuration.
 func Run(cfg Config) error {
-	p := tea.NewProgram(NewModel(cfg))
+	m := NewModel(cfg)
+	defer m.fetchCancel()
+	p := tea.NewProgram(m)
 	_, err := p.Run()
 	return err
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 
@@ -52,7 +53,7 @@ func LoadFrom(path string) (*Config, error) {
 
 	cfg := Default()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return cfg, nil
 }

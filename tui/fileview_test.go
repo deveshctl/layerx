@@ -147,3 +147,34 @@ func TestRenderFileView_TrailingNewlineLineCount(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(body, " 2 "), "exactly one '2' gutter row")
 	assert.Equal(t, 0, strings.Count(body, " 3 "), "no phantom '3' row from trailing \\n")
 }
+
+func TestSplitFileLines_CRLFAndTrailingNewline(t *testing.T) {
+	// CRLF must produce the same line count as LF, with no \r leaking into
+	// rendered lines. Trailing newline is a terminator, not a separator.
+	tests := []struct {
+		name string
+		data []byte
+		want []string
+	}{
+		{"crlf two lines no trailing", []byte("a\r\nb"), []string{"a", "b"}},
+		{"crlf two lines trailing", []byte("a\r\nb\r\n"), []string{"a", "b"}},
+		{"lf two lines trailing", []byte("a\nb\n"), []string{"a", "b"}},
+		{"empty", []byte{}, nil},
+		{"single newline", []byte("\n"), nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitFileLines(tc.data)
+			assert.Equal(t, tc.want, got)
+			for _, line := range got {
+				assert.False(t, strings.Contains(line, "\r"), "no CR should leak into rendered lines")
+			}
+		})
+	}
+}
+
+func TestFileViewLineCount_CRLFMatchesLF(t *testing.T) {
+	lf := &image.FileContent{Data: []byte("a\nb\nc\n")}
+	crlf := &image.FileContent{Data: []byte("a\r\nb\r\nc\r\n")}
+	assert.Equal(t, fileViewLineCount(lf), fileViewLineCount(crlf))
+}

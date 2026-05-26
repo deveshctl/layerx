@@ -49,6 +49,11 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 	}
 
 	borderFg := styleWithFg(borderColor)
+
+	maxTitle := max(contentWidth-3, 0)
+	if ansi.StringWidth(title) > maxTitle {
+		title = ansi.Truncate(title, maxTitle, "…")
+	}
 	titleRendered := lipgloss.NewStyle().Foreground(borderColor).Bold(true).Render(title)
 
 	topLeft := borderFg.Render("╭")
