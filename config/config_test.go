@@ -63,3 +63,39 @@ func TestLoadFrom_InvalidYAML(t *testing.T) {
 	_, err := LoadFrom(path)
 	assert.Error(t, err)
 }
+
+func TestLoadFrom_RejectsLowestEfficiencyOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  lowest-efficiency: 1.5
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lowest-efficiency")
+}
+
+func TestLoadFrom_RejectsNegativeUserWastedPercent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  highest-user-wasted-percent: -0.1
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "highest-user-wasted-percent")
+}
+
+func TestLoadFrom_RejectsNegativeWastedBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  highest-wasted-bytes: -1
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "highest-wasted-bytes")
+}

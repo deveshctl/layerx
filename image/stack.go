@@ -61,7 +61,21 @@ func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
 	whiteouts, opaque := extractWhiteouts(layerRoot)
 
 	if opaque {
+		// Opaque whiteout semantics: wipe directory contents, then apply the
+		// new layer's children. If a name in cumulative is reintroduced by
+		// this layer, skip the Removed clone — emitting both clones leaves
+		// duplicate-Name children that confuse FindChild and double-count
+		// the path in efficiency calculations.
+		layerNames := make(map[string]struct{})
+		for _, child := range layerRoot.Children {
+			if !isWhiteoutName(child.Name) {
+				layerNames[child.Name] = struct{}{}
+			}
+		}
 		for _, child := range cumulative.Children {
+			if _, reintroduced := layerNames[child.Name]; reintroduced {
+				continue
+			}
 			removed := cloneAsRemoved(child)
 			merged.AddChild(removed)
 		}

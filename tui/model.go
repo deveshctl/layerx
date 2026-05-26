@@ -62,6 +62,8 @@ const (
 	viewReady
 )
 
+const maxFilterLen = 256
+
 // fileContentMsg is sent when async file extraction completes.
 type fileContentMsg struct {
 	requestID uint64
@@ -100,6 +102,16 @@ type fileSaveMsg struct {
 	requestID uint64
 	filename  string
 	data      []byte
+	err       error
+}
+
+// fileSavedMsg is sent when the off-thread write completes.
+// `target` is the actual path written (may differ from `original` when
+// uniquePath bumped a `.N` suffix to avoid clobbering an existing file).
+type fileSavedMsg struct {
+	requestID uint64
+	original  string
+	target    string
 	err       error
 }
 
@@ -152,6 +164,7 @@ type model struct {
 	extractor        image.Extractor
 	efficiency       *image.EfficiencyResult
 	writeFile        func(string, []byte, os.FileMode) error
+	statFile         func(string) (os.FileInfo, error)
 	keys             keyMap
 	showWaste     bool
 	wasteCursor   int
@@ -175,6 +188,7 @@ func NewModel(cfg Config) model {
 		resolver:    cfg.Resolver,
 		progressCh:  ch,
 		writeFile:   os.WriteFile,
+		statFile:    os.Stat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
 		fetchCtx:    ctx,
@@ -354,14 +368,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return clearStatusMsg{}
 			})
 		}
-		err := m.writeFile(msg.filename, msg.data, 0644)
-		if err != nil {
-			m.statusMsg = "Error: " + err.Error()
+		// Run stat + write off-thread so a slow disk (network mount, encrypted
+		// volume, USB) can't freeze the TUI.
+		return m, saveFileCmd(m.statFile, m.writeFile, msg.requestID, msg.filename, msg.data)
+
+	case fileSavedMsg:
+		if msg.requestID != m.saveRequestID {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.statusMsg = "Error: " + msg.err.Error()
 			return m, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
 				return clearStatusMsg{}
 			})
 		}
-		m.statusMsg = "Saved: " + msg.filename
+		if msg.target != msg.original {
+			m.statusMsg = fmt.Sprintf("Saved: %s (existed → wrote %s)", msg.original, msg.target)
+		} else {
+			m.statusMsg = "Saved: " + msg.target
+		}
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return clearStatusMsg{}
 		})
@@ -698,6 +723,9 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		if msg.Text != "" {
+			if len([]rune(m.filterQuery))+len([]rune(msg.Text)) > maxFilterLen {
+				return m, nil
+			}
 			m.filterQuery += msg.Text
 			m.treeCursor = 0
 			m.treeOffset = 0
@@ -1074,13 +1102,16 @@ func (m model) viewLoading() tea.View {
 		if m.pullTotal > 0 {
 			detail := fmt.Sprintf("    Layer %d/%d", m.pullLayers, m.pullTotal)
 			if m.pullBytesMax > 0 {
-				pct := int(m.pullBytes * 100 / m.pullBytesMax)
+				pct := min(int(m.pullBytes*100/m.pullBytesMax), 100)
 				bytesText := fmt.Sprintf("  %s / %s",
 					image.FormatBytes(m.pullBytes),
 					image.FormatBytes(m.pullBytesMax))
+				// Budget reserves 2 inner-padding cells (m.width - 6 instead
+				// of m.width - 4) so the bytes total never butts up against
+				// the right border when boxWidth is clamped to m.width - 2.
 				barWidth := 20
 				if m.width > 0 {
-					budget := m.width - 4 - lipgloss.Width(detail) - len("  []") - lipgloss.Width(bytesText)
+					budget := m.width - 6 - lipgloss.Width(detail) - len("  []") - lipgloss.Width(bytesText)
 					if budget < barWidth {
 						barWidth = budget
 					}
@@ -1429,6 +1460,45 @@ func (m model) fetchFileRaw(ctx context.Context, path string, requestID uint64) 
 		data, err := extractor.ExtractRawFromLayer(ctx, imageRef, path, layer)
 		return fileSaveMsg{requestID: requestID, filename: filepath.Base(path), data: data, err: err}
 	}
+}
+
+// saveFileCmd resolves a non-clobbering target via uniquePath, writes the
+// bytes, and returns a fileSavedMsg. Runs inside a tea.Cmd goroutine — the
+// caller's Update returns immediately so the TUI does not block on slow
+// I/O. 0644 is honoured on POSIX; on Windows os.WriteFile ignores the
+// mode bits beyond the read-only attribute.
+func saveFileCmd(stat func(string) (os.FileInfo, error),
+	write func(string, []byte, os.FileMode) error,
+	requestID uint64, filename string, data []byte) tea.Cmd {
+	return func() tea.Msg {
+		target := uniquePath(stat, filename)
+		if err := write(target, data, 0644); err != nil {
+			return fileSavedMsg{requestID: requestID, original: filename, target: target, err: err}
+		}
+		return fileSavedMsg{requestID: requestID, original: filename, target: target}
+	}
+}
+
+// uniquePath returns filename if no file exists at that path, otherwise
+// the first available "<name>.<N>" (or "<name>.<N><ext>") variant. Probes
+// up to 1000 candidates; falls back to the highest-N attempt to avoid
+// looping forever on pathological filesystems.
+func uniquePath(stat func(string) (os.FileInfo, error), filename string) string {
+	if stat == nil {
+		return filename
+	}
+	if _, err := stat(filename); errors.Is(err, os.ErrNotExist) {
+		return filename
+	}
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	for i := 1; i < 1000; i++ {
+		candidate := fmt.Sprintf("%s.%d%s", base, i, ext)
+		if _, err := stat(candidate); errors.Is(err, os.ErrNotExist) {
+			return candidate
+		}
+	}
+	return fmt.Sprintf("%s.%d%s", base, 999, ext)
 }
 
 func (m *model) scrollViewDown() {

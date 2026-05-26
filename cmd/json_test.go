@@ -201,6 +201,22 @@ func TestWriteJSONAtomic_OverwritesAndCleansTmp(t *testing.T) {
 	assert.Empty(t, leftovers, "tmp files must be cleaned up after success")
 }
 
+func TestWriteJSONAtomic_RenameFailureCleansUpTmp(t *testing.T) {
+	// Force os.Rename to fail by making the target path a non-empty directory.
+	// On every supported OS, renaming a file onto a non-empty directory fails.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.json")
+	require.NoError(t, os.Mkdir(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "blocker"), []byte("x"), 0o644))
+
+	err := writeJSONAtomic(target, []byte(`{"x":1}`))
+	require.Error(t, err)
+
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, leftovers, "tmp file must be cleaned up after rename failure")
+}
+
 func TestWriteJSONAtomic_ConcurrentRunsDontCollide(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "out.json")
