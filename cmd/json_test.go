@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -118,4 +119,66 @@ func TestBuildJSONExport_NoLayers(t *testing.T) {
 
 	assert.Equal(t, 0, export.LayerCount)
 	assert.Nil(t, export.Layers)
+}
+
+// TestJSONExport_SchemaRoundTrip locks the public JSON schema by marshalling
+// a populated export to bytes and unmarshalling it back into a struct that
+// names every consumer-facing field literally. A future tag rename or
+// misplaced omitempty would break consumers; this test catches it.
+func TestJSONExport_SchemaRoundTrip(t *testing.T) {
+	analysis := &image.Analysis{
+		ImageRef:     "nginx:latest",
+		TotalSize:    100,
+		StackedTrees: []*image.FileTree{image.NewFileTree()},
+		Layers: []image.Layer{
+			{Index: 0, ID: "abc", Size: 100, NetDelta: 100, Command: "FROM"},
+		},
+	}
+	efficiency := &image.EfficiencyResult{
+		Score:       0.9,
+		WastedBytes: 10,
+		WastedFiles: []image.WastedFile{{Path: "/x", TotalWasted: 10, LayerCount: 2}},
+	}
+
+	data, err := json.Marshal(buildJSONExport(analysis, efficiency))
+	require.NoError(t, err)
+
+	var schema struct {
+		ImageRef   string `json:"imageRef"`
+		TotalSize  int64  `json:"totalSize"`
+		LayerCount int    `json:"layerCount"`
+		Efficiency struct {
+			Score       float64 `json:"score"`
+			WastedBytes int64   `json:"wastedBytes"`
+			WastedFiles []struct {
+				Path        string `json:"path"`
+				TotalWasted int64  `json:"totalWasted"`
+				LayerCount  int    `json:"layerCount"`
+			} `json:"wastedFiles"`
+		} `json:"efficiency"`
+		Layers []struct {
+			Index    int    `json:"index"`
+			ID       string `json:"id"`
+			Size     int64  `json:"size"`
+			NetDelta int64  `json:"netDelta"`
+			Command  string `json:"command"`
+			Files    []struct {
+				Path     string `json:"path"`
+				Size     int64  `json:"size"`
+				DiffType string `json:"diffType"`
+			} `json:"files"`
+		} `json:"layers"`
+	}
+	require.NoError(t, json.Unmarshal(data, &schema))
+
+	assert.Equal(t, "nginx:latest", schema.ImageRef)
+	assert.Equal(t, int64(100), schema.TotalSize)
+	assert.Equal(t, 1, schema.LayerCount)
+	assert.Equal(t, 0.9, schema.Efficiency.Score)
+	assert.Equal(t, int64(10), schema.Efficiency.WastedBytes)
+	require.Len(t, schema.Efficiency.WastedFiles, 1)
+	assert.Equal(t, "/x", schema.Efficiency.WastedFiles[0].Path)
+	require.Len(t, schema.Layers, 1)
+	assert.Equal(t, "abc", schema.Layers[0].ID)
+	assert.Equal(t, int64(100), schema.Layers[0].NetDelta)
 }

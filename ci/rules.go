@@ -58,6 +58,7 @@ func (r HighestWastedBytes) Evaluate(result *image.EfficiencyResult, _ int64) Ru
 }
 
 // HighestUserWastedPercent fails if wasted bytes as a fraction of total size exceed the threshold.
+// A threshold of 0 disables this rule (always passes).
 type HighestUserWastedPercent struct {
 	Threshold float64
 }
@@ -69,8 +70,12 @@ func (r HighestUserWastedPercent) Evaluate(result *image.EfficiencyResult, total
 	if totalSize > 0 {
 		pct = float64(result.WastedBytes) / float64(totalSize)
 	}
+	passed := true
+	if r.Threshold > 0 {
+		passed = pct <= r.Threshold
+	}
 	return RuleResult{
-		Passed:    pct <= r.Threshold,
+		Passed:    passed,
 		Name:      r.Name(),
 		Actual:    fmt.Sprintf("%.2f", pct),
 		Threshold: fmt.Sprintf("%.2f", r.Threshold),

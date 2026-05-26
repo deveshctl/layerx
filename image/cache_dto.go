@@ -10,7 +10,7 @@ import (
 // (or when the parse output produced by docker.go/parseLayers changes in a
 // way that affects what we persist). Do NOT bump for stack.go or size.go
 // changes — those run on every load and are not persisted.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // cacheEnvelope is the single top-level value written to disk per digest.
 type cacheEnvelope struct {
@@ -32,14 +32,16 @@ type cachedLayer struct {
 // cachedNode is the persisted shape of a FileNode. Excludes DiffType and
 // IntroducedInLayer — both are recomputed by Stack() on load.
 type cachedNode struct {
-	Name     string
-	Path     string
-	Size     int64
-	Mode     fs.FileMode
-	UID      int
-	GID      int
-	IsDir    bool
-	Children []*cachedNode
+	Name       string
+	Path       string
+	Linkname   string
+	Size       int64
+	Mode       fs.FileMode
+	UID        int
+	GID        int
+	IsDir      bool
+	IsHardlink bool
+	Children   []*cachedNode
 }
 
 func toCachedLayers(layers []Layer) []cachedLayer {
@@ -79,13 +81,15 @@ func toCachedNode(n *FileNode) *cachedNode {
 		return nil
 	}
 	cn := &cachedNode{
-		Name:  n.Name,
-		Path:  n.Path,
-		Size:  n.Size,
-		Mode:  n.Mode,
-		UID:   n.UID,
-		GID:   n.GID,
-		IsDir: n.IsDir,
+		Name:       n.Name,
+		Path:       n.Path,
+		Linkname:   n.Linkname,
+		Size:       n.Size,
+		Mode:       n.Mode,
+		UID:        n.UID,
+		GID:        n.GID,
+		IsDir:      n.IsDir,
+		IsHardlink: n.IsHardlink,
 	}
 	for _, c := range n.Children {
 		cn.Children = append(cn.Children, toCachedNode(c))
@@ -98,13 +102,15 @@ func fromCachedNode(c *cachedNode) *FileNode {
 		return nil
 	}
 	n := &FileNode{
-		Name:  c.Name,
-		Path:  c.Path,
-		Size:  c.Size,
-		Mode:  c.Mode,
-		UID:   c.UID,
-		GID:   c.GID,
-		IsDir: c.IsDir,
+		Name:       c.Name,
+		Path:       c.Path,
+		Linkname:   c.Linkname,
+		Size:       c.Size,
+		Mode:       c.Mode,
+		UID:        c.UID,
+		GID:        c.GID,
+		IsDir:      c.IsDir,
+		IsHardlink: c.IsHardlink,
 	}
 	for _, child := range c.Children {
 		n.Children = append(n.Children, fromCachedNode(child))

@@ -1258,6 +1258,27 @@ func TestFileContentMsgSetsViewReady(t *testing.T) {
 	assert.Equal(t, content, um.viewContent)
 }
 
+func TestFileContentMsgPopulatesHighlightCache(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewLoading
+
+	content := &image.FileContent{Path: "main.go", Data: []byte("package main\n"), Size: 13}
+	updated, _ := m.Update(fileContentMsg{content: content})
+	um := updated.(model)
+	require.NotNil(t, um.viewHighlightedLines, "highlight cache must be populated on content arrival to avoid recomputing per frame")
+}
+
+func TestEscClearsHighlightCache(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "main.go", Data: []byte("package main\n")}
+	m.viewHighlightedLines = []string{"package main"}
+
+	updated, _ := m.Update(keyPressSpecial(tea.KeyEscape))
+	um := updated.(model)
+	assert.Nil(t, um.viewHighlightedLines)
+}
+
 func TestFileContentMsgErrorClearsViewState(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewLoading

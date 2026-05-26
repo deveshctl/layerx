@@ -117,7 +117,9 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	defer rc.Close()
 
 	if progress != nil {
-		r.streamPullProgress(ctx, rc, progress)
+		if err := r.streamPullProgress(ctx, rc, progress); err != nil {
+			return &ErrPullFailed{Ref: imageRef, Cause: err}
+		}
 	} else {
 		if _, err := io.Copy(io.Discard, rc); err != nil {
 			return &ErrPullFailed{Ref: imageRef, Cause: err}
@@ -127,7 +129,8 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 }
 
 // streamPullProgress reads JSON pull events and sends progress updates.
-func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.ImagePullResponse, progress chan<- ProgressEvent) {
+// Returns the first stream error encountered, or nil on clean EOF.
+func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.ImagePullResponse, progress chan<- ProgressEvent) error {
 	type layerProgress struct {
 		current int64
 		total   int64
@@ -137,7 +140,7 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 
 	for msg, err := range rc.JSONMessages(ctx) {
 		if err != nil {
-			break
+			return err
 		}
 		if msg.ID == "" {
 			continue
@@ -180,6 +183,7 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 			BytesTotal:  totalBytes,
 		})
 	}
+	return nil
 }
 
 // parseLayers reads a Docker image tar archive and returns the layer list
@@ -289,10 +293,14 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		}
 		if tarData, ok := blobs[layerPath]; ok && len(tarData) > 0 {
 			r, err := decompressIfGzip(tarData)
-			if err == nil {
-				tree, _ := ParseLayerTar(r)
-				layers[i].Tree = tree
+			if err != nil {
+				return nil, fmt.Errorf("decompressing layer %s: %w", layerPath, err)
 			}
+			tree, err := ParseLayerTar(r)
+			if err != nil {
+				return nil, fmt.Errorf("parsing layer %s: %w", layerPath, err)
+			}
+			layers[i].Tree = tree
 		}
 	}
 

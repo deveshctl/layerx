@@ -400,3 +400,68 @@ func TestParseLayers_OCIGzipCompressedLayers(t *testing.T) {
 	require.NotNil(t, curl, "usr/bin/curl must exist")
 	assert.Equal(t, int64(1024), curl.Size)
 }
+
+// --- parseLayers error propagation (bug-scan 2026-05-25 #2) ----------------
+
+// TestParseLayers_CorruptLayerSurfacesError ensures a layer blob whose tar is
+// truncated mid-stream causes parseLayers to fail loudly rather than silently
+// installing a nil Tree (which the TUI would render as an empty layer).
+func TestParseLayers_CorruptLayerSurfacesError(t *testing.T) {
+	// Build a valid tar header for one entry, then truncate the body so
+	// tar.Reader.Next() errors after the first entry.
+	var inner bytes.Buffer
+	tw := tar.NewWriter(&inner)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name:     "etc/hostname",
+		Size:     1024, // claim 1024 bytes
+		Typeflag: tar.TypeReg,
+	}))
+	_, err := tw.Write([]byte("only-a-few-bytes")) // far less than 1024
+	require.NoError(t, err)
+	// Deliberately do NOT call tw.Close() — leave the stream truncated.
+	corrupt := inner.Bytes()
+
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0"})
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": corrupt,
+	})
+
+	_, err = parseLayers(tarBuf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "layer0/layer.tar")
+}
+
+// TestParseLayers_BadGzipHeaderSurfacesError covers the sibling decompression
+// path: a blob that begins with the gzip magic but is otherwise garbage must
+// fail loudly rather than silently swallowing the decompression error.
+func TestParseLayers_BadGzipHeaderSurfacesError(t *testing.T) {
+	// Two-byte gzip magic followed by garbage that isn't a valid gzip stream.
+	badGzip := append([]byte{0x1f, 0x8b}, []byte("not actually gzip")...)
+
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0"})
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": badGzip,
+	})
+
+	_, err = parseLayers(tarBuf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "layer0/layer.tar")
+}

@@ -137,6 +137,7 @@ type model struct {
 	treeCollapsed map[string]bool
 	viewState    viewState
 	viewContent      *image.FileContent
+	viewHighlightedLines []string
 	viewOffset       int
 	viewOriginLayer  int
 	viewOriginCmd    string
@@ -145,7 +146,9 @@ type model struct {
 	viewSearchMatches [][2]int
 	viewSearchCursor int
 	viewRequestID    uint64
+	viewerCancel     context.CancelFunc
 	saveRequestID    uint64
+	saveCancel       context.CancelFunc
 	extractor        image.Extractor
 	efficiency       *image.EfficiencyResult
 	writeFile        func(string, []byte, os.FileMode) error
@@ -307,6 +310,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.requestID != m.viewRequestID {
 			return m, nil
 		}
+		if m.viewerCancel != nil {
+			m.viewerCancel()
+			m.viewerCancel = nil
+		}
 		if msg.err != nil {
 			m.viewState = viewNone
 			m.statusMsg = "Error: " + msg.err.Error()
@@ -316,12 +323,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewState = viewReady
 		m.viewContent = msg.content
+		m.viewHighlightedLines = nil
+		if msg.content != nil && !msg.content.Binary && len(msg.content.Data) > 0 {
+			m.viewHighlightedLines = highlightFileLines(msg.content.Path, msg.content.Data)
+		}
 		m.viewOffset = 0
 		return m, nil
 
 	case fileSaveMsg:
 		if msg.requestID != m.saveRequestID {
 			return m, nil
+		}
+		if m.saveCancel != nil {
+			m.saveCancel()
+			m.saveCancel = nil
 		}
 		if msg.err != nil {
 			m.statusMsg = "Error: " + msg.err.Error()
@@ -360,8 +375,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.viewState = viewNone
 				m.viewContent = nil
+				m.viewHighlightedLines = nil
 				m.viewOffset = 0
 				m.viewRequestID++
+				if m.viewerCancel != nil {
+					m.viewerCancel()
+					m.viewerCancel = nil
+				}
 				return m, nil
 			}
 			if m.showWaste {
@@ -636,7 +656,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.statusMsg = "Extracting..."
 			m.saveRequestID++
-			return m, m.fetchFileRaw(f.Path, m.saveRequestID)
+			if m.saveCancel != nil {
+				m.saveCancel()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			m.saveCancel = cancel
+			return m, m.fetchFileRaw(ctx, f.Path, m.saveRequestID)
 		}
 	}
 
@@ -781,7 +806,12 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 		m.viewOriginCmd = ""
 	}
 	m.viewRequestID++
-	return m, tea.Batch(m.fetchFileContent(f.Path, m.viewRequestID), m.spinnerTick())
+	if m.viewerCancel != nil {
+		m.viewerCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.viewerCancel = cancel
+	return m, tea.Batch(m.fetchFileContent(ctx, f.Path, m.viewRequestID), m.spinnerTick())
 }
 
 func (m model) layers() []image.Layer {
@@ -1157,6 +1187,7 @@ func (m model) viewReady() tea.View {
 			searchMatches: m.viewSearchMatches,
 			searchCursor:  m.viewSearchCursor,
 			searchActive:  m.viewSearchActive,
+			highlightedLines: m.viewHighlightedLines,
 		})
 		panels = viewer
 	}
@@ -1382,22 +1413,22 @@ func (m model) renderViewerStatusBar() string {
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
 }
 
-func (m model) fetchFileContent(path string, requestID uint64) tea.Cmd {
+func (m model) fetchFileContent(ctx context.Context, path string, requestID uint64) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
 	layer := m.layerCursor
 	return func() tea.Msg {
-		content, err := extractor.ExtractFromLayer(context.Background(), imageRef, path, layer)
+		content, err := extractor.ExtractFromLayer(ctx, imageRef, path, layer)
 		return fileContentMsg{requestID: requestID, content: content, err: err}
 	}
 }
 
-func (m model) fetchFileRaw(path string, requestID uint64) tea.Cmd {
+func (m model) fetchFileRaw(ctx context.Context, path string, requestID uint64) tea.Cmd {
 	extractor := m.extractor
 	imageRef := m.imageRef
 	layer := m.layerCursor
 	return func() tea.Msg {
-		data, err := extractor.ExtractRawFromLayer(context.Background(), imageRef, path, layer)
+		data, err := extractor.ExtractRawFromLayer(ctx, imageRef, path, layer)
 		return fileSaveMsg{requestID: requestID, filename: filepath.Base(path), data: data, err: err}
 	}
 }

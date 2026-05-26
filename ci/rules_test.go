@@ -61,3 +61,9 @@ func TestHighestUserWastedPercent_ZeroTotal(t *testing.T) {
 	result := r.Evaluate(&image.EfficiencyResult{WastedBytes: 100}, 0)
 	assert.True(t, result.Passed)
 }
+
+func TestHighestUserWastedPercent_DisabledWhenZero(t *testing.T) {
+	r := HighestUserWastedPercent{Threshold: 0}
+	result := r.Evaluate(&image.EfficiencyResult{WastedBytes: 999999}, 1000)
+	assert.True(t, result.Passed)
+}

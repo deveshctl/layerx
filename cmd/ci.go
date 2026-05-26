@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -88,6 +89,19 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 }
 
 func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {
+	err := runCICheckInner(imageRef, cfg, cmd, noCache)
+	// ciCmd has SilenceErrors=true and root.go silences errors when CI=true,
+	// so cobra will not print anything for us. Surface non-CIFailed errors
+	// (e.g. Docker daemon down) to stderr ourselves; the CIFailed sentinel
+	// stays silent because executeCICheck has already printed the report.
+	var ciFail *ErrCIFailed
+	if err != nil && !errors.As(err, &ciFail) {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+	return err
+}
+
+func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {
 	resolver, err := image.NewDockerResolver()
 	if err != nil {
 		return fmt.Errorf("failed to initialize: %w", err)
@@ -132,7 +146,9 @@ func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {
 	if hwb > 0 {
 		rules = append(rules, ci.HighestWastedBytes{Threshold: hwb})
 	}
-	rules = append(rules, ci.HighestUserWastedPercent{Threshold: huwp})
+	if huwp > 0 {
+		rules = append(rules, ci.HighestUserWastedPercent{Threshold: huwp})
+	}
 
 	return rules
 }
