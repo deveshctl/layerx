@@ -1,12 +1,25 @@
 # layerx
 
-A terminal-based Docker image layer inspector. Point it at any Docker image and get an interactive TUI to browse layers, explore filesystem changes, view file contents, and run CI efficiency checks.
+Interactive Docker image layer inspector with CI-friendly efficiency checks. Single binary, no runtime dependencies beyond Docker.
 
-Single binary. Zero runtime dependencies beyond a running Docker daemon.
-
+![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
+
+<!-- Demo: a GIF will go here. -->
+
+---
+
+## What is layerx?
+
+A terminal tool for understanding what's inside a Docker image — which layer added each file, where the wasted bytes are, and what your `RUN` steps actually produced.
+
+Use it to:
+
+- Debug bloated images and find the layer responsible
+- Review the filesystem impact of a Dockerfile change before merging
+- Gate CI on layer waste or efficiency thresholds
 
 ---
 
@@ -20,56 +33,50 @@ brew install deveshctl/tap/layerx
 layerx nginx:latest
 ```
 
-Other platforms: see [Install](#install) below.
+Other platforms: see [Install](#install).
+
+---
+
+## What you can do
+
+| Mode        | Command                                      | Best for                                                |
+|-------------|----------------------------------------------|---------------------------------------------------------|
+| Interactive | `layerx IMAGE`                               | Exploring layers, diffs, file contents, wasted bytes    |
+| CI          | `layerx ci IMAGE` or `CI=true layerx IMAGE`  | Pipeline gates on efficiency / wasted bytes             |
+| Export      | `layerx --json out.json IMAGE`               | Scripts, dashboards, `jq`                               |
+
+### Interactive explorer
+
+- Browse layers with vim keys; see Dockerfile command, size, short digest
+- Per-layer file tree with diff colouring (green = added, yellow = modified, red = removed)
+- Open files inline with line numbers, scrolling, and in-viewer search
+- Sort by size, filter by name, hide unchanged files
+- Extract a file to disk, copy a path, or copy file contents to your clipboard (works over SSH and tmux)
+- Efficiency score and wasted bytes always visible in the status bar
+
+See [TUI keybindings](#tui-keybindings) for the full shortcut list.
+
+### CI mode
+
+- Three configurable rules: lowest efficiency, highest wasted bytes, highest user-wasted percent
+- Exits `0` on pass, `1` on rule failure, `2` on internal error
+- Configurable via `.layerx.yaml` or CLI flags
+
+### JSON export
+
+Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks.
 
 ---
 
 ## Prerequisites
 
-Docker must be installed and running before using layerx.
+Docker must be installed and running.
 
-| Platform | Install |
-|----------|---------|
-| Linux | [Docker Engine](https://docs.docker.com/engine/install/) |
-| macOS | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) |
-| Windows | [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) |
-
----
-
-## Features
-
-### Interactive TUI
-- **Layer browser** — navigate layers with vim keys (j/k), see Dockerfile command, size, and short digest
-- **File tree** — columnar display with permissions, UID:GID, size, and diff colouring (green=added, yellow=modified, red=removed); collapsible folders (Enter on a directory)
-- **Layer stacking** — correct filesystem view with `.wh.<name>` and `.wh..wh..opq` whiteout handling
-- **File content viewer** — press Enter on any file to view its contents inline with line numbers and scrolling
-- **Viewer search** — `/` in viewer opens search input with inline highlighting, `n`/`N` navigate matches
-- **Layer origin annotations** — file tree shows `(LN)` suffix for files introduced in a different layer; viewer title shows origin layer and command
-- **Clipboard (OSC52)** — `y` copies file path, `Y` copies file content (viewer) or layer command (layers panel); works over SSH/tmux
-- **Filter** — `/` opens substring filter, Enter confirms, Backspace-on-empty clears
-- **Diff-only mode** — `d` hides unchanged files, shows only added/modified/removed
-- **Sort by size** — `s` cycles: default → largest first → smallest first
-- **File extraction** — `x` saves the focused file to your working directory
-- **Efficiency badge** — score percentage and wasted bytes in the status bar
-
-### Performance
-- **Analysis cache** — repeat runs against an unchanged image skip the Docker tar export and parse, loading from a per-image-digest cache under `os.UserCacheDir()/layerx/<digest>/` (override with `LAYERX_CACHE_DIR`)
-- `--no-cache` (alias `--refresh`) bypasses the cache for the current run; the run still writes the cache on success
-
-### CI Mode
-- `layerx ci <image>` — evaluates image efficiency against configurable thresholds
-- Three rules: `lowest-efficiency`, `highest-wasted-bytes`, `highest-user-wasted-percent`
-- Exits 0 (pass) or 1 (fail) with human-readable report
-- `CI=true layerx <image>` triggers CI mode from root command
-- Configurable via `.layerx.yaml` or CLI flags
-
-### JSON Export
-- `layerx --json <path> <image>` — full analysis to JSON (layers, files, efficiency)
-- Pipe through `jq` for scripted analysis
-
-### Shell Completion
-- `layerx completion [bash|zsh|fish|powershell]`
-- Custom completer suggests local Docker images
+| Platform | Install                                                                                  |
+|----------|------------------------------------------------------------------------------------------|
+| Linux    | [Docker Engine](https://docs.docker.com/engine/install/)                                 |
+| macOS    | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/)             |
+| Windows  | [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)         |
 
 ---
 
@@ -88,65 +95,37 @@ scoop bucket add layerx https://github.com/deveshctl/scoop-bucket
 scoop install layerx
 ```
 
-### Debian / Ubuntu (.deb)
+### Debian / Ubuntu
 
-**Latest** — amd64:
 ```bash
+# amd64
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
 sudo dpkg -i layerx_linux_amd64.deb
-```
 
-**Latest** — arm64:
-```bash
+# arm64
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_arm64.deb
 sudo dpkg -i layerx_linux_arm64.deb
 ```
 
-**Pinned to v1.2.0** — amd64:
-```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_amd64.deb
-sudo dpkg -i layerx_linux_amd64.deb
-```
+### RHEL / Fedora
 
-**Pinned to v1.2.0** — arm64:
 ```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_arm64.deb
-sudo dpkg -i layerx_linux_arm64.deb
-```
-
-### RHEL / Fedora (.rpm)
-
-**Latest** — amd64:
-```bash
+# amd64
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.rpm
 sudo rpm -i layerx_linux_amd64.rpm
-```
 
-**Latest** — arm64:
-```bash
+# arm64
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_arm64.rpm
 sudo rpm -i layerx_linux_arm64.rpm
 ```
 
-**Pinned to v1.2.0** — amd64:
-```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_amd64.rpm
-sudo rpm -i layerx_linux_amd64.rpm
-```
+### Direct download
 
-**Pinned to v1.2.0** — arm64:
-```bash
-curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.0/layerx_linux_arm64.rpm
-sudo rpm -i layerx_linux_arm64.rpm
-```
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.2.0`) in the URLs above.
 
-### Direct Download
+### Build from source
 
-Download a prebuilt binary from [Releases](https://github.com/deveshctl/layerx/releases) for your platform (Linux, macOS, Windows — amd64 and arm64).
-
-### Build from Source
-
-Requires Go 1.26.2+:
+Requires Go 1.26+:
 
 ```bash
 go install github.com/deveshctl/layerx@latest
@@ -160,7 +139,7 @@ go install github.com/deveshctl/layerx@latest
 # Interactive TUI
 layerx nginx:latest
 
-# Bypass the analysis cache (force a fresh tar export + parse)
+# Force a fresh analysis (bypass the cache)
 layerx --no-cache nginx:latest
 
 # CI mode — exit 1 if efficiency < 95%
@@ -173,28 +152,44 @@ layerx --json analysis.json nginx:latest
 source <(layerx completion bash)
 ```
 
-### TUI Keybindings
+### TUI keybindings
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch panel (layers ↔ file tree) |
-| `j` / `k` | Navigate up/down |
-| `g` / `G` | Jump to top/bottom |
-| `Enter` | Open file viewer; expand/collapse folder (tree mode) |
-| `Esc` | Back (close search → close viewer → clear filter → quit) |
-| `/` | Filter file tree (tree) / search in viewer (viewer) |
-| `n` / `N` | Next / previous search match (viewer) |
-| `y` | Copy file path to clipboard |
-| `Y` | Copy file content (viewer) / layer command (layers) |
-| `d` | Toggle diff-only mode |
-| `s` | Cycle sort (default → largest → smallest) |
-| `x` | Extract file to disk |
-| `?` | Toggle help overlay |
-| `q` | Quit |
+| Key         | Action                                                       |
+|-------------|--------------------------------------------------------------|
+| `Tab`       | Switch panel (layers ↔ file tree)                            |
+| `j` / `k`   | Move up / down                                               |
+| `g` / `G`   | Jump to top / bottom                                         |
+| `Enter`     | Open file viewer; expand or collapse a folder                |
+| `Esc`       | Back (close search → close viewer → clear filter → quit)     |
+| `/`         | Filter file tree (tree) / search in viewer (viewer)          |
+| `n` / `N`   | Next / previous search match (viewer)                        |
+| `y`         | Copy file path to clipboard                                  |
+| `Y`         | Copy file content (viewer) or layer command (layers)         |
+| `d`         | Toggle diff-only mode (hide unchanged files)                 |
+| `s`         | Cycle sort: default → largest → smallest                     |
+| `x`         | Extract focused file to disk                                 |
+| `?`         | Toggle help overlay                                          |
+| `q`         | Quit                                                         |
+
+---
+
+## CI mode
+
+### GitHub Actions
+
+```yaml
+- name: Install layerx
+  run: |
+    curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
+    sudo dpkg -i layerx_linux_amd64.deb
+
+- name: Check image efficiency
+  run: layerx ci --lowest-efficiency 0.95 myapp:${{ github.sha }}
+```
 
 ### Configuration
 
-Create `.layerx.yaml` in your project root:
+Drop a `.layerx.yaml` in your project root:
 
 ```yaml
 rules:
@@ -203,71 +198,64 @@ rules:
   highest-user-wasted-percent: 0.1
 ```
 
+CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
+
+---
+
+## Caching & environment
+
+| Variable           | Purpose                                                        |
+|--------------------|----------------------------------------------------------------|
+| `CI=true`          | Treat `layerx IMAGE` (no subcommand) as `layerx ci IMAGE`      |
+| `LAYERX_CACHE_DIR` | Override the default analysis cache directory                  |
+
+Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` (alias `--refresh`) bypasses the cache for a single run; the run still refreshes the cache on success.
+
+---
+
+## Troubleshooting
+
+- **"Cannot connect to the Docker daemon"** — Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux.
+- **"image not found"** — layerx pulls images on demand. Check the reference and that you can `docker pull` it manually.
+- **Cache permission errors** — point `LAYERX_CACHE_DIR` somewhere writable, e.g. `LAYERX_CACHE_DIR=$HOME/.cache/layerx`.
+
+---
+
+## Contributing
+
+Issues and PRs welcome. For larger changes, please open an issue first to discuss the approach. See [CHANGELOG](CHANGELOG.md) for release notes.
+
 ---
 
 ## Architecture
 
 ```
-image/         Domain layer — Docker SDK, tar parsing, file tree, efficiency analysis
-tui/           Bubbletea v2 TUI — consumes image/ interfaces only
-ci/            CI evaluator — consumes image/ interfaces only
-cmd/           Cobra CLI — wires packages together
-config/        .layerx.yaml loader
+image/    Domain layer — Docker SDK, tar parsing, file tree, efficiency
+tui/      Bubbletea v2 TUI — consumes image/ interfaces only
+ci/       CI evaluator — consumes image/ interfaces only
+cmd/      Cobra CLI — wires packages together
+config/   .layerx.yaml loader
 ```
 
-Key design rules:
+Design rules:
+
 - `image/` has zero imports from `tui/`, `ci/`, or `config/`
 - TUI and CI consume interfaces, never concrete Docker SDK types
-- All Docker client calls use `client.WithAPIVersionNegotiation()` (prevents breakage on Docker Engine upgrades)
-- Both whiteout conventions handled correctly (regular + opaque)
+- All Docker client calls negotiate the API version (no breakage on Docker Engine upgrades)
+- Both whiteout conventions handled correctly (regular and opaque)
 
 ---
 
-## Tech Stack
+## Tech stack
 
-| Concern | Choice |
-|---------|--------|
-| Language | Go 1.26+ |
-| CLI | [cobra](https://github.com/spf13/cobra) |
-| TUI | [bubbletea v2](https://github.com/charmbracelet/bubbletea) + [lipgloss v2](https://github.com/charmbracelet/lipgloss) + [bubbles v2](https://github.com/charmbracelet/bubbles) |
-| Docker | [moby/moby client](https://github.com/moby/moby) |
-| Config | [goccy/go-yaml](https://github.com/goccy/go-yaml) |
-| Testing | [testify](https://github.com/stretchr/testify) |
-
----
-
-## Development Status
-
-layerx is under active development. Current milestone progress:
-
-- [x] M01 — Docker plumbing proof
-- [x] M02 — Layer metadata table
-- [x] M03 — Bubbletea layout proof
-- [x] M04 — Live layer list in TUI
-- [x] M05 — File tree in TUI
-- [x] M06 — File tree filter + toggle
-- [x] M07 — Sort by size
-- [x] M08 — File content viewer
-- [x] M09 — Efficiency score + wasted bytes
-- [x] M10 — File extraction to disk
-- [x] M11 — CI mode
-- [x] M12 — Config file
-- [x] M13 — Shell completion
-- [x] M14 — JSON export
-- [ ] M15 — MCP server *(deferred)*
-- [x] M16 — Clipboard, viewer search, layer origin annotations
-
----
-
-## For Maintainers
-
-Before tagging the first release, create these two public repositories and configure the secret:
-
-1. Create [`github.com/deveshctl/homebrew-tap`](https://github.com/deveshctl/homebrew-tap) (public, empty)
-2. Create [`github.com/deveshctl/scoop-bucket`](https://github.com/deveshctl/scoop-bucket) (public, empty)
-3. Create a Personal Access Token with `repo` scope → add as `TAP_GITHUB_TOKEN` in repo **Settings → Secrets and Variables → Actions**
-
-Then push a `v*` tag and the [release workflow](.github/workflows/release.yml) handles the rest.
+| Concern  | Choice                                                                                         |
+|----------|------------------------------------------------------------------------------------------------|
+| Language | Go 1.26+                                                                                       |
+| CLI      | [cobra](https://github.com/spf13/cobra)                                                        |
+| TUI      | [bubbletea v2](https://github.com/charmbracelet/bubbletea) + [lipgloss v2](https://github.com/charmbracelet/lipgloss) + [bubbles v2](https://github.com/charmbracelet/bubbles) |
+| Docker   | [moby/moby client](https://github.com/moby/moby)                                               |
+| Config   | [goccy/go-yaml](https://github.com/goccy/go-yaml)                                              |
+| Testing  | [testify](https://github.com/stretchr/testify)                                                 |
 
 ---
 
