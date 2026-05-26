@@ -167,10 +167,7 @@ func helpLayoutColumns(sections []helpSection) [][]helpSection {
 		per := (n + 2) / 3
 		var cols [][]helpSection
 		for i := 0; i < n; i += per {
-			end := i + per
-			if end > n {
-				end = n
-			}
+			end := min(i+per, n)
 			cols = append(cols, sections[i:end])
 		}
 		return cols
@@ -230,10 +227,7 @@ func (m model) overlayHelp() string {
 	body.WriteString("\n")
 
 	content := body.String()
-	boxWidth := lipgloss.Width(content) + 4
-	if boxWidth < 56 {
-		boxWidth = 56
-	}
+	boxWidth := max(lipgloss.Width(content)+4, 56)
 	if maxBox := m.width - 4; maxBox > 0 && boxWidth > maxBox {
 		boxWidth = maxBox
 	}

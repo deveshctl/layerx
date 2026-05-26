@@ -47,7 +47,7 @@ func FormatMode(m fs.FileMode) string {
 	}
 	const rwx = "rwx"
 	perm := m.Perm()
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		if perm&(1<<uint(8-i)) != 0 {
 			buf[1+i] = rwx[i%3]
 		} else {

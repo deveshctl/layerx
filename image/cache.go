@@ -190,8 +190,7 @@ func readCacheFile(path string) (cacheEnvelope, error, bool) {
 // failure (permission denied, device busy, network share glitch) rather
 // than confirmed file corruption.
 func isTransientIOError(err error) bool {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
+	if _, ok := errors.AsType[*os.PathError](err); ok {
 		return true
 	}
 	// Bare syscall errors and io.ErrClosedPipe are also transient. Plain

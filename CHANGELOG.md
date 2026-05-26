@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes. Five further bug-scan fixes covering tar-path normalization, CI-rule disable semantics, pull-error propagation, file-viewer chroma cost, and extractor goroutine cancellation.
+Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes. Five further bug-scan fixes covering tar-path normalization, CI-rule disable semantics, pull-error propagation, file-viewer chroma cost, and extractor goroutine cancellation. Plus a tree-wide gopls cleanup: deprecated `tar.TypeRegA` removed, `client.NewClientWithOpts` migrated to `client.New`, and Go 1.22+ modernizations applied.
 
 ### Fixed
 - `cleanTarPath` now returns the cleaned path instead of the original. The validator computed `path.Clean(p)` and then returned `p`, so a tar entry like `usr/./bin/sh` (legal output of busybox tar and some `--transform` rules) was inserted into the tree under a phantom `.` node. Whiteout matching missed `.wh.bin` entries against such paths, the TUI rendered ugly `/usr/./bin/sh` rows, and efficiency comparisons silently under-reported waste when one layer used the clean form and another the dotted form. One-character fix at `image/tree_parser.go:68` plus a `TestParseLayerTar_EmbeddedDotSegmentNormalized` regression.
@@ -24,7 +24,7 @@ Three correctness fixes in waste overlay, file viewer, and efficiency calculatio
 - Whiteout entries (`.wh.<name>`, `.wh..wh..opq`) no longer leak into `EfficiencyResult.WastedFiles`. `walkFiles` skipped them via `IsHardlink` for size, but two layers deleting the same path produced a phantom `WastedFile{TotalWasted:0, LayerCount:2}` in the user-visible waste overlay and JSON export. `walkFiles` now skips any node whose name satisfies `isWhiteoutName` before recursing.
 - `LAYERX_CACHE_DIR=~/foo` now expands to `$HOME/foo` instead of creating a literal `~` directory in the current working directory. `expandHome` resolves a leading `~` (or `~/...`) via `os.UserHomeDir`; `~user/...` forms are rejected with a stderr warning. Bare paths without `~` are unchanged.
 - `saveCache` now sweeps stale `layers.gob.tmp-*` files older than one hour from the digest directory before creating a new temp file. A SIGKILL during a previous write could orphan temp files; without the sweep, repeated crashes would accumulate them indefinitely.
-- `image/tree_parser.go` now whitelists tar typeflags (`TypeReg`, `TypeRegA`, `TypeDir`, `TypeSymlink`, `TypeLink`, `TypeChar`, `TypeBlock`, `TypeFifo`). A tar carrying `TypeXGlobalHeader` (rare but legal) would previously surface as a phantom `PaxHeaders.0/` directory in the rendered tree.
+- `image/tree_parser.go` now whitelists tar typeflags (`TypeReg`, `TypeDir`, `TypeSymlink`, `TypeLink`, `TypeChar`, `TypeBlock`, `TypeFifo`). A tar carrying `TypeXGlobalHeader` (rare but legal) would previously surface as a phantom `PaxHeaders.0/` directory in the rendered tree.
 - `IsBinary` now trusts `http.DetectContentType` for non-`octet-stream` results. UTF-16 text files (which carry null bytes in their high-byte half) were correctly classified as `text/plain; charset=utf-16le` by detection, then mis-overridden as binary by the unconditional null-byte scan. The scan now runs only when detection returns `application/octet-stream`.
 - `cleanTarPath` now rejects `..` segments via `path.Clean`. Defense-in-depth: the cache and extractor paths already validate independently, but a future consumer using tree paths to write to disk would have inherited the gap.
 
@@ -44,6 +44,9 @@ Three correctness fixes in waste overlay, file viewer, and efficiency calculatio
 - New `viewerParams.highlightedLines` field; `renderFileView` consumes pre-computed chroma output instead of computing it inline.
 - New model fields `viewHighlightedLines []string`, `viewerCancel context.CancelFunc`, and `saveCancel context.CancelFunc`.
 - `fetchFileContent` and `fetchFileRaw` now take `ctx context.Context` as a parameter.
+- Cleared all gopls modernization hints across the tree (Go 1.22+ idioms): `min`/`max` for clamp patterns, `for i := range n` integer loops, `strings.SplitSeq` for range loops, `errors.AsType[T]` in place of `errors.As`, `slices.Contains` for the binary-byte null check, and tagged `switch` on `m.viewState` / `msg.Code`. Behavior preserved.
+- Replaced `client.NewClientWithOpts` with `client.New` in `image/docker.go` (the former is scheduled for removal in the next moby release). `WithAPIVersionNegotiation` is retained per the project rule, even though it is now a no-op in the moby client.
+- Removed the deprecated `tar.TypeRegA` alias from the typeflag whitelist and the extractor's regular-file check (`TypeRegA` is an alias for `TypeReg`).
 
 ## [v1.2.1] — 2026-05-24
 

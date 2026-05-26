@@ -272,18 +272,9 @@ func (m model) renderWasteOverlay() string {
 		lines = append(lines, "  "+titleStyle.Render(header))
 		lines = append(lines, "")
 
-		visibleHeight := m.height - 10
-		if visibleHeight < 1 {
-			visibleHeight = 1
-		}
-		start := m.wasteOffset
-		if start > len(rows) {
-			start = len(rows)
-		}
-		end := start + visibleHeight
-		if end > len(rows) {
-			end = len(rows)
-		}
+		visibleHeight := max(m.height-10, 1)
+		start := min(m.wasteOffset, len(rows))
+		end := min(start+visibleHeight, len(rows))
 		for i := start; i < end; i++ {
 			lines = append(lines, formatWasteRow(rows[i], i == m.wasteCursor, innerWidth))
 		}

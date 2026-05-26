@@ -33,7 +33,7 @@ func NewDockerResolver(opts ...Option) (Resolver, error) {
 		opt(r)
 	}
 	if r.cli == nil {
-		cli, err := client.NewClientWithOpts(
+		cli, err := client.New(
 			client.FromEnv,
 			client.WithAPIVersionNegotiation(),
 		)

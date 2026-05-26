@@ -347,13 +347,13 @@ func TestViewLoadingContainsLoadingAndImageRef(t *testing.T) {
 // maxPanelLineWidth returns the widest visible line in the rendered view,
 // measured with lipgloss.Width so ANSI styling is excluded.
 func maxPanelLineWidth(content string) int {
-	max := 0
-	for _, ln := range strings.Split(content, "\n") {
-		if w := lipgloss.Width(ln); w > max {
-			max = w
+	maxW := 0
+	for ln := range strings.SplitSeq(content, "\n") {
+		if w := lipgloss.Width(ln); w > maxW {
+			maxW = w
 		}
 	}
-	return max
+	return maxW
 }
 
 // TestViewLoadingPullProgressFitsInBox asserts that a multi-GB pull-progress

@@ -93,10 +93,7 @@ func renderFileView(p viewerParams) string {
 	gutterDigits := len(fmt.Sprintf("%d", totalLines)) + 1
 
 	var sb strings.Builder
-	end := p.offset + viewHeight
-	if end > totalLines {
-		end = totalLines
-	}
+	end := min(p.offset+viewHeight, totalLines)
 	if p.offset > totalLines {
 		p.offset = totalLines
 	}
@@ -111,10 +108,7 @@ func renderFileView(p viewerParams) string {
 		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterDigits, lineNum))
 		gutterW := ansi.StringWidth(gutter)
 
-		maxLineWidth := contentWidth - gutterW
-		if maxLineWidth < 1 {
-			maxLineWidth = 1
-		}
+		maxLineWidth := max(contentWidth-gutterW, 1)
 		if syntaxHighlight {
 			if ansi.StringWidth(line) > maxLineWidth {
 				line = ansi.Truncate(line, maxLineWidth, "…")
