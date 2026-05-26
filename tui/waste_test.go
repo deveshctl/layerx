@@ -218,10 +218,21 @@ func TestWasteTitleShowsPositionCounter(t *testing.T) {
 
 	out := m.renderWasteOverlay()
 
-	assert.Contains(t, out, "Wasted Files 5/31",
-		"panel title shows 1-based cursor position over total wasted files")
+	assert.Contains(t, out, "Wasted Files 5/20",
+		"panel title shows 1-based cursor position over visible row count")
 	assert.NotContains(t, out, "Top 20 of",
 		"body header should no longer use Top 20 framing")
+}
+
+func TestWastePositionCounterMatchesVisibleRows(t *testing.T) {
+	m := setupModel()
+	m.efficiency = efficiencyOf(300) // 300 wasted files; collapsed view caps to 20.
+	m.openWaste()
+
+	out := m.renderWasteOverlay()
+	assert.Contains(t, out, "Wasted Files 1/20",
+		"denominator must match visible row count when collapsed")
+	assert.NotContains(t, out, "Wasted Files 1/300")
 }
 
 func TestWasteTitleEmptyState(t *testing.T) {

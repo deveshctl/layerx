@@ -3,6 +3,7 @@ package image
 import (
 	"archive/tar"
 	"bytes"
+	"io/fs"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -244,4 +245,19 @@ func TestParseLayerTar_PathAlwaysHasLeadingSlash(t *testing.T) {
 	for _, p := range collected {
 		assert.Equal(t, "/", string(p[0]), "path %q must start with /", p)
 	}
+}
+
+func TestInsertNode_PromotionToDirClearsFileSize(t *testing.T) {
+	tree := NewFileTree()
+	// First as a file with size 100.
+	insertNode(tree.Root, "etc/foo", 100, false, false, "", 0644, 0, 0)
+	// Then as a dir.
+	insertNode(tree.Root, "etc/foo", 0, true, false, "", fs.ModeDir|0755, 0, 0)
+
+	etc := tree.Root.FindChild("etc")
+	require.NotNil(t, etc)
+	foo := etc.FindChild("foo")
+	require.NotNil(t, foo)
+	assert.True(t, foo.IsDir, "promoted to dir")
+	assert.Equal(t, int64(0), foo.Size, "size cleared on promotion")
 }

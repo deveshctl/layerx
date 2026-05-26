@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes. Five further bug-scan fixes covering tar-path normalization, CI-rule disable semantics, pull-error propagation, file-viewer chroma cost, and extractor goroutine cancellation. Plus a tree-wide gopls cleanup: deprecated `tar.TypeRegA` removed, `client.NewClientWithOpts` migrated to `client.New`, and Go 1.22+ modernizations applied.
 
+### bug-batch — 2026-05-25
+
+Fixes from a deep scan of all `.go` files. Each finding was verified by direct code inspection before fix.
+
+- fix(tui): waste overlay title denominator now matches the visible row count (20 collapsed, full count expanded) instead of always showing the full total. The cursor position counter was promising "1/300" navigation while only 20 rows were reachable; the full total is still shown unchanged on the header line just below ("X wasted across 300 files"), so no information is lost.
+- fix(ci): a `lowest-efficiency` threshold of 0 or negative now disables the rule, matching the disable-on-zero semantics of the other two rules.
+- fix(cmd): JSON export writes to a tmp file and atomically renames — no more half-written files on crash.
+- fix(cmd): `--json` is now a persistent flag and composes with the `ci` subcommand. CI rule evaluation still runs; JSON is written either way.
+- fix(cmd): `CI=true` + `--json` now runs CI evaluation first and then exports JSON, instead of silently skipping CI.
+- fix(cli): exit 2 on internal errors (Docker down, config parse, etc.); exit 1 is reserved for CI rule failure. Pipelines can now distinguish.
+- fix(completion): 1s timeout on `docker images` probe — a hung daemon no longer hangs the user's shell.
+- fix(image): tree node correctly clears `Size` when a path is promoted from file to directory across layers.
+- chore: `errors.As(&v)` modernized to `errors.AsType[T]` (Go 1.26) at the three sites flagged by gopls.
+
 ### Fixed
 - `cleanTarPath` now returns the cleaned path instead of the original. The validator computed `path.Clean(p)` and then returned `p`, so a tar entry like `usr/./bin/sh` (legal output of busybox tar and some `--transform` rules) was inserted into the tree under a phantom `.` node. Whiteout matching missed `.wh.bin` entries against such paths, the TUI rendered ugly `/usr/./bin/sh` rows, and efficiency comparisons silently under-reported waste when one layer used the clean form and another the dotted form. One-character fix at `image/tree_parser.go:68` plus a `TestParseLayerTar_EmbeddedDotSegmentNormalized` regression.
 - `layerx ci --highest-user-wasted-percent 0` now disables the rule, matching its own help text. `cmd/ci.go` guarded `HighestWastedBytes` with `if hwb > 0` but appended `HighestUserWastedPercent` unconditionally, and the rule's `Evaluate` had no internal bypass — so passing `0` (or setting it in `.layerx.yaml`) failed any image with any waste at all. `cmd/ci.go` now mirrors the existing guard, and `HighestUserWastedPercent.Evaluate` itself bypasses on `Threshold <= 0` for belt-and-suspenders coverage of direct callers (e.g. future MCP).
