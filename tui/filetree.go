@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -324,18 +325,25 @@ func buildTreePrefix(depth int) string {
 	return strings.Repeat("  ", depth)
 }
 
+// padRight measures the string by display width (lipgloss.Width — handles
+// CJK, emoji, ANSI sequences) rather than byte length, so non-ASCII content
+// pads correctly. Truncation uses ansi.Truncate which respects rune
+// boundaries; byte-slicing here would emit half-runes and corrupt the
+// terminal renderer.
 func padRight(s string, width int) string {
-	if len(s) >= width {
-		return s[:width]
+	w := lipgloss.Width(s)
+	if w >= width {
+		return ansi.Truncate(s, width, "")
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", width-w)
 }
 
 func padLeft(s string, width int) string {
-	if len(s) >= width {
-		return s[:width]
+	w := lipgloss.Width(s)
+	if w >= width {
+		return ansi.Truncate(s, width, "")
 	}
-	return strings.Repeat(" ", width-len(s)) + s
+	return strings.Repeat(" ", width-w) + s
 }
 
 func applyDiffFilter(files []*image.FileNode) []*image.FileNode {

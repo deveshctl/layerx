@@ -485,6 +485,44 @@ func TestViewLoadingPullProgressDropsBarWhenTooNarrow(t *testing.T) {
 	require.LessOrEqual(t, maxPanelLineWidth(content), 40)
 }
 
+// TestViewLoadingPullProgressBytesTotalNotClipped asserts that across a sweep
+// of common terminal widths, the bytes-total unit suffix ("MB" / "GB") is
+// always rendered in full. Regression: at certain widths, the rounding in the
+// budget calc left the bytes text exactly at the right border, causing the
+// trailing unit ("MB") to be clipped mid-value.
+func TestViewLoadingPullProgressBytesTotalNotClipped(t *testing.T) {
+	cases := []struct {
+		name      string
+		bytes     int64
+		bytesMax  int64
+		expectMax string
+	}{
+		{"MB-range", 81920000, 361 * 1024 * 1024, "361.0 MB"},
+		{"GB-range", 2 * 1024 * 1024 * 1024, 4*1024*1024*1024 + 700*1024*1024, "4.7 GB"},
+		{"large-GB", 8 * 1024 * 1024 * 1024, 12 * 1024 * 1024 * 1024, "12.0 GB"},
+	}
+	for _, tc := range cases {
+		for w := 40; w <= 120; w++ {
+			t.Run(fmt.Sprintf("%s/width=%d", tc.name, w), func(t *testing.T) {
+				m := NewModel(Config{ImageRef: "node"})
+				m.width = w
+				m.height = 40
+				m.loadPhase = image.PhasePulling
+				m.pullLayers = 2
+				m.pullTotal = 8
+				m.pullBytes = tc.bytes
+				m.pullBytesMax = tc.bytesMax
+
+				content := viewContent(m.View())
+				assert.Contains(t, content, tc.expectMax,
+					"bytes-total %q must not be clipped at width %d", tc.expectMax, w)
+				require.LessOrEqual(t, maxPanelLineWidth(content), w,
+					"panel must not exceed terminal width %d", w)
+			})
+		}
+	}
+}
+
 // --- View: error state -------------------------------------------------------
 
 func TestViewErrorContainsErrorMessage(t *testing.T) {
@@ -815,6 +853,16 @@ func TestFilterTypingUpdatesQuery(t *testing.T) {
 	m = send(m, keyPress('n'))
 	m = send(m, keyPress('g'))
 	assert.Equal(t, "ng", m.filterQuery)
+}
+
+func TestFilterQuery_LengthCapped(t *testing.T) {
+	m := setupModelWithDiffs()
+	m = send(m, keyPress('/'))
+	for range maxFilterLen + 50 {
+		m = send(m, keyPress('a'))
+	}
+	assert.LessOrEqual(t, len([]rune(m.filterQuery)), maxFilterLen,
+		"filterQuery must not grow past maxFilterLen")
 }
 
 func TestFilterEscClearsQuery(t *testing.T) {
@@ -1407,6 +1455,7 @@ func TestExtractKeyOnRemovedFile(t *testing.T) {
 
 func TestFileSaveMsgSuccess(t *testing.T) {
 	m := setupModel()
+	m.saveRequestID = 7
 	var savedName string
 	var savedData []byte
 	m.writeFile = func(name string, data []byte, _ os.FileMode) error {
@@ -1414,32 +1463,94 @@ func TestFileSaveMsgSuccess(t *testing.T) {
 		savedData = data
 		return nil
 	}
+	m.statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
-	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", data: []byte("hello")})
-	um := updated.(model)
-	assert.Equal(t, "Saved: test.txt", um.statusMsg)
+	updated, cmd := m.Update(fileSaveMsg{requestID: 7, filename: "test.txt", data: []byte("hello")})
+	require.NotNil(t, cmd, "fileSaveMsg must dispatch the off-thread save cmd")
+	saved := cmd().(fileSavedMsg)
 	assert.Equal(t, "test.txt", savedName)
 	assert.Equal(t, []byte("hello"), savedData)
+	assert.Equal(t, "test.txt", saved.target)
+	assert.Equal(t, "test.txt", saved.original)
+	assert.NoError(t, saved.err)
+
+	updated2, _ := updated.(model).Update(saved)
+	assert.Equal(t, "Saved: test.txt", updated2.(model).statusMsg)
 }
 
 func TestFileSaveMsgExtractError(t *testing.T) {
 	m := setupModel()
+	m.saveRequestID = 1
 	m.writeFile = os.WriteFile
 
-	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", err: errors.New("connection refused")})
+	updated, _ := m.Update(fileSaveMsg{requestID: 1, filename: "test.txt", err: errors.New("connection refused")})
 	um := updated.(model)
 	assert.Equal(t, "Error: connection refused", um.statusMsg)
 }
 
 func TestFileSaveMsgWriteError(t *testing.T) {
 	m := setupModel()
+	m.saveRequestID = 2
 	m.writeFile = func(_ string, _ []byte, _ os.FileMode) error {
 		return errors.New("permission denied")
 	}
+	m.statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
-	updated, _ := m.Update(fileSaveMsg{filename: "test.txt", data: []byte("hello")})
-	um := updated.(model)
-	assert.Equal(t, "Error: permission denied", um.statusMsg)
+	updated, cmd := m.Update(fileSaveMsg{requestID: 2, filename: "test.txt", data: []byte("hello")})
+	require.NotNil(t, cmd)
+	saved := cmd().(fileSavedMsg)
+	require.Error(t, saved.err)
+
+	updated2, _ := updated.(model).Update(saved)
+	assert.Equal(t, "Error: permission denied", updated2.(model).statusMsg)
+}
+
+func TestFileSaveMsgExistingFileAutoRenames(t *testing.T) {
+	m := setupModel()
+	m.saveRequestID = 3
+	var savedName string
+	m.writeFile = func(name string, _ []byte, _ os.FileMode) error {
+		savedName = name
+		return nil
+	}
+	// stat: test.txt and test.1.txt exist, test.2.txt does not.
+	m.statFile = func(name string) (os.FileInfo, error) {
+		if name == "test.txt" || name == "test.1.txt" {
+			return nil, nil
+		}
+		return nil, os.ErrNotExist
+	}
+
+	updated, cmd := m.Update(fileSaveMsg{requestID: 3, filename: "test.txt", data: []byte("hello")})
+	require.NotNil(t, cmd)
+	saved := cmd().(fileSavedMsg)
+	assert.Equal(t, "test.txt", saved.original)
+	assert.Equal(t, "test.2.txt", saved.target)
+	assert.Equal(t, "test.2.txt", savedName)
+
+	updated2, _ := updated.(model).Update(saved)
+	status := updated2.(model).statusMsg
+	assert.Contains(t, status, "test.txt")
+	assert.Contains(t, status, "test.2.txt")
+	assert.Contains(t, status, "existed")
+}
+
+func TestFileSaveMsgStaleRequestIDIgnored(t *testing.T) {
+	// A late-arriving fileSaveMsg from a superseded extraction must be
+	// dropped without dispatching a write. Without the requestID guard the
+	// user sees a "Saved" status for a file they already moved on from.
+	m := setupModel()
+	m.saveRequestID = 5
+	called := false
+	m.writeFile = func(string, []byte, os.FileMode) error {
+		called = true
+		return nil
+	}
+	m.statFile = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+
+	_, cmd := m.Update(fileSaveMsg{requestID: 4, filename: "stale.txt", data: []byte("x")})
+	assert.Nil(t, cmd, "stale requestID must not dispatch a save cmd")
+	assert.False(t, called)
 }
 
 // --- Clipboard (y/Y) ---

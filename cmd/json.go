@@ -169,5 +169,9 @@ func writeJSONAtomic(targetPath string, data []byte) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, targetPath)
+	if err := os.Rename(tmp, targetPath); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }

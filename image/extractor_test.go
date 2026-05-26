@@ -76,7 +76,9 @@ func TestProcessContent_Empty(t *testing.T) {
 
 // --- readFullFileFromTar -----------------------------------------------------
 
-func TestReadFullFileFromTar_NoSizeLimit(t *testing.T) {
+func TestReadFullFileFromTar_LargerThanViewLimit(t *testing.T) {
+	// Bytes above MaxViewSize but well below MaxSaveSize must round-trip
+	// cleanly — the save path is not bound by the viewer cap.
 	content := bytes.Repeat([]byte("x"), MaxViewSize+500)
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -93,6 +95,26 @@ func TestReadFullFileFromTar_NoSizeLimit(t *testing.T) {
 	data, err := readFullFileFromTar(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, len(content), len(data))
+}
+
+func TestReadFullFileFromTar_RejectsHeaderOverLimit(t *testing.T) {
+	// Header advertising a size above MaxSaveSize must fail fast without
+	// allocating the body. Using a small actual body keeps the test cheap.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	err := tw.WriteHeader(&tar.Header{
+		Name:     "huge.dat",
+		Size:     MaxSaveSize + 1,
+		Typeflag: tar.TypeReg,
+	})
+	require.NoError(t, err)
+	// Don't write the body — closing the tar without payload is fine for the
+	// header-check path.
+	tw.Close()
+
+	_, err = readFullFileFromTar(&buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too large to save")
 }
 
 func TestReadFullFileFromTar_SkipsDirectories(t *testing.T) {
@@ -513,4 +535,81 @@ func TestExtractFromLayer_AncestorWhiteoutBlocksWalkBack(t *testing.T) {
 	_, err = e.ExtractFromLayer(context.Background(), "img", "/tmp/sub/a.txt", 1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "removed in layer")
+}
+
+// buildLayerTarWithEntry builds a single-entry layer tar with a custom
+// typeflag and linkname — used to exercise non-regular-file paths.
+func buildLayerTarWithEntry(t *testing.T, name string, typeflag byte, linkname string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name:     name,
+		Mode:     0o644,
+		Typeflag: typeflag,
+		Linkname: linkname,
+	}))
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+func TestExtractFromLayer_SymlinkAtPath(t *testing.T) {
+	// L0: /etc/foo is a regular file with content "v0".
+	// L1: /etc/foo is replaced by a symlink to /etc/bar.
+	// At cursor=1, extraction must surface a "not a regular file" error
+	// rather than silently falling back to L0's bytes — the effective
+	// state at L1 is the symlink, not the older regular file.
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar", "layer1/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0", "L1"})
+
+	outer := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"etc/foo": "v0"}),
+		"layer1/layer.tar": buildLayerTarWithEntry(t, "etc/foo", tar.TypeSymlink, "etc/bar"),
+	})
+
+	cli := &fakeImageSaveClient{saveData: outer.Bytes()}
+	e := NewDockerExtractor(cli)
+
+	_, err = e.ExtractFromLayer(context.Background(), "img", "/etc/foo", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a regular file")
+
+	_, err = e.ExtractRawFromLayer(context.Background(), "img", "/etc/foo", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a regular file")
+}
+
+func TestExtractFromLayer_DirectoryAtPath(t *testing.T) {
+	// L0: /etc/foo is a regular file. L1: /etc/foo is a directory entry.
+	// Same expectation as the symlink case: typed error, no fall-through.
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar", "layer1/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	configData := buildConfig(t, []string{"L0", "L1"})
+
+	outer := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"etc/foo": "v0"}),
+		"layer1/layer.tar": buildLayerTarWithEntry(t, "etc/foo/", tar.TypeDir, ""),
+	})
+
+	cli := &fakeImageSaveClient{saveData: outer.Bytes()}
+	e := NewDockerExtractor(cli)
+
+	// cleanTarPath strips trailing slashes, so the dir entry's name normalizes
+	// to "etc/foo" and matches the lookup.
+	_, err = e.ExtractFromLayer(context.Background(), "img", "/etc/foo", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a regular file")
 }

@@ -103,7 +103,7 @@ func (m model) visibleWasteRows() []wasteRow {
 // + bottom blank = 6 lines, plus the panel's 2 border rows and the
 // surrounding 1-row margin from lipgloss.Place clamping (boxHeight ≤
 // m.height - 2). That works out to m.height - 10.
-func (m *model) wasteVisibleHeight() int {
+func (m model) wasteVisibleHeight() int {
 	h := m.height - 10
 	if h < 1 {
 		return 1
@@ -278,7 +278,7 @@ func (m model) renderWasteOverlay() string {
 		lines = append(lines, "  "+titleStyle.Render(header))
 		lines = append(lines, "")
 
-		visibleHeight := max(m.height-10, 1)
+		visibleHeight := m.wasteVisibleHeight()
 		start := min(m.wasteOffset, len(rows))
 		end := min(start+visibleHeight, len(rows))
 		for i := start; i < end; i++ {

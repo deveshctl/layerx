@@ -17,6 +17,13 @@ import (
 
 const MaxViewSize = 1 << 20 // 1 MB
 
+// MaxSaveSize bounds save-to-disk extraction. The viewer caps reads at
+// MaxViewSize, but the save path historically called io.ReadAll with no
+// limit — a 10 GB file inside a layer (or a maliciously crafted tar entry
+// with an inflated header.Size) would OOM the process. 2 GiB is generous
+// enough for legitimate single-file extracts and well below typical RAM.
+const MaxSaveSize = 2 << 30 // 2 GiB
+
 // FileContent holds the result of extracting a file from an image.
 type FileContent struct {
 	Path      string
@@ -190,7 +197,10 @@ func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 	}
 }
 
-// readFullFileFromTar reads the first regular file from a tar stream without size limits.
+// readFullFileFromTar reads the first regular file from a tar stream.
+// Bounded by MaxSaveSize to protect against OOM on huge tar entries; the
+// header is consulted first as a fast-fail path, and io.LimitReader caps
+// the worst case where the header understates the actual stream length.
 func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	tr := tar.NewReader(r)
 	for {
@@ -204,7 +214,17 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 		if hdr.Typeflag == tar.TypeDir {
 			continue
 		}
-		return io.ReadAll(tr)
+		if hdr.Size > MaxSaveSize {
+			return nil, fmt.Errorf("file too large to save: %d bytes (limit %d)", hdr.Size, MaxSaveSize)
+		}
+		data, err := io.ReadAll(io.LimitReader(tr, MaxSaveSize+1))
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) > MaxSaveSize {
+			return nil, fmt.Errorf("file too large to save: exceeds %d bytes", MaxSaveSize)
+		}
+		return data, nil
 	}
 }
 
@@ -212,6 +232,13 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 // encountered during walk-back. The caller surfaces this as a "removed in
 // layer" error rather than continuing the walk.
 var errWhiteoutStop = errors.New("path removed by whiteout")
+
+// errPathNotRegular signals that the requested path exists in this layer
+// but is not a regular file (symlink, hardlink, or directory). The caller
+// must surface this as a typed error instead of falling through to older
+// layers — at this layer the path's effective state is the symlink/dir,
+// not whatever older regular file used to live there.
+var errPathNotRegular = errors.New("path exists but is not a regular file")
 
 // loadLayerTars exports the image via ImageSave and returns the ordered
 // manifest.Layers list along with raw (possibly gzipped) tar bytes for
@@ -334,13 +361,17 @@ func readBlobsFromSpool(spool *os.File, keep map[string]struct{}) (map[string][]
 }
 
 // findFileInLayer walks one layer's tar bytes (decompressing if gzipped) and
-// looks for filePath as a regular file. Whiteouts are detected and signaled
-// separately so the walk-back can stop.
+// looks for filePath as a regular file. Whiteouts and non-regular-file
+// matches are surfaced as typed errors so the walk-back can stop.
 //
 // Returns:
-//   - (data,  true,  nil)              when the file is found
-//   - (nil,   false, nil)              when the file is not in this layer
-//   - (nil,   false, errWhiteoutStop)  when the file (or an ancestor) is whiteouted
+//   - (data,  true,  nil)                  when the file is found
+//   - (nil,   false, nil)                  when the file is not in this layer
+//   - (nil,   false, errWhiteoutStop)      when the path (or ancestor) is whiteouted
+//   - (nil,   false, errPathNotRegular)    when the path exists at this layer
+//     but is a symlink, hardlink, or directory — not the regular file the
+//     caller can read. The caller must NOT fall through to older layers; the
+//     effective state at this layer is the non-regular entry.
 func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 	r, err := decompressIfGzip(layerBytes)
 	if err != nil {
@@ -389,8 +420,7 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			continue
 		}
 		if hdr.Typeflag != tar.TypeReg {
-			// Symlink, hardlink, dir entry — let walk-back continue.
-			return nil, false, nil
+			return nil, false, fmt.Errorf("%w: typeflag %d", errPathNotRegular, hdr.Typeflag)
 		}
 
 		data, err := io.ReadAll(tr)
@@ -455,6 +485,9 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 		if errors.Is(err, errWhiteoutStop) {
 			return nil, fmt.Errorf("file %s was removed in layer %d", filePath, j)
 		}
+		if errors.Is(err, errPathNotRegular) {
+			return nil, fmt.Errorf("file %s is not a regular file at layer %d (%w)", filePath, j, err)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -492,6 +525,9 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 		data, found, err := findFileInLayer(blob, cleanPath)
 		if errors.Is(err, errWhiteoutStop) {
 			return nil, fmt.Errorf("file %s was removed in layer %d", filePath, j)
+		}
+		if errors.Is(err, errPathNotRegular) {
+			return nil, fmt.Errorf("file %s is not a regular file at layer %d (%w)", filePath, j, err)
 		}
 		if err != nil {
 			return nil, err

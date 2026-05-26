@@ -55,5 +55,21 @@ func LoadFrom(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("validating %s: %w", path, err)
+	}
 	return cfg, nil
+}
+
+func (c *Config) validate() error {
+	if c.Rules.LowestEfficiency < 0 || c.Rules.LowestEfficiency > 1 {
+		return fmt.Errorf("rules.lowest-efficiency must be in [0, 1]; got %v", c.Rules.LowestEfficiency)
+	}
+	if c.Rules.HighestUserWastedPercent < 0 || c.Rules.HighestUserWastedPercent > 1 {
+		return fmt.Errorf("rules.highest-user-wasted-percent must be in [0, 1]; got %v", c.Rules.HighestUserWastedPercent)
+	}
+	if c.Rules.HighestWastedBytes < 0 {
+		return fmt.Errorf("rules.highest-wasted-bytes must be >= 0; got %d", c.Rules.HighestWastedBytes)
+	}
+	return nil
 }

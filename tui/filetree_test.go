@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/deveshctl/layerx/image"
 )
 
@@ -36,5 +38,59 @@ func TestRenderFileTree_NoFilterRetainsBelowIndicator(t *testing.T) {
 	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, nil, 0)
 	if !strings.Contains(out, "▾") {
 		t.Fatalf("expected ▾ when overflow exists and filter is not active; got panel:\n%s", out)
+	}
+}
+
+func TestPadRight_DisplayWidthMeasurement(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		w    int
+	}{
+		{"ascii_short", "abc", 8},
+		{"ascii_exact", "abcdefgh", 8},
+		{"accented_latin", "café", 8},
+		{"cjk", "日本語", 10}, // each rune renders at width 2 → 6 cells, 4 spaces pad
+		{"emoji", "hi👋", 8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := padRight(tc.in, tc.w)
+			if w := lipgloss.Width(got); w != tc.w {
+				t.Fatalf("padRight(%q, %d): width=%d, want %d (output=%q)",
+					tc.in, tc.w, w, tc.w, got)
+			}
+		})
+	}
+}
+
+func TestPadLeft_DisplayWidthMeasurement(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		w    int
+	}{
+		{"ascii_short", "abc", 8},
+		{"ascii_exact", "abcdefgh", 8},
+		{"accented_latin", "café", 8},
+		{"cjk", "日本語", 10},
+		{"emoji", "👋hi", 8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := padLeft(tc.in, tc.w)
+			if w := lipgloss.Width(got); w != tc.w {
+				t.Fatalf("padLeft(%q, %d): width=%d, want %d (output=%q)",
+					tc.in, tc.w, w, tc.w, got)
+			}
+		})
+	}
+}
+
+func TestPadRight_TruncatesOverWidth(t *testing.T) {
+	// Overlong ASCII must clip to exactly the requested width.
+	got := padRight("abcdefghij", 5)
+	if w := lipgloss.Width(got); w != 5 {
+		t.Fatalf("expected width 5, got %d (%q)", w, got)
 	}
 }

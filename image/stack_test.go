@@ -200,6 +200,50 @@ func TestStack_OpaqueWhiteoutRemovesAllPreviousContents(t *testing.T) {
 	assert.Nil(t, opq, "opaque whiteout file must not appear in stacked tree")
 }
 
+func TestStack_OpaqueWhiteoutReintroducesName(t *testing.T) {
+	// Layer 0 has /var/cache/foo.dat (size 100).
+	// Layer 1 emits an opaque whiteout AND a fresh foo.dat (size 300).
+	// Expectation: exactly one foo.dat child of cache, marked Added at size 300.
+	// Without the fix, the opaque branch clones foo.dat as Removed AND appends
+	// it as Added, producing two children with the same Name.
+	layer0 := makeTree(
+		makeDir("var", "/var",
+			makeDir("cache", "/var/cache",
+				makeFile("foo.dat", "/var/cache/foo.dat", 100),
+			),
+		),
+	)
+	layer1 := makeTree(
+		makeDir("var", "/var",
+			makeDir("cache", "/var/cache",
+				makeFile(".wh..wh..opq", "/var/cache/.wh..wh..opq", 0),
+				makeFile("foo.dat", "/var/cache/foo.dat", 300),
+			),
+		),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	r1 := result[1].Root
+	cache := r1.FindChild("var").FindChild("cache")
+	require.NotNil(t, cache)
+
+	var foos []*FileNode
+	for _, c := range cache.Children {
+		if c.Name == "foo.dat" {
+			foos = append(foos, c)
+		}
+	}
+	require.Len(t, foos, 1, "reintroduced name must appear exactly once after opaque whiteout")
+	assert.Equal(t, Added, foos[0].DiffType)
+	assert.Equal(t, int64(300), foos[0].Size)
+}
+
 func TestStack_ThreeLayers_CumulativeChanges(t *testing.T) {
 	layer0 := makeTree(
 		makeDir("app", "/app",
