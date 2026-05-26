@@ -31,7 +31,7 @@ func Evaluate(efficiency *image.EfficiencyResult, totalSize int64, rules []Rule)
 	}
 
 	limit := min(10, len(efficiency.WastedFiles))
-	report.TopWaste = efficiency.WastedFiles[:limit]
+	report.TopWaste = append([]image.WastedFile(nil), efficiency.WastedFiles[:limit]...)
 
 	return report
 }

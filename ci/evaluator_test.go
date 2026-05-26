@@ -124,3 +124,25 @@ func TestEvaluate_NoRules(t *testing.T) {
 	assert.True(t, report.Passed)
 	assert.Equal(t, 0, report.ExitCode())
 }
+
+func TestEvaluate_TopWasteIsIndependent(t *testing.T) {
+	files := []image.WastedFile{
+		{Path: "/a", TotalWasted: 300, LayerCount: 2},
+		{Path: "/b", TotalWasted: 200, LayerCount: 2},
+		{Path: "/c", TotalWasted: 100, LayerCount: 2},
+	}
+	eff := &image.EfficiencyResult{
+		Score:       0.5,
+		WastedBytes: 600,
+		WastedFiles: files,
+	}
+	report := Evaluate(eff, 1200, nil)
+	require.Len(t, report.TopWaste, 3)
+	assert.Equal(t, "/a", report.TopWaste[0].Path)
+
+	// Mutating the original slice must not corrupt the report.
+	eff.WastedFiles[0].Path = "MUTATED"
+	eff.WastedFiles[0].TotalWasted = -1
+	assert.Equal(t, "/a", report.TopWaste[0].Path, "TopWaste must own its backing array")
+	assert.Equal(t, int64(300), report.TopWaste[0].TotalWasted)
+}

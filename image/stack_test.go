@@ -541,3 +541,115 @@ func TestStack_DirMetadataPropagatesToL2(t *testing.T) {
 	assert.Equal(t, fs.FileMode(0o777), app.Mode, "L1's metadata change must be preserved at L2")
 	assert.Equal(t, Unchanged, app.DiffType, "no change at L2 itself")
 }
+
+func TestStack_DirReplacedByFile_EmitsRemovedForChildren(t *testing.T) {
+	// Layer 0: /x is a directory containing /x/a and /x/b.
+	layer0 := makeTree(
+		makeDir("x", "/x",
+			makeFile("a", "/x/a", 100),
+			makeFile("b", "/x/b", 200),
+		),
+	)
+	// Layer 1: /x is now a regular file.
+	layer1 := makeTree(
+		makeFile("x", "/x", 50),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	r1 := result[1].Root
+
+	// /x must appear as a Modified regular file with the new size.
+	x := r1.FindChild("x")
+	require.NotNil(t, x)
+	assert.False(t, x.IsDir)
+	assert.Equal(t, Modified, x.DiffType)
+	assert.Equal(t, int64(50), x.Size)
+
+	// The lost children must appear as Removed at the merged-root level.
+	var foundA, foundB *FileNode
+	for _, child := range r1.Children {
+		switch child.Path {
+		case "/x/a":
+			foundA = child
+		case "/x/b":
+			foundB = child
+		}
+	}
+	require.NotNil(t, foundA, "/x/a must appear as Removed in stacked tree")
+	require.NotNil(t, foundB, "/x/b must appear as Removed in stacked tree")
+	assert.Equal(t, Removed, foundA.DiffType)
+	assert.Equal(t, int64(100), foundA.Size)
+	assert.Equal(t, Removed, foundB.DiffType)
+	assert.Equal(t, int64(200), foundB.Size)
+}
+
+func TestStack_PreservesHardlinkMetadata(t *testing.T) {
+	// Layer 0 introduces /bin/ls as a regular file.
+	layer0 := makeTree(
+		makeDir("bin", "/bin",
+			makeFile("ls", "/bin/ls", 100),
+		),
+	)
+	// Layer 1 introduces /usr/bin/ls as a hardlink pointing at /bin/ls.
+	hardlink := &FileNode{
+		Name:       "ls",
+		Path:       "/usr/bin/ls",
+		Size:       0,
+		IsDir:      false,
+		IsHardlink: true,
+		Linkname:   "/bin/ls",
+	}
+	layer1 := makeTree(
+		makeDir("usr", "/usr",
+			makeDir("bin", "/usr/bin", hardlink),
+		),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	// Layer 1 stacked tree must carry the hardlink fields through cloneAsAdded.
+	r1usrbin := result[1].Root.FindChild("usr").FindChild("bin")
+	require.NotNil(t, r1usrbin)
+	r1ls := r1usrbin.FindChild("ls")
+	require.NotNil(t, r1ls, "hardlink must appear in stacked tree")
+	assert.True(t, r1ls.IsHardlink, "IsHardlink must propagate through cloneAsAdded")
+	assert.Equal(t, "/bin/ls", r1ls.Linkname, "Linkname must propagate through cloneAsAdded")
+
+	// And /bin/ls must remain Unchanged on layer 1 — exercising cloneAsUnchanged.
+	r1binls := result[1].Root.FindChild("bin").FindChild("ls")
+	require.NotNil(t, r1binls)
+	assert.Equal(t, Unchanged, r1binls.DiffType)
+
+	// Add a layer 2 hardlink modification to exercise the Modified branch in mergeLayer.
+	layer2hl := &FileNode{
+		Name:       "ls",
+		Path:       "/usr/bin/ls",
+		Size:       0,
+		IsDir:      false,
+		IsHardlink: true,
+		Linkname:   "/bin/busybox",
+	}
+	layer2 := makeTree(
+		makeDir("usr", "/usr",
+			makeDir("bin", "/usr/bin", layer2hl),
+		),
+	)
+	layersWith2 := append(layers, Layer{Index: 2, Tree: layer2})
+	result2 := Stack(layersWith2)
+	r2ls := result2[2].Root.FindChild("usr").FindChild("bin").FindChild("ls")
+	require.NotNil(t, r2ls)
+	assert.Equal(t, Modified, r2ls.DiffType)
+	assert.True(t, r2ls.IsHardlink, "IsHardlink must propagate through Modified branch")
+	assert.Equal(t, "/bin/busybox", r2ls.Linkname, "Linkname must propagate through Modified branch")
+}

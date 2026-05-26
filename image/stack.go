@@ -38,7 +38,9 @@ func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
 	merged := &FileNode{
 		Name:              cumulative.Name,
 		Path:              cumulative.Path,
+		Linkname:          cumulative.Linkname,
 		IsDir:             cumulative.IsDir,
+		IsHardlink:        cumulative.IsHardlink,
 		Size:              cumulative.Size,
 		Mode:              cumulative.Mode,
 		UID:               cumulative.UID,
@@ -94,11 +96,24 @@ func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
 				mergedChild := mergeLayer(cChild, lChild, layerIdx)
 				merged.AddChild(mergedChild)
 			} else {
+				if cChild.IsDir && !lChild.IsDir {
+					// The path used to be a directory and is now a regular file.
+					// Emit each old child as Removed against `merged` so the stacked
+					// tree retains visibility into the deleted subtree. Path-level
+					// consumers (efficiency, JSON export) read by Path; the structural
+					// flattening is harmless to them and avoids duplicate-Name
+					// children that would confuse FindChild and the TUI tree view.
+					for _, gc := range cChild.Children {
+						merged.AddChild(cloneAsRemoved(gc))
+					}
+				}
 				mod := &FileNode{
 					Name:              cChild.Name,
 					Path:              cChild.Path,
+					Linkname:          lChild.Linkname,
 					Size:              lChild.Size,
 					IsDir:             lChild.IsDir,
+					IsHardlink:        lChild.IsHardlink,
 					DiffType:          Modified,
 					Mode:              lChild.Mode,
 					UID:               lChild.UID,
@@ -156,8 +171,10 @@ func cloneAsUnchanged(node *FileNode) *FileNode {
 	clone := &FileNode{
 		Name:              node.Name,
 		Path:              node.Path,
+		Linkname:          node.Linkname,
 		Size:              node.Size,
 		IsDir:             node.IsDir,
+		IsHardlink:        node.IsHardlink,
 		DiffType:          Unchanged,
 		Mode:              node.Mode,
 		UID:               node.UID,
@@ -174,8 +191,10 @@ func cloneAsRemoved(node *FileNode) *FileNode {
 	clone := &FileNode{
 		Name:              node.Name,
 		Path:              node.Path,
+		Linkname:          node.Linkname,
 		Size:              node.Size,
 		IsDir:             node.IsDir,
+		IsHardlink:        node.IsHardlink,
 		DiffType:          Removed,
 		Mode:              node.Mode,
 		UID:               node.UID,
@@ -192,8 +211,10 @@ func cloneAsAdded(node *FileNode, layerIdx int) *FileNode {
 	clone := &FileNode{
 		Name:              node.Name,
 		Path:              node.Path,
+		Linkname:          node.Linkname,
 		Size:              node.Size,
 		IsDir:             node.IsDir,
+		IsHardlink:        node.IsHardlink,
 		DiffType:          Added,
 		Mode:              node.Mode,
 		UID:               node.UID,
@@ -215,8 +236,10 @@ func cloneStructure(node *FileNode) *FileNode {
 	clone := &FileNode{
 		Name:              node.Name,
 		Path:              node.Path,
+		Linkname:          node.Linkname,
 		Size:              node.Size,
 		IsDir:             node.IsDir,
+		IsHardlink:        node.IsHardlink,
 		Mode:              node.Mode,
 		UID:               node.UID,
 		GID:               node.GID,

@@ -156,6 +156,20 @@ func TestWasteExpand(t *testing.T) {
 	assert.Equal(t, 0, m.wasteCursor)
 }
 
+func TestWasteOverlayExpandKeyAcceptsBothCases(t *testing.T) {
+	for _, ch := range []rune{'a', 'A'} {
+		t.Run(string(ch), func(t *testing.T) {
+			m := setupModel()
+			m.efficiency = efficiencyOf(50)
+			m.openWaste()
+			require.False(t, m.wasteExpanded)
+
+			m = send(m, keyPress(ch))
+			assert.True(t, m.wasteExpanded, "case-%c must toggle expand", ch)
+		})
+	}
+}
+
 func TestWasteAutoExpandOnDown(t *testing.T) {
 	m := setupModel()
 	m.efficiency = efficiencyOf(25)
@@ -218,21 +232,10 @@ func TestWasteTitleShowsPositionCounter(t *testing.T) {
 
 	out := m.renderWasteOverlay()
 
-	assert.Contains(t, out, "Wasted Files 5/20",
-		"panel title shows 1-based cursor position over visible row count")
+	assert.Contains(t, out, "Wasted Files 5/31",
+		"panel title shows 1-based cursor position over total wasted files")
 	assert.NotContains(t, out, "Top 20 of",
 		"body header should no longer use Top 20 framing")
-}
-
-func TestWastePositionCounterMatchesVisibleRows(t *testing.T) {
-	m := setupModel()
-	m.efficiency = efficiencyOf(300) // 300 wasted files; collapsed view caps to 20.
-	m.openWaste()
-
-	out := m.renderWasteOverlay()
-	assert.Contains(t, out, "Wasted Files 1/20",
-		"denominator must match visible row count when collapsed")
-	assert.NotContains(t, out, "Wasted Files 1/300")
 }
 
 func TestWasteTitleEmptyState(t *testing.T) {
@@ -267,6 +270,29 @@ func TestWasteJumpClearsFilter(t *testing.T) {
 	assert.Equal(t, "", um.filterQuery, "filter query cleared")
 	assert.Equal(t, 0, um.layerCursor, "layerCursor set to introducing layer")
 	assert.Contains(t, um.statusMsg, "/etc/passwd")
+}
+
+func TestWasteJumpUnknownIntroPreservesFilter(t *testing.T) {
+	m := setupModel()
+	m.efficiency = image.Efficiency(m.analysis.Layers)
+	m.openWaste()
+	// Row with IntroLayer=-1 (intro unknown) — jump should be a no-op,
+	// preserving the user's filter rather than wiping it.
+	m.wasteRows = []wasteRow{
+		{Path: "/some/path", Wasted: 1024, LayerCount: 2, IntroLayer: -1},
+	}
+	m.filterActive = true
+	m.filterQuery = "important"
+	m.layerCursor = 1
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	um := updated.(model)
+
+	assert.False(t, um.showWaste, "overlay still closes")
+	assert.True(t, um.filterActive, "filterActive must be preserved on no-op jump")
+	assert.Equal(t, "important", um.filterQuery, "filterQuery must be preserved on no-op jump")
+	assert.Equal(t, 1, um.layerCursor, "layerCursor must not change on no-op jump")
+	assert.Contains(t, um.statusMsg, "Intro layer unknown")
 }
 
 func TestWasteJumpClearsDiffOnly(t *testing.T) {

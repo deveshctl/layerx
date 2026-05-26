@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -198,6 +196,38 @@ func TestWriteJSONAtomic_OverwritesAndCleansTmp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("new"), got)
 
-	_, err = os.Stat(target + ".tmp")
-	assert.True(t, errors.Is(err, fs.ErrNotExist), "tmp file must be cleaned up after success")
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, leftovers, "tmp files must be cleaned up after success")
+}
+
+func TestWriteJSONAtomic_ConcurrentRunsDontCollide(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.json")
+
+	t.Run("group", func(t *testing.T) {
+		t.Run("writer-a", func(t *testing.T) {
+			t.Parallel()
+			for range 20 {
+				require.NoError(t, writeJSONAtomic(target, []byte(`{"who":"a"}`)))
+			}
+		})
+		t.Run("writer-b", func(t *testing.T) {
+			t.Parallel()
+			for range 20 {
+				require.NoError(t, writeJSONAtomic(target, []byte(`{"who":"b"}`)))
+			}
+		})
+	})
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	// Last-writer-wins on rename: the surviving file must be valid JSON from one of the writers.
+	var payload map[string]string
+	require.NoError(t, json.Unmarshal(got, &payload))
+	assert.Contains(t, []string{"a", "b"}, payload["who"])
+
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, leftovers, "no tmp files must remain after concurrent writes")
 }

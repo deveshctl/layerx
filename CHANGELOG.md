@@ -4,13 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes. Five further bug-scan fixes covering tar-path normalization, CI-rule disable semantics, pull-error propagation, file-viewer chroma cost, and extractor goroutine cancellation. Plus a tree-wide gopls cleanup: deprecated `tar.TypeRegA` removed, `client.NewClientWithOpts` migrated to `client.New`, and Go 1.22+ modernizations applied.
+Three correctness fixes in waste overlay, file viewer, and efficiency calculation. Plus two reliability fixes in the pull-progress and CI paths. Two extractor and analysis hardening fixes. One Windows-specific cache eviction fix. Ten low-priority correctness, robustness, and test-coverage fixes. Five further bug-scan fixes covering tar-path normalization, CI-rule disable semantics, pull-error propagation, file-viewer chroma cost, and extractor goroutine cancellation. Plus a tree-wide gopls cleanup: deprecated `tar.TypeRegA` removed, `client.NewClientWithOpts` migrated to `client.New`, and Go 1.22+ modernizations applied. A round-2 deep scan added 11 more fixes spanning hardlink metadata propagation, directory-to-file replacement diff emission, JSON-export tmp-file collisions, deterministic waste ordering, gzip reader leaks, file-viewer trailing-newline rendering, and version-string formatting.
 
 ### bug-batch — 2026-05-25
 
 Fixes from a deep scan of all `.go` files. Each finding was verified by direct code inspection before fix.
 
-- fix(tui): waste overlay title denominator now matches the visible row count (20 collapsed, full count expanded) instead of always showing the full total. The cursor position counter was promising "1/300" navigation while only 20 rows were reachable; the full total is still shown unchanged on the header line just below ("X wasted across 300 files"), so no information is lost.
 - fix(ci): a `lowest-efficiency` threshold of 0 or negative now disables the rule, matching the disable-on-zero semantics of the other two rules.
 - fix(cmd): JSON export writes to a tmp file and atomically renames — no more half-written files on crash.
 - fix(cmd): `--json` is now a persistent flag and composes with the `ci` subcommand. CI rule evaluation still runs; JSON is written either way.
@@ -19,6 +18,22 @@ Fixes from a deep scan of all `.go` files. Each finding was verified by direct c
 - fix(completion): 1s timeout on `docker images` probe — a hung daemon no longer hangs the user's shell.
 - fix(image): tree node correctly clears `Size` when a path is promoted from file to directory across layers.
 - chore: `errors.As(&v)` modernized to `errors.AsType[T]` (Go 1.26) at the three sites flagged by gopls.
+
+#### Round 2 — deeper scan
+
+A second pass over the tree surfaced 11 more findings, each verified by direct code inspection.
+
+- fix(image): `Stack` now propagates `Linkname` and `IsHardlink` through every clone path (`mergeLayer` merged/Modified branches, `cloneAsUnchanged`, `cloneAsRemoved`, `cloneAsAdded`, `cloneStructure`). Previously the hardlink metadata was set only on first parse and silently dropped at every subsequent stacking, so efficiency and viewer logic that depends on `IsHardlink` saw zero hardlinks for any layer past the first.
+- fix(image): when a directory is replaced by a regular file in a later layer (`RUN rm -rf /etc && touch /etc`), `Stack` now emits `Removed` nodes for each child of the gone directory before constructing the replacement node. Without this, the children stayed `Unchanged` in the stacked tree and the waste/diff views silently dropped them.
+- fix(cmd): `writeJSONAtomic` now creates its temp file via `os.CreateTemp(filepath.Dir(targetPath), ".layerx-json-*.tmp")` instead of a deterministic `<target>.tmp` name. Two concurrent `layerx --json out.json …` runs in the same directory could clobber each other's tmp file and produce a corrupt output.
+- fix(image): `Efficiency` now uses a stable total ordering (`TotalWasted` desc, then `Path` asc). With only `TotalWasted` as the key, two files with equal waste landed in nondeterministic order across runs — making JSON exports and CI reports flap between identical inputs.
+- fix(tui): waste-overlay jump no longer wipes `filterActive`/`filterQuery` when the intro layer is unknown (`IntroLayer == -1`). The clear is now scoped to the success branch, matching the cursor-jump.
+- fix(tui): file viewer no longer renders a phantom blank line at the end of files that end in `\n` (which is most of them). `renderFileView` now trims one trailing newline before splitting; `fileViewLineCount` mirrors the trim with a single-newline guard so an all-`"\n"` file still reports 1 line.
+- fix(ci): `report.TopWaste` is now a defensive copy of `efficiency.WastedFiles[:limit]`, not a slice into the same backing array. Future code mutating either side can no longer leak through the shared header.
+- fix(image): `decompressIfGzip` now returns an `io.ReadCloser` and callers (`parseLayers`, `findFileInLayer`) close the reader after use. Gzipped layer blobs (the OCI Docker 25+ default) previously leaked the gzip reader's internal buffer on every layer parse and every file extraction.
+- fix(tui): waste-overlay expand toggle now accepts both `a` and `A`, matching every other case-insensitive shortcut in the TUI.
+- fix(tui): file viewer title truncation now uses `lipgloss.Width` + `ansi.Truncate` instead of rune count. A 30-CJK-character `originCmd` (display width 60) was rendered untruncated and overflowed the title bar; truncation now happens at display-width 40 with the existing `…` suffix.
+- fix(cmd): `SetVersionInfo` no longer splices `(commit none, built unknown)` into the version string. `main.go`'s defaults (`commit="none"`, `date="unknown"` when not built with `-ldflags`) are now suppressed; only a real commit produces the parenthesized suffix.
 
 ### Fixed
 - `cleanTarPath` now returns the cleaned path instead of the original. The validator computed `path.Clean(p)` and then returned `p`, so a tar entry like `usr/./bin/sh` (legal output of busybox tar and some `--transform` rules) was inserted into the tree under a phantom `.` node. Whiteout matching missed `.wh.bin` entries against such paths, the TUI rendered ugly `/usr/./bin/sh` rows, and efficiency comparisons silently under-reported waste when one layer used the clean form and another the dotted form. One-character fix at `image/tree_parser.go:68` plus a `TestParseLayerTar_EmbeddedDotSegmentNormalized` regression.

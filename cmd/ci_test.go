@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/deveshctl/layerx/config"
@@ -25,4 +27,32 @@ func TestBuildRules_DisablesLowestEfficiencyOnZeroOrNegative(t *testing.T) {
 
 	rules := buildRules(cfg, cmd)
 	assert.Empty(t, rules, "all-zero thresholds must disable all rules")
+}
+
+// main.go maps a non-nil cobra error to exit 1 only when the error chain
+// contains *ErrCIFailed; everything else exits 2. Lock that contract here so
+// a future change that wraps or replaces the sentinel doesn't silently
+// collapse both exit codes to 2.
+func TestErrCIFailed_DetectableThroughWrapping(t *testing.T) {
+	sentinel := &ErrCIFailed{}
+	wrapped := fmt.Errorf("running ci check: %w", sentinel)
+
+	var got *ErrCIFailed
+	assert.True(t, errors.As(sentinel, &got), "bare sentinel must match")
+	assert.True(t, errors.As(wrapped, &got), "wrapped sentinel must match")
+	assert.False(t, errors.As(errors.New("unrelated"), &got), "plain errors must not match")
+	assert.False(t, errors.As(fmt.Errorf("docker daemon down"), &got), "internal errors must not match")
+}
+
+// --json must live on rootCmd's persistent flag set so it is inherited by
+// the ci subcommand (`layerx ci --json out.json IMG`). Earlier it was a
+// local flag on rootCmd which made the ci subcommand reject --json with an
+// "unknown flag" error.
+func TestJSONFlagIsPersistent(t *testing.T) {
+	persistent := rootCmd.PersistentFlags().Lookup("json")
+	assert.NotNil(t, persistent, "--json must be on rootCmd.PersistentFlags so subcommands inherit it")
+
+	// And the ci subcommand must see it through inherited flags.
+	inherited := ciCmd.InheritedFlags().Lookup("json")
+	assert.NotNil(t, inherited, "ci subcommand must inherit --json from rootCmd")
 }

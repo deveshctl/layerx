@@ -297,6 +297,7 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 				return nil, fmt.Errorf("decompressing layer %s: %w", layerPath, err)
 			}
 			tree, err := ParseLayerTar(r)
+			r.Close()
 			if err != nil {
 				return nil, fmt.Errorf("parsing layer %s: %w", layerPath, err)
 			}
@@ -309,11 +310,12 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 
 // decompressIfGzip returns a reader that decompresses gzip data, or wraps raw
 // bytes directly. Docker 25+ OCI format stores layer blobs as gzip-compressed tar.
-func decompressIfGzip(data []byte) (io.Reader, error) {
+// Callers must Close the returned reader.
+func decompressIfGzip(data []byte) (io.ReadCloser, error) {
 	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
 		return gzip.NewReader(bytes.NewReader(data))
 	}
-	return bytes.NewReader(data), nil
+	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 type dockerManifest struct {
