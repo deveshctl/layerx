@@ -126,6 +126,9 @@ func (m *model) adjustWasteScroll(visibleHeight int) {
 func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Quit) {
 		m.quitting = true
+		if m.fetchCancel != nil {
+			m.fetchCancel()
+		}
 		return m, tea.Quit
 	}
 	rows := m.visibleWasteRows()
@@ -235,12 +238,16 @@ func (m model) renderWasteOverlay() string {
 	if m.efficiency != nil {
 		originalCount = len(m.efficiency.WastedFiles)
 	}
+	visibleCount := len(m.wasteRows)
 
 	posNum := 0
-	if originalCount > 0 {
+	if visibleCount > 0 {
 		posNum = m.wasteCursor + 1
 	}
-	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, originalCount)
+	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, visibleCount)
+	if originalCount > visibleCount {
+		panelTitle += fmt.Sprintf(" (capped, %d total)", originalCount)
+	}
 
 	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)

@@ -68,6 +68,7 @@ func completeImageRefs(cmd *cobra.Command, args []string, toComplete string) ([]
 
 	var refs []string
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimRight(line, "\r")
 		if line == "" || strings.Contains(line, "<none>") {
 			continue
 		}

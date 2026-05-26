@@ -57,6 +57,13 @@ func runJSONExport(imageRef, outputPath string, noCache bool) error {
 		return err
 	}
 
+	return runJSONExportFromAnalysis(analysis, outputPath)
+}
+
+// runJSONExportFromAnalysis writes the analysis to outputPath without
+// re-resolving the image. Used when CI has already produced an analysis we
+// can reuse.
+func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) error {
 	efficiency := image.Efficiency(analysis.Layers)
 
 	export := buildJSONExport(analysis, efficiency)

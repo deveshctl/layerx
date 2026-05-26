@@ -6,8 +6,10 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/moby/moby/client"
@@ -101,6 +103,9 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	f := make(client.Filters).Add("reference", imageRef)
 	result, err := r.cli.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		return &ErrDaemonNotRunning{Cause: err}
 	}
 
@@ -112,16 +117,25 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 
 	rc, err := r.cli.ImagePull(ctx, imageRef, client.ImagePullOptions{})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
 	defer rc.Close()
 
 	if progress != nil {
 		if err := r.streamPullProgress(ctx, rc, progress); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			return &ErrPullFailed{Ref: imageRef, Cause: err}
 		}
 	} else {
 		if _, err := io.Copy(io.Discard, rc); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			return &ErrPullFailed{Ref: imageRef, Cause: err}
 		}
 	}
@@ -190,55 +204,33 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 // with ID, Size, Command, and Tree populated.
 // Supports both legacy Docker format (config as <sha>.json at root) and
 // OCI format (config as blobs/sha256/<digest>).
+//
+// Memory bound: the input stream is spooled to a temp file, then walked in
+// two passes. Pass 1 reads small metadata (manifest.json, config). Pass 2
+// streams each layer through decompress + ParseLayerTar, dropping the buffer
+// before the next layer. Peak heap is bounded by the largest single layer
+// rather than the sum of all blobs in the archive.
 func parseLayers(r io.Reader) ([]Layer, error) {
-	tr := tar.NewReader(r)
+	spool, err := os.CreateTemp("", "layerx-resolve-*.tar")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp spool: %w", err)
+	}
+	spoolPath := spool.Name()
+	defer os.Remove(spoolPath)
+	defer spool.Close()
 
-	// Buffer all entries: metadata goes to contents, potential layer/blob data
-	// goes to blobs. After manifest is parsed, blobs are resolved by reference.
-	contents := make(map[string][]byte)
-	blobs := make(map[string][]byte)
-	headers := make(map[string]int64)
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading image archive: %w", err)
-		}
-
-		headers[hdr.Name] = hdr.Size
-
-		switch {
-		case hdr.Name == "manifest.json":
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-			}
-			contents[hdr.Name] = data
-		case strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/"):
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-			}
-			contents[hdr.Name] = data
-		case strings.HasPrefix(hdr.Name, "blobs/sha256/"):
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-			}
-			blobs[hdr.Name] = data
-		case strings.HasSuffix(hdr.Name, "/layer.tar"):
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-			}
-			blobs[hdr.Name] = data
-		}
+	if _, err := io.Copy(spool, r); err != nil {
+		return nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 
-	manifestData := contents["manifest.json"]
+	// Pass 1: collect manifest.json, root *.json (legacy config), and a
+	// header map of every entry's declared size. Bodies of layer/blob
+	// entries are streamed past without buffering.
+	manifestData, rootJSON, headers, err := scanResolveMetadata(spool)
+	if err != nil {
+		return nil, err
+	}
+
 	if manifestData == nil {
 		return nil, fmt.Errorf("invalid image archive: manifest.json not found")
 	}
@@ -250,28 +242,20 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 	if len(manifests) == 0 {
 		return nil, fmt.Errorf("invalid image archive: empty manifest")
 	}
-
 	manifest := manifests[0]
 
-	// Resolve config: check both contents (legacy .json) and blobs (OCI).
-	configData := contents[manifest.Config]
-	if configData == nil {
-		configData = blobs[manifest.Config]
-	}
-	if configData == nil {
-		return nil, fmt.Errorf("invalid image archive: config %s not found", manifest.Config)
+	// Resolve config: legacy (<sha>.json at root) or OCI (blobs/sha256/...).
+	configData, ok := rootJSON[manifest.Config]
+	if !ok {
+		configData, err = readEntryFromSpool(spool, manifest.Config)
+		if err != nil {
+			return nil, fmt.Errorf("invalid image archive: config %s not found: %w", manifest.Config, err)
+		}
 	}
 
 	var config imageConfig
 	if err := json.Unmarshal(configData, &config); err != nil {
 		return nil, fmt.Errorf("invalid image archive: cannot parse config: %w", err)
-	}
-
-	layerSizes := make(map[string]int64)
-	for _, layerPath := range manifest.Layers {
-		if size, ok := headers[layerPath]; ok {
-			layerSizes[layerPath] = size
-		}
 	}
 
 	var commands []string
@@ -286,26 +270,122 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		layers[i] = Layer{
 			Index: i,
 			ID:    extractShortID(layerPath),
-			Size:  layerSizes[layerPath],
+			Size:  headers[layerPath],
 		}
 		if i < len(commands) {
 			layers[i].Command = commands[i]
 		}
-		if tarData, ok := blobs[layerPath]; ok && len(tarData) > 0 {
-			r, err := decompressIfGzip(tarData)
-			if err != nil {
-				return nil, fmt.Errorf("decompressing layer %s: %w", layerPath, err)
-			}
-			tree, err := ParseLayerTar(r)
-			r.Close()
-			if err != nil {
-				return nil, fmt.Errorf("parsing layer %s: %w", layerPath, err)
-			}
-			layers[i].Tree = tree
+	}
+
+	// Pass 2: stream each layer one at a time, parse, drop the buffer
+	// before reading the next. Peak heap = largest single layer.
+	keep := make(map[string]int, len(manifest.Layers))
+	for i, p := range manifest.Layers {
+		keep[p] = i
+	}
+
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek spool: %w", err)
+	}
+	tr := tar.NewReader(spool)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
 		}
+		if err != nil {
+			return nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		idx, want := keep[hdr.Name]
+		if !want {
+			continue
+		}
+		tarData, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+		}
+		if len(tarData) == 0 {
+			continue
+		}
+		dec, err := decompressIfGzip(tarData)
+		if err != nil {
+			return nil, fmt.Errorf("decompressing layer %s: %w", hdr.Name, err)
+		}
+		tree, parseErr := ParseLayerTar(dec)
+		dec.Close()
+		tarData = nil // drop before next iteration
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing layer %s: %w", hdr.Name, parseErr)
+		}
+		layers[idx].Tree = tree
 	}
 
 	return layers, nil
+}
+
+// scanResolveMetadata walks the spool once, returning manifest.json bytes,
+// any root-level *.json blobs (legacy config payloads), and a header map of
+// declared sizes for every entry. Layer / blob bodies are streamed past
+// without buffering.
+func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]int64, error) {
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return nil, nil, nil, fmt.Errorf("seek spool: %w", err)
+	}
+	tr := tar.NewReader(spool)
+
+	var manifestData []byte
+	rootJSON := make(map[string][]byte)
+	headers := make(map[string]int64)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		headers[hdr.Name] = hdr.Size
+
+		switch {
+		case hdr.Name == "manifest.json":
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("reading manifest.json: %w", err)
+			}
+			manifestData = data
+		case strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/"):
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+			}
+			rootJSON[hdr.Name] = data
+		default:
+			// Layer/blob body — skip without buffering.
+		}
+	}
+	return manifestData, rootJSON, headers, nil
+}
+
+// readEntryFromSpool walks the spool and returns the bytes of a single named
+// entry. Used for OCI configs that live under blobs/sha256/.
+func readEntryFromSpool(spool *os.File, name string) ([]byte, error) {
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek spool: %w", err)
+	}
+	tr := tar.NewReader(spool)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("entry not found: %s", name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		if hdr.Name == name {
+			return io.ReadAll(tr)
+		}
+	}
 }
 
 // decompressIfGzip returns a reader that decompresses gzip data, or wraps raw

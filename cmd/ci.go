@@ -91,23 +91,26 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	if err := executeCICheck(imageRef, cfg, cmd, noCacheRequested()); err != nil {
-		// CI rule failure still triggers JSON export so pipelines can
-		// inspect the failing analysis. Internal errors (Docker down,
-		// etc.) skip JSON since there is nothing to export.
-		if _, ok := errors.AsType[*ErrCIFailed](err); ok && flagJSON != "" {
-			_ = runJSONExport(imageRef, flagJSON, noCacheRequested())
-		}
-		return err
-	}
+	analysis, ciErr := executeCICheck(imageRef, cfg, cmd, noCacheRequested())
 	if flagJSON != "" {
-		return runJSONExport(imageRef, flagJSON, noCacheRequested())
+		var jsonErr error
+		switch {
+		case analysis != nil:
+			jsonErr = runJSONExportFromAnalysis(analysis, flagJSON)
+		case ciErr != nil:
+			// CI failed before producing an analysis (e.g. Docker daemon
+			// down). Nothing to export.
+			jsonErr = nil
+		default:
+			jsonErr = runJSONExport(imageRef, flagJSON, noCacheRequested())
+		}
+		return combineCIAndJSONErr(ciErr, jsonErr, os.Stderr)
 	}
-	return nil
+	return ciErr
 }
 
-func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {
-	err := runCICheckInner(imageRef, cfg, cmd, noCache)
+func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
+	analysis, err := runCICheckInner(imageRef, cfg, cmd, noCache)
 	// ciCmd has SilenceErrors=true and root.go silences errors when CI=true,
 	// so cobra will not print anything for us. Surface non-CIFailed errors
 	// (e.g. Docker daemon down) to stderr ourselves; the CIFailed sentinel
@@ -117,19 +120,19 @@ func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noC
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 	}
-	return err
+	return analysis, err
 }
 
-func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) error {
+func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
 	resolver, err := image.NewDockerResolver()
 	if err != nil {
-		return fmt.Errorf("failed to initialize: %w", err)
+		return nil, fmt.Errorf("failed to initialize: %w", err)
 	}
 
 	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
 		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	efficiency := image.Efficiency(analysis.Layers)
@@ -138,9 +141,9 @@ func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, no
 	report.Print(os.Stdout)
 
 	if report.ExitCode() != 0 {
-		return &ErrCIFailed{}
+		return analysis, &ErrCIFailed{}
 	}
-	return nil
+	return analysis, nil
 }
 
 func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {

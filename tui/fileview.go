@@ -70,8 +70,10 @@ func renderFileView(p viewerParams) string {
 		return renderPanel(body, title, true, contentWidth, p.height, false, false)
 	}
 
-	data := strings.TrimSuffix(string(p.content.Data), "\n")
-	lines := strings.Split(data, "\n")
+	lines := splitFileLines(p.content.Data)
+	if lines == nil {
+		lines = []string{""}
+	}
 	syntaxHighlight := p.searchQuery == ""
 	if syntaxHighlight {
 		if p.highlightedLines != nil {
@@ -269,10 +271,22 @@ func fileViewLineCount(content *image.FileContent) int {
 	if content == nil || content.Binary || len(content.Data) == 0 {
 		return 0
 	}
-	data := strings.TrimSuffix(string(content.Data), "\n")
-	if data == "" {
+	lines := splitFileLines(content.Data)
+	if len(lines) == 0 {
 		// Content was just a single trailing newline — semantically one empty line.
 		return 1
 	}
-	return strings.Count(data, "\n") + 1
+	return len(lines)
+}
+
+// splitFileLines normalizes CRLF→LF, drops a single trailing newline, and
+// splits the content into rendered viewer lines. Shared by the renderer and
+// search match indexing so both agree on line count and indices.
+func splitFileLines(data []byte) []string {
+	s := strings.ReplaceAll(string(data), "\r\n", "\n")
+	s = strings.TrimSuffix(s, "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
