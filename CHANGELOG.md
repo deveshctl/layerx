@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File content viewer and save-to-disk (`x`) work in archive mode too —
   full feature parity with daemon-backed inspection.
 
+### Changed
+- Manually-built binaries (`go build` from source) now include the git commit and build date in `--version` output, picked up automatically from the metadata Go embeds at build time. Release builds and source-tarball checkouts without git history are unchanged.
+
 ### Fixed
 - Clearer errors for archive mode: a missing path reports "Archive not
   found" instead of a generic Docker error; a malformed tarball reports
