@@ -293,8 +293,9 @@ func TestArchiveResolver_Inspect(t *testing.T) {
 	r := NewArchiveResolver(path)
 	meta, err := r.Inspect(context.Background(), path)
 	require.NoError(t, err)
-	// Inspect sums all entry header sizes, including manifest.json and config.
-	assert.Greater(t, meta.Size, int64(1024+2048))
+	// Inspect sums only the layer blobs declared in the manifest, not
+	// manifest.json or the config blob.
+	assert.Equal(t, int64(1024+2048), meta.Size)
 }
 
 func TestArchiveExtractor_ExtractFromLayer(t *testing.T) {
