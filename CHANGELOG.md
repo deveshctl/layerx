@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Inspect local image archives without a Docker daemon: pass a path to a
+  `docker save` tarball or OCI layout tarball (e.g. `layerx ./build/app.tar`)
+  and LayerX reads the file directly. Works for the TUI, `--json` export,
+  and `layerx ci`. Useful in CI runners and air-gapped environments where
+  the image is already on disk and starting a daemon is unwanted.
+- Auto-detection: any argument that resolves to an existing regular file
+  is opened as an archive; everything else still goes through the Docker
+  daemon. No new flags; existing `layerx nginx:latest` workflows are
+  unchanged.
+- File content viewer and save-to-disk (`x`) work in archive mode too —
+  full feature parity with daemon-backed inspection.
+
+### Fixed
+- Clearer errors for archive mode: a missing path reports "Archive not
+  found" instead of a generic Docker error; a malformed tarball reports
+  "Not a valid image archive" instead of a low-level parse error.
+
 ## [v1.2.2] - 2026-05-26
 
 A correctness and reliability release across the TUI, CI mode, config, and

@@ -1,6 +1,6 @@
 # layerx
 
-Interactive Docker image layer inspector with CI-friendly efficiency checks. Single binary, no runtime dependencies beyond Docker.
+Interactive Docker image layer inspector with CI-friendly efficiency checks. Single binary; no daemon required when reading saved image archives.
 
 ![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
@@ -29,8 +29,11 @@ Use it to:
 # macOS / Linux
 brew install deveshctl/tap/layerx
 
-# Try it
+# Inspect a Docker image (daemon required)
 layerx nginx:latest
+
+# Or inspect a local docker-save / OCI archive (no daemon needed)
+layerx ./build/app.tar
 ```
 
 Other platforms: see [Install](#install).
@@ -39,11 +42,13 @@ Other platforms: see [Install](#install).
 
 ## What you can do
 
-| Mode        | Command                                      | Best for                                                |
-|-------------|----------------------------------------------|---------------------------------------------------------|
-| Interactive | `layerx IMAGE`                               | Exploring layers, diffs, file contents, wasted bytes    |
-| CI          | `layerx ci IMAGE` or `CI=true layerx IMAGE`  | Pipeline gates on efficiency / wasted bytes             |
-| Export      | `layerx --json out.json IMAGE`               | Scripts, dashboards, `jq`                               |
+| Mode        | Command                                              | Best for                                                |
+|-------------|------------------------------------------------------|---------------------------------------------------------|
+| Interactive | `layerx IMAGE_OR_ARCHIVE`                            | Exploring layers, diffs, file contents, wasted bytes    |
+| CI          | `layerx ci IMAGE_OR_ARCHIVE` or `CI=true layerx ...` | Pipeline gates on efficiency / wasted bytes             |
+| Export      | `layerx --json out.json IMAGE_OR_ARCHIVE`            | Scripts, dashboards, `jq`                               |
+
+`IMAGE_OR_ARCHIVE` is auto-detected: an existing file is read directly without contacting any container runtime, anything else is resolved through the Docker daemon. All three modes accept either form.
 
 ### Interactive explorer
 
@@ -70,7 +75,7 @@ Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scri
 
 ## Prerequisites
 
-Docker must be installed and running.
+Docker is required when inspecting Docker image references (`nginx:latest`, `myregistry/app:tag`). It is **not** required when inspecting a local archive file (`docker save` output or OCI layout tarball) — archive mode reads the file directly.
 
 | Platform | Install                                                                                  |
 |----------|------------------------------------------------------------------------------------------|
@@ -136,14 +141,18 @@ go install github.com/deveshctl/layerx@latest
 ## Usage
 
 ```bash
-# Interactive TUI
+# Interactive TUI — Docker reference
 layerx nginx:latest
+
+# Interactive TUI — local archive (no daemon required)
+layerx ./build/app.tar
 
 # Force a fresh analysis (bypass the cache)
 layerx --no-cache nginx:latest
 
-# CI mode — exit 1 if efficiency < 95%
+# CI mode — exit 1 if efficiency < 95% (works for both inputs)
 layerx ci --lowest-efficiency 0.95 nginx:latest
+layerx ci --lowest-efficiency 0.95 ./build/app.tar
 
 # JSON export
 layerx --json analysis.json nginx:latest
@@ -215,7 +224,9 @@ Repeat runs against an unchanged image digest reuse the cache and skip the tar e
 
 ## Troubleshooting
 
-- **"Cannot connect to the Docker daemon"** — Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux.
+- **"Cannot connect to the Docker daemon"** — Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux. (Tip: if your image is already saved as a tarball, pass the file path instead — no daemon required.)
+- **"Archive not found"** — the path you passed doesn't exist or isn't a regular file. Check spelling and that you're not pointing at a directory.
+- **"Not a valid image archive"** — the file exists but isn't a `docker save` or OCI layout tarball. Re-export with `docker save -o image.tar IMAGE` or build with `--output type=oci,dest=image.tar`.
 - **"image not found"** — layerx pulls images on demand. Check the reference and that you can `docker pull` it manually.
 - **Cache permission errors** — point `LAYERX_CACHE_DIR` somewhere writable, e.g. `LAYERX_CACHE_DIR=$HOME/.cache/layerx`.
 

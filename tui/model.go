@@ -1588,6 +1588,12 @@ func friendlyError(err error) string {
 	if notFoundErr, ok := errors.AsType[*image.ErrImageNotFound](err); ok {
 		return fmt.Sprintf("Image %q not found.", notFoundErr.Ref)
 	}
+	if archErr, ok := errors.AsType[*image.ErrArchiveNotFound](err); ok {
+		return fmt.Sprintf("Archive %q not found. Check the file path.", archErr.Path)
+	}
+	if invalidErr, ok := errors.AsType[*image.ErrInvalidArchive](err); ok {
+		return fmt.Sprintf("Not a valid image archive: %q. Expected a docker-save or OCI layout tarball.", invalidErr.Path)
+	}
 	return err.Error()
 }
 

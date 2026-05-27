@@ -213,14 +213,14 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 func parseLayers(r io.Reader) ([]Layer, error) {
 	spool, err := os.CreateTemp("", "layerx-resolve-*.tar")
 	if err != nil {
-		return nil, fmt.Errorf("creating temp spool: %w", err)
+		return nil, &ErrArchiveInfra{Op: "creating temp spool", Cause: err}
 	}
 	spoolPath := spool.Name()
 	defer os.Remove(spoolPath)
 	defer spool.Close()
 
 	if _, err := io.Copy(spool, r); err != nil {
-		return nil, fmt.Errorf("spooling image archive: %w", err)
+		return nil, &ErrArchiveInfra{Op: "spooling image archive", Cause: err}
 	}
 
 	// Pass 1: collect manifest.json, root *.json (legacy config), and a
