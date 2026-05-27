@@ -1591,6 +1591,9 @@ func friendlyError(err error) string {
 	if archErr, ok := errors.AsType[*image.ErrArchiveNotFound](err); ok {
 		return fmt.Sprintf("Archive %q not found. Check the file path.", archErr.Path)
 	}
+	if permErr, ok := errors.AsType[*image.ErrArchivePermission](err); ok {
+		return fmt.Sprintf("Permission denied opening archive %q. Check file permissions.", permErr.Path)
+	}
 	if invalidErr, ok := errors.AsType[*image.ErrInvalidArchive](err); ok {
 		return fmt.Sprintf("Not a valid image archive: %q. Expected a docker-save or OCI layout tarball.", invalidErr.Path)
 	}

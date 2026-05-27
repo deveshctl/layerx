@@ -472,9 +472,19 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			continue
 		}
 
-		data, err := io.ReadAll(tr)
+		// Bound the read so a crafted tar (header.Size inflated, or stream
+		// longer than declared) can't OOM the process. Mirrors the cap in
+		// readFullFileFromTar — fail-fast on header, then LimitReader as
+		// belt-and-braces for streams that exceed their declared size.
+		if hdr.Size > MaxSaveSize {
+			return nil, false, fmt.Errorf("file too large to extract: %d bytes (limit %d)", hdr.Size, MaxSaveSize)
+		}
+		data, err := io.ReadAll(io.LimitReader(tr, MaxSaveSize+1))
 		if err != nil {
 			return nil, false, fmt.Errorf("reading file from layer: %w", err)
+		}
+		if int64(len(data)) > MaxSaveSize {
+			return nil, false, fmt.Errorf("file too large to extract: exceeds %d bytes", MaxSaveSize)
 		}
 		regularData = data
 		foundRegular = true

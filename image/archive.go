@@ -30,12 +30,21 @@ func NewArchiveResolver(path string) *ArchiveResolver {
 	return &ArchiveResolver{path: path}
 }
 
-// openArchive opens path read-only, mapping fs errors to typed
-// ErrArchiveNotFound so the caller (TUI, CLI) can render a tailored message.
+// openArchive opens path read-only, mapping fs errors to typed errors so the
+// caller (TUI, CLI) can render a tailored message: ErrArchiveNotFound for
+// missing paths, ErrArchivePermission for EACCES, and a wrapped infra error
+// for everything else (I/O failures, too many open files, etc).
 func openArchive(path string) (*os.File, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, &ErrArchiveNotFound{Path: path, Cause: err}
+		switch {
+		case os.IsNotExist(err):
+			return nil, &ErrArchiveNotFound{Path: path, Cause: err}
+		case os.IsPermission(err):
+			return nil, &ErrArchivePermission{Path: path, Cause: err}
+		default:
+			return nil, &ErrArchiveInfra{Op: fmt.Sprintf("open archive %q", path), Cause: err}
+		}
 	}
 	return f, nil
 }
@@ -72,6 +81,11 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 
 // Inspect returns lightweight metadata (total declared layer size) by
 // scanning the outer tar headers once. Does not read layer bodies.
+//
+// "Total layer size" is summed strictly over the entries listed in the
+// manifest's Layers — manifest.json, the config blob, and any unrelated
+// root-level JSON are excluded. This matches what users mean by "image
+// size" and what the spinner / status bar displays.
 func (r *ArchiveResolver) Inspect(ctx context.Context, imageRef string) (*ImageMeta, error) {
 	f, err := openArchive(r.path)
 	if err != nil {
@@ -79,14 +93,25 @@ func (r *ArchiveResolver) Inspect(ctx context.Context, imageRef string) (*ImageM
 	}
 	defer f.Close()
 
-	_, _, headers, err := scanResolveMetadata(f)
+	manifestData, _, headers, err := scanResolveMetadata(f)
 	if err != nil {
 		return nil, &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
+	if manifestData == nil {
+		return nil, &ErrInvalidArchive{Path: r.path, Cause: errors.New("manifest.json not found")}
+	}
+
+	var manifests []dockerManifest
+	if err := json.Unmarshal(manifestData, &manifests); err != nil {
+		return nil, &ErrInvalidArchive{Path: r.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
+	}
+	if len(manifests) == 0 {
+		return nil, &ErrInvalidArchive{Path: r.path, Cause: errors.New("empty manifest")}
+	}
 
 	var total int64
-	for _, sz := range headers {
-		total += sz
+	for _, layerPath := range manifests[0].Layers {
+		total += headers[layerPath]
 	}
 	return &ImageMeta{Size: total}, nil
 }

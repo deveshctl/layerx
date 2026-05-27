@@ -48,6 +48,21 @@ func (e *ErrArchiveNotFound) Error() string {
 
 func (e *ErrArchiveNotFound) Unwrap() error { return e.Cause }
 
+// ErrArchivePermission is returned when the archive file exists but the
+// current user cannot open it (permission denied). Distinct from
+// ErrArchiveNotFound so the user sees "fix your permissions" rather than
+// "fix your path".
+type ErrArchivePermission struct {
+	Path  string
+	Cause error
+}
+
+func (e *ErrArchivePermission) Error() string {
+	return fmt.Sprintf("permission denied opening archive %q: %v", e.Path, e.Cause)
+}
+
+func (e *ErrArchivePermission) Unwrap() error { return e.Cause }
+
 // ErrInvalidArchive is returned when the file exists and is readable but is
 // not a valid docker-save / OCI image archive (missing manifest.json,
 // malformed manifest, malformed config, etc).

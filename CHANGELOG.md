@@ -23,7 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Clearer errors for archive mode: a missing path reports "Archive not
   found" instead of a generic Docker error; a malformed tarball reports
-  "Not a valid image archive" instead of a low-level parse error.
+  "Not a valid image archive" instead of a low-level parse error. A
+  permission-denied archive now reports "Permission denied" instead of
+  being mislabelled as "not found".
+- Saving or viewing a file from a layer enforces the same 2 GiB cap as
+  the daemon-backed copy path. A crafted tar entry with an inflated
+  size header can no longer make LayerX exhaust memory.
+- Archive image-size readout (shown during loading) now sums only the
+  layer blobs declared in the manifest, not unrelated tar entries like
+  `manifest.json` and the config blob.
 
 ## [v1.2.2] - 2026-05-26
 
