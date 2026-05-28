@@ -46,9 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Setting all of `lowest-efficiency`, `highest-wasted-bytes`, and
   `highest-user-wasted-percent` to 0 (or omitting them all) now exits 2
   with a clear message naming each flag and the config key.
-- `.layerx.yaml` files containing the documented `keybindings:` block now
-  load successfully. Strict mode previously rejected the entire config —
-  rules and all — because the placeholder had not been wired in.
+- `.layerx.yaml` files containing a `keybindings:` block now load
+  successfully. Strict mode previously rejected the entire config — rules
+  and all — when this section was present.
 - Efficiency scores no longer charge waste for files that were deleted
   between layers and a different file with the same path was added later
   (`apt-get install` → `apt-get clean` → reinstall). Each delete-then-readd
@@ -68,12 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Filenames with CJK or emoji characters no longer overflow the selected
   filetree row. Padding now measures display width to match the unselected
   branch.
-- Layer parsing streams compressed blobs through the gzip decoder instead
-  of buffering the full compressed bytes per layer. Multi-GB layers (ML
-  model images, dataset bundles) no longer allocate the whole blob before
-  reading; peak heap is now bounded by the layer's parsed FileTree.
-- Long Dockerfile commands wrap on a midpoint space when one is available
-  at exactly half the panel width, avoiding a one-character mid-word cut.
+- Multi-GB layers (ML model images, dataset bundles) no longer load the
+  entire compressed blob into memory before parsing. Peak memory during
+  analysis stays bounded by the largest single layer's parsed file tree
+  rather than the largest compressed layer.
+- Long Dockerfile commands wrap on the nearest space within the panel
+  width, eliminating an off-by-one that could force a mid-word cut on
+  odd-width panels.
 
 ## [v1.2.3] - 2026-05-28
 
