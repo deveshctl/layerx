@@ -75,6 +75,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Long Dockerfile commands wrap on the nearest space within the panel
   width, eliminating an off-by-one that could force a mid-word cut on
   odd-width panels.
+- File extraction (`x` save, content viewer) on multi-GB images no longer
+  loads every layer blob into memory at once. The per-extract memory
+  ceiling is now one layer blob — the one currently being scanned — so
+  ML / dataset images that previously OOMed the process now work, and
+  TUI key-mash sequences that fired concurrent extracts are bounded.
+- `x` save now writes via temp-file + rename instead of in-place. A
+  process kill (Ctrl+C, OOM, power loss) mid-write no longer leaves a
+  truncated file at the user's chosen path; the target either holds the
+  complete pre-write content or the complete new content. The save
+  resolves symlinks before writing (so saving over a symlink updates the
+  link's target, not the link itself) and applies the process umask to
+  the chosen mode bits, matching the prior `os.WriteFile` semantics.
+- Opening a large source file in the viewer no longer freezes the TUI
+  while syntax highlighting runs. The Chroma tokenize/format pass moved
+  off the input goroutine; the file shows immediately in plain text and
+  the colored version swaps in when ready.
+- Filenames with CJK or wide-emoji characters no longer overflow the
+  Waste panel's path column. Truncation now measures display columns
+  rather than rune count, keeping the surrounding table aligned.
+- Layer blob loading is now bounded by an explicit per-blob size cap.
+  A malformed image archive that declares a single layer is petabytes
+  no longer causes runaway allocation.
 
 ## [v1.2.3] - 2026-05-28
 

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -21,6 +22,24 @@ func initChroma() {
 		chromaFmt = formatters.Get("terminal256")
 		chromaStyle = chromastyles.Get("monokai")
 	})
+}
+
+// highlightFileCmd wraps highlightFileLines in a tea.Cmd so the bubbletea
+// runtime can run tokenisation off the Update goroutine. The returned
+// message carries requestID so the receiver can discard a stale highlight
+// when the user has navigated to a different file in the meantime.
+func highlightFileCmd(requestID uint64, path string, data []byte) tea.Cmd {
+	// Snapshot the input — Cmds run after Update returns and the underlying
+	// FileContent.Data slice is part of model state that another extract
+	// could swap out before this Cmd executes.
+	pathCopy := path
+	dataCopy := append([]byte(nil), data...)
+	return func() tea.Msg {
+		return highlightedMsg{
+			requestID: requestID,
+			lines:     highlightFileLines(pathCopy, dataCopy),
+		}
+	}
 }
 
 // highlightFileLines returns syntax-highlighted lines for path/data, or nil if

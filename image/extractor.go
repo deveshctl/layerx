@@ -24,6 +24,14 @@ const MaxViewSize = 1 << 20 // 1 MB
 // enough for legitimate single-file extracts and well below typical RAM.
 const MaxSaveSize = 2 << 30 // 2 GiB
 
+// MaxLayerBlobSize bounds a single layer-tar blob loaded from a spooled
+// image archive. Distinct from MaxSaveSize because layer blobs aggregate
+// many files (apt caches, ML model directories, full base-image userlands)
+// and legitimately exceed the per-file cap. 16 GiB is permissive enough for
+// production ML images while still rejecting a malformed manifest that
+// claims a single blob is petabytes.
+const MaxLayerBlobSize = 16 << 30 // 16 GiB
+
 // FileContent holds the result of extracting a file from an image.
 type FileContent struct {
 	Path      string
@@ -232,15 +240,33 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	}
 }
 
+// blobLoader returns the bytes of a single layer blob by name. Implementations
+// read on-demand from the underlying archive (spool file or on-disk archive)
+// so peak heap is one blob, not the sum of every blob up to the layer cursor.
+// A blob that does not exist returns (nil, nil) — walkBackForFile treats
+// "missing blob" the same as "blob whose tar contains nothing for the path"
+// and continues the walk-back.
+type blobLoader func(name string) ([]byte, error)
+
 // walkBackForFile walks layerPaths from layerCursor toward 0 looking for
 // cleanPath as a regular file. The first layer that contains it returns
 // (data, nil); a whiteout or non-regular entry encountered before any regular
 // hit returns a typed error. cleanPath must already be cleaned by the caller
 // (no leading slash). Shared by DockerExtractor and ArchiveExtractor — the
 // only difference between the two is how they obtain layerPaths and blobs.
-func walkBackForFile(layerPaths []string, blobs map[string][]byte, cleanPath, displayPath string, layerCursor int) ([]byte, error) {
+//
+// load is invoked lazily, once per layer index visited, so the largest blob
+// resident in memory at any moment is the single blob currently being
+// scanned. This is the load-bearing memory bound for images with many large
+// layers (e.g. ML model images): the prior eager-load implementation pinned
+// every kept blob until the function returned, which OOMed on multi-GB
+// images.
+func walkBackForFile(layerPaths []string, load blobLoader, cleanPath, displayPath string, layerCursor int) ([]byte, error) {
 	for j := layerCursor; j >= 0; j-- {
-		blob := blobs[layerPaths[j]]
+		blob, err := load(layerPaths[j])
+		if err != nil {
+			return nil, err
+		}
 		if blob == nil {
 			continue
 		}
@@ -273,69 +299,93 @@ var errWhiteoutStop = errors.New("path removed by whiteout")
 // not whatever older regular file used to live there.
 var errPathNotRegular = errors.New("path exists but is not a regular file")
 
-// loadLayerTars exports the image via ImageSave and returns the ordered
-// manifest.Layers list along with raw (possibly gzipped) tar bytes for
-// only the first maxLayers entries.
+// loadLayerSource exports the image via ImageSave, spools it to a temp file,
+// parses the manifest, and returns:
+//   - layerPaths  : the manifest's ordered Layers list
+//   - load        : a blobLoader that reads one blob at a time from the spool
+//   - closeFn     : releases and removes the spool; the caller MUST defer it
 //
-// Memory bound: the ImageSave stream is spooled to a temp file (cleaned up
-// before return). After that, only the requested layers' bytes are held in
-// memory, so peak heap is on the order of the largest needed blob — not the
-// whole image. This matters for the TUI extraction path where mashing keys
-// can fire concurrent calls; without the cap an 8 GB image would peak at
-// 8 GB of heap per call.
+// Memory bound: peak heap during a walk-back is one blob — the largest blob
+// the walk happens to read — plus the manifest. The prior implementation
+// pre-read every blob up to the layer cursor into a map, which OOMed on
+// multi-GB ML-model images and on TUI key-mash sequences that fired
+// concurrent extracts.
 //
-// maxLayers must be > 0 and is clamped to len(manifest.Layers).
-func (e *DockerExtractor) loadLayerTars(ctx context.Context, imageRef string, maxLayers int) ([]string, map[string][]byte, error) {
+// maxLayers must be > 0; it bounds which manifest entries are eligible for
+// load. A request for an entry outside that prefix returns (nil, nil) —
+// indistinguishable from "manifest entry missing", because both are skipped
+// by walkBackForFile.
+func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, maxLayers int) (layerPaths []string, load blobLoader, closeFn func(), err error) {
+	if maxLayers <= 0 {
+		return nil, nil, nil, fmt.Errorf("loadLayerSource: maxLayers must be > 0, got %d", maxLayers)
+	}
+
 	rc, err := e.cli.ImageSave(ctx, []string{imageRef})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
+		return nil, nil, nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
 	defer rc.Close()
 
 	spool, err := os.CreateTemp("", "layerx-extract-*.tar")
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating temp spool: %w", err)
+		return nil, nil, nil, fmt.Errorf("creating temp spool: %w", err)
 	}
 	spoolPath := spool.Name()
-	defer os.Remove(spoolPath)
-	defer spool.Close()
+
+	// closeFn is the unified teardown so partial-failure paths below can call
+	// it once and return (nil, nil, nil, err) without leaking.
+	cleanup := func() {
+		_ = spool.Close()
+		_ = os.Remove(spoolPath)
+	}
 
 	if _, err := io.Copy(spool, rc); err != nil {
-		return nil, nil, fmt.Errorf("spooling image archive: %w", err)
+		cleanup()
+		return nil, nil, nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 
-	// Pass 1: parse manifest only. Blob bodies are streamed past via
-	// io.Copy(io.Discard, tr) — no allocation per blob.
 	manifestData, err := readManifestFromSpool(spool)
 	if err != nil {
-		return nil, nil, err
+		cleanup()
+		return nil, nil, nil, err
 	}
-
 	var manifests []dockerManifest
 	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return nil, nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
+		cleanup()
+		return nil, nil, nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
 	}
 	if len(manifests) == 0 {
-		return nil, nil, fmt.Errorf("invalid image archive: empty manifest")
+		cleanup()
+		return nil, nil, nil, fmt.Errorf("invalid image archive: empty manifest")
 	}
-	layerPaths := manifests[0].Layers
+	layerPaths = manifests[0].Layers
 
-	if maxLayers <= 0 {
-		return nil, nil, fmt.Errorf("loadLayerTars: maxLayers must be > 0, got %d", maxLayers)
-	}
 	keepCount := min(maxLayers, len(layerPaths))
 	keep := make(map[string]struct{}, keepCount)
 	for _, p := range layerPaths[:keepCount] {
 		keep[p] = struct{}{}
 	}
 
-	// Pass 2: read only blobs in the keep-set.
-	blobs, err := readBlobsFromSpool(spool, keep)
+	idx, err := scanBlobIndex(spool)
 	if err != nil {
-		return nil, nil, err
+		cleanup()
+		return nil, nil, nil, err
 	}
 
-	return layerPaths, blobs, nil
+	load = func(name string) ([]byte, error) {
+		if _, ok := keep[name]; !ok {
+			return nil, nil
+		}
+		size, present := idx[name]
+		if !present {
+			return nil, nil
+		}
+		if size > MaxLayerBlobSize {
+			return nil, fmt.Errorf("layer blob %s too large: %d bytes (limit %d)", name, size, MaxLayerBlobSize)
+		}
+		return readSingleBlobFromSpool(spool, name)
+	}
+	return layerPaths, load, cleanup, nil
 }
 
 // readManifestFromSpool walks the spooled outer tar from the beginning and
@@ -364,33 +414,82 @@ func readManifestFromSpool(spool *os.File) ([]byte, error) {
 	}
 }
 
-// readBlobsFromSpool walks the spooled outer tar from the beginning and
-// returns a map of name -> raw bytes for entries whose name is in keep.
-// Entries not in keep are streamed past without buffering.
-func readBlobsFromSpool(spool *os.File, keep map[string]struct{}) (map[string][]byte, error) {
+// readSingleBlobFromSpool walks the spooled outer tar from the beginning and
+// returns the bytes of the entry whose name equals wanted, or (nil, nil) if
+// the spool does not contain that entry. Other entries are streamed past
+// without buffering.
+//
+// The blob is bounded by MaxLayerBlobSize. A blob whose tar header declares
+// a size above the cap fails fast; an io.LimitReader on the body catches
+// streams whose declared size understates the actual length. The cap is
+// generous (16 GiB) — legitimate ML / dataset layers can exceed 1 GiB —
+// while still preventing runaway allocation from a malformed or hostile
+// archive.
+func readSingleBlobFromSpool(spool *os.File, wanted string) ([]byte, error) {
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek spool: %w", err)
 	}
-	blobs := make(map[string][]byte, len(keep))
 	tr := tar.NewReader(spool)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			break
+			return nil, nil
 		}
 		if err != nil {
 			return nil, fmt.Errorf("reading image archive: %w", err)
 		}
-		if _, want := keep[hdr.Name]; !want {
+		if hdr.Name != wanted {
 			continue
 		}
-		data, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+		if hdr.Size > MaxLayerBlobSize {
+			return nil, fmt.Errorf("layer blob %s too large: %d bytes (limit %d)", wanted, hdr.Size, MaxLayerBlobSize)
 		}
-		blobs[hdr.Name] = data
+		data, err := io.ReadAll(io.LimitReader(tr, MaxLayerBlobSize+1))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", wanted, err)
+		}
+		if int64(len(data)) > MaxLayerBlobSize {
+			return nil, fmt.Errorf("layer blob %s too large: stream exceeds %d bytes", wanted, MaxLayerBlobSize)
+		}
+		return data, nil
 	}
-	return blobs, nil
+}
+
+// blobIndex maps a blob name to its declared header.Size. The lazy loader
+// uses the size to early-reject oversized blobs before opening a tar reader,
+// and to short-circuit "blob is in the manifest but missing from the spool"
+// vs "blob exists but exceeds the cap" with distinct errors.
+//
+// Offset tracking is intentionally NOT included: tar.Reader does not expose
+// the post-header file position in a stable way across stdlib versions, and
+// rebuilding it via spool.Seek(SeekCurrent) after Next() is fragile (the
+// reader internally buffers). The index is the cheap-but-sufficient win:
+// one full scan to build the map, and from then on each load reseeks and
+// scans header-only until it finds the wanted name. Header scan is two
+// orders of magnitude cheaper than re-reading bodies, so an N-layer extract
+// does N header scans + 1 body read, not N body reads.
+type blobIndex map[string]int64
+
+// scanBlobIndex walks the spooled outer tar once, recording every entry's
+// declared size. Bodies are streamed past via io.Copy(io.Discard, tr) so
+// peak memory during the scan is the tar reader's internal buffer (~tens
+// of KB), not the sum of layer bodies.
+func scanBlobIndex(spool *os.File) (blobIndex, error) {
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek spool: %w", err)
+	}
+	idx := make(blobIndex)
+	tr := tar.NewReader(spool)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return idx, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("indexing image archive: %w", err)
+		}
+		idx[hdr.Name] = hdr.Size
+	}
 }
 
 // findFileInLayer walks one layer's tar bytes (decompressing if gzipped) and
@@ -534,10 +633,11 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, blobs, err := e.loadLayerTars(ctx, imageRef, layerCursor+1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(ctx, imageRef, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
+	defer closeFn()
 	if layerCursor >= len(layerPaths) {
 		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
 	}
@@ -547,7 +647,7 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	data, err := walkBackForFile(layerPaths, blobs, cleanPath, filePath, layerCursor)
+	data, err := walkBackForFile(layerPaths, load, cleanPath, filePath, layerCursor)
 	if err != nil {
 		return nil, err
 	}
@@ -560,10 +660,11 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, blobs, err := e.loadLayerTars(ctx, imageRef, layerCursor+1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(ctx, imageRef, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
+	defer closeFn()
 	if layerCursor >= len(layerPaths) {
 		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
 	}
@@ -573,5 +674,5 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	return walkBackForFile(layerPaths, blobs, cleanPath, filePath, layerCursor)
+	return walkBackForFile(layerPaths, load, cleanPath, filePath, layerCursor)
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -446,4 +447,31 @@ func TestWasteRenderCopyConfirm(t *testing.T) {
 	out := um.renderWasteOverlay()
 	assert.Contains(t, out, "Copied!", "copy banner shows in overlay")
 	assert.NotContains(t, out, "Enter jump", "footer hints replaced while copyConfirm")
+}
+
+// truncateLeft must respect display columns, not rune count. CJK ideographs
+// and wide emoji each occupy two cells, so a previous implementation that
+// kept the last (width-1) RUNES would emit (2*(width-1))+1 cells for a CJK
+// path — overflowing the column budget and corrupting the surrounding
+// table layout in the waste panel.
+func TestTruncateLeftCJKHonoursDisplayWidth(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		width int
+	}{
+		{name: "ascii under width", input: "/usr/bin/sh", width: 20},
+		{name: "ascii overflow", input: "/usr/bin/very/long/path/here", width: 12},
+		{name: "cjk overflow", input: "/データ/モデル/ファイル/large.bin", width: 12},
+		{name: "emoji overflow", input: "/folder/🎉🎉🎉🎉🎉/file.txt", width: 10},
+		{name: "mixed overflow", input: "/abc/データ/xyz.txt", width: 8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateLeft(tc.input, tc.width)
+			assert.LessOrEqual(t, lipgloss.Width(got), tc.width,
+				"truncateLeft(%q, %d) -> %q overflowed display width to %d cells",
+				tc.input, tc.width, got, lipgloss.Width(got))
+		})
+	}
 }
