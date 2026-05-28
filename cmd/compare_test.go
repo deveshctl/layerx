@@ -309,8 +309,8 @@ func TestRenderNoOp_PlainLanguageAndVerdict(t *testing.T) {
 	assert.Contains(t, out, "Both inputs resolve to the same image content")
 	assert.Contains(t, out, "no diff to show")
 	assert.Contains(t, out, "digest:")
-	// short digest shown
-	assert.Contains(t, out, "sha256:abcdef0123...")
+	// short digest shown (first 19 chars of input + "...")
+	assert.Contains(t, out, "sha256:abcdef012345...")
 	// full digest also shown so scripts can match
 	assert.Contains(t, out, "(full: sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789)")
 	// machine-parseable verdict line is preserved verbatim
@@ -321,7 +321,8 @@ func TestRenderNoOp_PlainLanguageAndVerdict(t *testing.T) {
 func TestShortDigest(t *testing.T) {
 	long := "sha256:abcdef0123456789ffffffffffffffffffff"
 	short := shortDigest(long)
-	assert.Equal(t, "sha256:abcdef0123...", short)
+	// First 19 runes of the input ("sha256:" + 12 hex chars) plus "...".
+	assert.Equal(t, "sha256:abcdef012345...", short)
 	// Inputs at or under the budget are returned as-is.
 	assert.Equal(t, "short", shortDigest("short"))
 }

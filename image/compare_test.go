@@ -403,7 +403,10 @@ func TestCompareAnalysis_IsRegression(t *testing.T) {
 	t.Run("wasted up", func(t *testing.T) {
 		r := &CompareResult{
 			BeforeEfficiency: EfficiencySummary{Score: 1.0, WastedBytes: 0},
-			AfterEfficiency:  EfficiencySummary{Score: 1.0, WastedBytes: 100},
+			AfterEfficiency: EfficiencySummary{
+				Score: 1.0, WastedBytes: 100,
+				WastedBytesDelta: 100,
+			},
 		}
 		assert.True(t, r.IsRegression())
 	})
@@ -411,7 +414,10 @@ func TestCompareAnalysis_IsRegression(t *testing.T) {
 	t.Run("score down beyond epsilon", func(t *testing.T) {
 		r := &CompareResult{
 			BeforeEfficiency: EfficiencySummary{Score: 0.95, WastedBytes: 50},
-			AfterEfficiency:  EfficiencySummary{Score: 0.80, WastedBytes: 50},
+			AfterEfficiency: EfficiencySummary{
+				Score: 0.80, WastedBytes: 50,
+				ScoreDelta: -0.15,
+			},
 		}
 		assert.True(t, r.IsRegression())
 	})
