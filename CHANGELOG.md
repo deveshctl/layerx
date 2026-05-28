@@ -22,6 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (default) shows the largest deltas with a "... and N more" counter, full
   prints every entry, summary keeps only the header and verdict.
 
+### Changed
+- `layerx compare` with no arguments now prints a short usage hint with
+  three concrete examples instead of an opaque "Error" line, so the
+  command is self-explanatory on first use.
+- `layerx compare` shows live progress on stderr while resolving remote
+  images — pulling, exporting, parsing, and the resolved digest are all
+  surfaced per side, so a slow registry pull is visibly active rather than
+  appearing stuck. Pipe `2>/dev/null` to silence; stdout stays grep-clean.
+- `layerx compare` no-op message (when both inputs resolve to the same
+  image content) is rewritten in plain language and shows both the short
+  and full digest. The machine-parseable `verdict: noop digest=...` line
+  is unchanged.
+- `layerx compare` table columns now align consistently across long paths
+  and commands, so the LAYERS, FILE CHANGES, and WASTE CHANGES sections
+  stay readable on real diffs.
+
 ## [v1.2.3] - 2026-05-28
 
 ### Added
