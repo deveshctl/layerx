@@ -324,6 +324,22 @@ func TestRenderNoOp_PlainLanguageAndVerdict(t *testing.T) {
 	assert.True(t, strings.HasSuffix(out, "\n"), "must end with newline")
 }
 
+// Empty digest path: archive resolvers don't always expose an ImageID, so the
+// path-equality short-circuit calls renderNoOp(out, ""). The verdict line must
+// stay parseable (`reason=path-equal`, no empty `digest=`) and the no-op body
+// must not print a stray "digest:" line with nothing after it.
+func TestRenderNoOp_EmptyDigestUsesPathEqualReason(t *testing.T) {
+	var buf bytes.Buffer
+	renderNoOp(&buf, "")
+	out := buf.String()
+
+	assert.Contains(t, out, "Both inputs resolve to the same image content")
+	assert.Contains(t, out, "verdict: noop reason=path-equal")
+	assert.NotContains(t, out, "digest=", "empty digest must not produce a digest= verdict")
+	assert.NotContains(t, out, "digest:", "empty digest must not print a stray short-digest line")
+	assert.True(t, strings.HasSuffix(out, "\n"), "must end with newline")
+}
+
 func TestShortDigest(t *testing.T) {
 	long := "sha256:abcdef0123456789ffffffffffffffffffff"
 	short := shortDigest(long)

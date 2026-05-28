@@ -156,7 +156,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		// the context explicitly rather than mutating ciCmd.SetContext —
 		// ciCmd is package-level state, and a leaked context outlives the
 		// invocation.
-		analysis, ciErr := executeCICheck(cmd.Context(), imageRef, cfg, ciCmd, noCache)
+		analysis, ciErr := executeCICheck(cmd.Context(), imageRef, cfg, ciCmd, noCache, true)
 		if flagJSON != "" {
 			var jsonErr error
 			switch {

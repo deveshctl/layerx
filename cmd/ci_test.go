@@ -62,12 +62,26 @@ func TestRunCICheckInner_RejectsAllRulesDisabled(t *testing.T) {
 	cmd.Flags().Int64Var(&hwb, "highest-wasted-bytes", 0, "")
 	cmd.Flags().Float64Var(&huwp, "highest-user-wasted-percent", 0, "")
 
-	analysis, err := runCICheckInner(context.Background(), "nginx:latest", cfg, cmd, false)
+	analysis, err := runCICheckInner(context.Background(), "nginx:latest", cfg, cmd, false, false)
 	require.Error(t, err)
 	assert.Nil(t, analysis)
 	assert.Contains(t, err.Error(), "no CI rules enabled")
+	assert.Contains(t, err.Error(), "--lowest-efficiency", "direct `layerx ci` invocation must surface flag names")
 	var ciFailed *ErrCIFailed
 	assert.False(t, errors.As(err, &ciFailed), "config error must not look like a rule failure")
+}
+
+// errNoCIRulesEnabled tailors the message based on how the user reached the
+// CI path: the `CI=true layerx IMG` shortcut runs through rootCmd, so naming
+// threshold flags is misleading (they belong to the ci subcommand). Lock the
+// branch so a future refactor doesn't collapse both messages.
+func TestErrNoCIRulesEnabled_MessagesDifferByPath(t *testing.T) {
+	direct := errNoCIRulesEnabled(false).Error()
+	viaEnv := errNoCIRulesEnabled(true).Error()
+
+	assert.Contains(t, direct, "--lowest-efficiency")
+	assert.Contains(t, viaEnv, "layerx ci`")
+	assert.NotEqual(t, direct, viaEnv, "messages must differ so the user gets path-appropriate guidance")
 }
 
 // --json must live on rootCmd's persistent flag set so it is inherited by

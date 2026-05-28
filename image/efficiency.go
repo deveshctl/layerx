@@ -154,14 +154,19 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	}
 }
 
-// indexTree populates idx with every non-whiteout node reachable from root,
-// keyed by FileNode.Path. The map is consumed by pathRuns for O(1) per-path
-// lookups across stacked snapshots. Hardlinks and whiteouts are skipped to
-// match walkFiles' notion of "real files" — pathRuns only ever asks for paths
-// walkFiles produced.
+// indexTree populates idx with every non-whiteout, non-hardlink leaf or
+// directory reachable from root, keyed by FileNode.Path. The map is consumed
+// by pathRuns for O(1) per-path lookups across stacked snapshots. Hardlinks
+// and whiteouts are skipped to match walkFiles' notion of "real files" —
+// pathRuns only ever asks for paths walkFiles produced, and including
+// hardlink nodes here would charge their (always-zero) size against
+// efficiency if a future caller ever fed a hardlink path in.
 func indexTree(node *FileNode, idx map[string]*FileNode) {
 	for _, child := range node.Children {
 		if isWhiteoutName(child.Name) {
+			continue
+		}
+		if !child.IsDir && child.IsHardlink {
 			continue
 		}
 		if child.Path != "" {
