@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/deveshctl/layerx/config"
-	"github.com/deveshctl/layerx/image"
 	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
@@ -27,35 +26,55 @@ func noCacheRequested() bool {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "layerx [flags] IMAGE",
+	Use:   "layerx [flags] IMAGE_OR_ARCHIVE",
 	Short: "Inspect Docker image layers",
-	Long: `Inspect a Docker image's layers, filesystem changes, and wasted bytes.
+	Long: `Inspect a container image's layers, filesystem changes, and wasted bytes.
 
 By default launches an interactive TUI for browsing layers, viewing file
-contents, and surfacing duplicated or removed files. Requires a running
-Docker daemon. Use --json to skip the TUI and export the analysis, or run
-"layerx ci" for non-interactive efficiency checks.
+contents, and surfacing duplicated or removed files.
+
+Inputs:
+  IMAGE_OR_ARCHIVE may be either a Docker image reference (e.g.
+  "nginx:latest" or "myregistry.io/team/app:1.2") or a path to a local
+  image archive produced by "docker save" or an OCI layout tarball. The
+  argument is auto-detected: an existing regular file is read directly
+  without contacting any container runtime; anything else is resolved via
+  the Docker daemon.
+
+  Archive mode requires no Docker daemon, no network, and no running
+  containers — useful in CI runners and air-gapped environments where the
+  image is already on disk.
+
+Use --json to skip the TUI and export the analysis, or run "layerx ci" for
+non-interactive efficiency checks. Both work with image refs and archive
+paths.
 
 Cache:
-  Analysis results are cached on disk under the user cache directory
-  (keyed by image digest) so repeat runs skip re-parsing layer tarballs.
-  Use --no-cache to bypass the cache for a single run; the run still
-  refreshes the cache on success.
+  Analysis results are cached on disk so repeat runs against an unchanged
+  image are near-instant. Use --no-cache to bypass the cache for a single
+  run; the run still refreshes the cache on success.
 
 Environment:
-  CI=true   When set, "layerx IMAGE" runs the ci subcommand with default
-            (or config-file) thresholds instead of launching the TUI.
-            Useful for pipelines that invoke layerx without a subcommand.
-            To override thresholds on the command line, invoke the ci
-            subcommand directly: "layerx ci --lowest-efficiency 0.95 IMG".`,
-	Example: `  # Inspect an image interactively
+  CI=true   When set, "layerx IMAGE_OR_ARCHIVE" runs the ci subcommand with
+            default (or config-file) thresholds instead of launching the
+            TUI. Useful for pipelines that invoke layerx without a
+            subcommand. To override thresholds on the command line, invoke
+            the ci subcommand directly:
+            "layerx ci --lowest-efficiency 0.95 IMG".`,
+	Example: `  # Inspect an image interactively (Docker daemon required)
   layerx nginx:latest
+
+  # Inspect a local archive produced by "docker save" (no daemon required)
+  layerx ./build/app.tar
+
+  # Inspect an OCI layout tarball
+  layerx /tmp/myimage-oci.tar
 
   # Force a fresh analysis, ignoring any cached result
   layerx --no-cache nginx:latest
 
-  # Export analysis as JSON (skips the TUI)
-  layerx --json out.json nginx:latest
+  # Export analysis as JSON (skips the TUI; works with archives too)
+  layerx --json out.json ./build/app.tar
 
   # Run efficiency checks (also triggered by CI=true)
   layerx ci nginx:latest`,
@@ -143,9 +162,9 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return runJSONExport(imageRef, flagJSON, noCache)
 	}
 
-	resolver, err := image.NewDockerResolver()
+	resolver, err := selectResolver(imageRef)
 	if err != nil {
-		return fmt.Errorf("failed to initialize: %w", err)
+		return err
 	}
 
 	return tui.Run(tui.Config{

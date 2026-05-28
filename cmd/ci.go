@@ -31,9 +31,14 @@ var (
 )
 
 var ciCmd = &cobra.Command{
-	Use:   "ci [flags] IMAGE",
+	Use:   "ci [flags] IMAGE_OR_ARCHIVE",
 	Short: "Run efficiency checks for CI pipelines",
 	Long: `Evaluate image efficiency against configurable thresholds.
+
+Accepts either a Docker image reference or a path to a local image archive
+(docker save / OCI layout tarball). Archive mode requires no Docker daemon —
+useful in CI runners that already produced the artifact and want to avoid
+loading it into an engine just to inspect it.
 
 Exits 0 when all rules pass, 1 when any rule fails. Output is plain text
 suitable for CI logs.
@@ -41,7 +46,7 @@ suitable for CI logs.
 Exit codes:
   0  all rules passed
   1  one or more rules failed
-  2  internal error (Docker daemon down, malformed config, etc.)
+  2  internal error (Docker daemon down, archive not found, malformed config, etc.)
 
 Thresholds can be set via flags or a .layerx.yaml file in the working
 directory. Flags take precedence over config values. A missing config
@@ -58,6 +63,9 @@ Cache:
   re-parse the image after a rebuild within the same digest).`,
 	Example: `  # Run with default thresholds (lowest-efficiency: 0.9)
   layerx ci nginx:latest
+
+  # Inspect a local archive in CI (no daemon required)
+  layerx ci ./build/app.tar
 
   # Override a single threshold
   layerx ci --lowest-efficiency 0.95 nginx:latest
@@ -129,9 +137,9 @@ func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noC
 }
 
 func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
-	resolver, err := image.NewDockerResolver()
+	resolver, err := selectResolver(imageRef)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize: %w", err)
+		return nil, err
 	}
 
 	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,

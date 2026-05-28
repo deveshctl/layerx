@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Inspect local image archives without a Docker daemon: pass a path to a
+  `docker save` tarball or OCI layout tarball (e.g. `layerx ./build/app.tar`)
+  and LayerX reads the file directly. Works for the TUI, `--json` export,
+  and `layerx ci`. Useful in CI runners and air-gapped environments where
+  the image is already on disk and starting a daemon is unwanted.
+- Auto-detection: any argument that resolves to an existing regular file
+  is opened as an archive; everything else still goes through the Docker
+  daemon. No new flags; existing `layerx nginx:latest` workflows are
+  unchanged.
+- File content viewer and save-to-disk (`x`) work in archive mode too —
+  full feature parity with daemon-backed inspection.
+
+### Changed
+- Manually-built binaries (`go build` from source) now include the git commit and build date in `--version` output, picked up automatically from the metadata Go embeds at build time. Release builds and source-tarball checkouts without git history are unchanged.
+
+### Fixed
+- Clearer errors for archive mode: a missing path reports "Archive not
+  found" instead of a generic Docker error; a malformed tarball reports
+  "Not a valid image archive" instead of a low-level parse error. A
+  permission-denied archive now reports "Permission denied" instead of
+  being mislabelled as "not found".
+- Saving or viewing a file from a layer enforces the same 2 GiB cap as
+  the daemon-backed copy path. A crafted tar entry with an inflated
+  size header can no longer make LayerX exhaust memory.
+- Archive image-size readout (shown during loading) now sums only the
+  layer blobs declared in the manifest, not unrelated tar entries like
+  `manifest.json` and the config blob.
+
 ## [v1.2.2] - 2026-05-26
 
 A correctness and reliability release across the TUI, CI mode, config, and

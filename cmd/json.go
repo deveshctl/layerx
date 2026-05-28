@@ -46,9 +46,9 @@ type jsonFile struct {
 }
 
 func runJSONExport(imageRef, outputPath string, noCache bool) error {
-	resolver, err := image.NewDockerResolver()
+	resolver, err := selectResolver(imageRef)
 	if err != nil {
-		return fmt.Errorf("failed to initialize: %w", err)
+		return err
 	}
 
 	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,

@@ -33,3 +33,62 @@ func (e *ErrPullFailed) Error() string {
 }
 
 func (e *ErrPullFailed) Unwrap() error { return e.Cause }
+
+// ErrArchiveNotFound is returned when the archive file path does not exist
+// or is not a regular file. Distinct from ErrInvalidArchive so callers can
+// give a different message for "wrong path" vs "wrong contents".
+type ErrArchiveNotFound struct {
+	Path  string
+	Cause error
+}
+
+func (e *ErrArchiveNotFound) Error() string {
+	return fmt.Sprintf("archive %q not found: %v", e.Path, e.Cause)
+}
+
+func (e *ErrArchiveNotFound) Unwrap() error { return e.Cause }
+
+// ErrArchivePermission is returned when the archive file exists but the
+// current user cannot open it (permission denied). Distinct from
+// ErrArchiveNotFound so the user sees "fix your permissions" rather than
+// "fix your path".
+type ErrArchivePermission struct {
+	Path  string
+	Cause error
+}
+
+func (e *ErrArchivePermission) Error() string {
+	return fmt.Sprintf("permission denied opening archive %q: %v", e.Path, e.Cause)
+}
+
+func (e *ErrArchivePermission) Unwrap() error { return e.Cause }
+
+// ErrInvalidArchive is returned when the file exists and is readable but is
+// not a valid docker-save / OCI image archive (missing manifest.json,
+// malformed manifest, malformed config, etc).
+type ErrInvalidArchive struct {
+	Path  string
+	Cause error
+}
+
+func (e *ErrInvalidArchive) Error() string {
+	return fmt.Sprintf("not a valid image archive %q: %v", e.Path, e.Cause)
+}
+
+func (e *ErrInvalidArchive) Unwrap() error { return e.Cause }
+
+// ErrArchiveInfra signals an infrastructure-class failure encountered while
+// processing an archive: temp file creation, disk-full while spooling, etc.
+// Distinct from ErrInvalidArchive — the archive may be perfectly valid; the
+// host environment failed. Callers should surface the cause directly rather
+// than telling the user their tarball is malformed.
+type ErrArchiveInfra struct {
+	Op    string
+	Cause error
+}
+
+func (e *ErrArchiveInfra) Error() string {
+	return fmt.Sprintf("%s: %v", e.Op, e.Cause)
+}
+
+func (e *ErrArchiveInfra) Unwrap() error { return e.Cause }

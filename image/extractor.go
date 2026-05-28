@@ -232,6 +232,35 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	}
 }
 
+// walkBackForFile walks layerPaths from layerCursor toward 0 looking for
+// cleanPath as a regular file. The first layer that contains it returns
+// (data, nil); a whiteout or non-regular entry encountered before any regular
+// hit returns a typed error. cleanPath must already be cleaned by the caller
+// (no leading slash). Shared by DockerExtractor and ArchiveExtractor — the
+// only difference between the two is how they obtain layerPaths and blobs.
+func walkBackForFile(layerPaths []string, blobs map[string][]byte, cleanPath, displayPath string, layerCursor int) ([]byte, error) {
+	for j := layerCursor; j >= 0; j-- {
+		blob := blobs[layerPaths[j]]
+		if blob == nil {
+			continue
+		}
+		data, found, err := findFileInLayer(blob, cleanPath)
+		if errors.Is(err, errWhiteoutStop) {
+			return nil, fmt.Errorf("file %s was removed in layer %d", displayPath, j)
+		}
+		if errors.Is(err, errPathNotRegular) {
+			return nil, fmt.Errorf("file %s is not a regular file at layer %d", displayPath, j)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("file %s not found in any layer up to %d", displayPath, layerCursor)
+}
+
 // errWhiteoutStop signals that the requested path was whiteouted in a layer
 // encountered during walk-back. The caller surfaces this as a "removed in
 // layer" error rather than continuing the walk.
@@ -443,9 +472,19 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			continue
 		}
 
-		data, err := io.ReadAll(tr)
+		// Bound the read so a crafted tar (header.Size inflated, or stream
+		// longer than declared) can't OOM the process. Mirrors the cap in
+		// readFullFileFromTar — fail-fast on header, then LimitReader as
+		// belt-and-braces for streams that exceed their declared size.
+		if hdr.Size > MaxSaveSize {
+			return nil, false, fmt.Errorf("file too large to extract: %d bytes (limit %d)", hdr.Size, MaxSaveSize)
+		}
+		data, err := io.ReadAll(io.LimitReader(tr, MaxSaveSize+1))
 		if err != nil {
 			return nil, false, fmt.Errorf("reading file from layer: %w", err)
+		}
+		if int64(len(data)) > MaxSaveSize {
+			return nil, false, fmt.Errorf("file too large to extract: exceeds %d bytes", MaxSaveSize)
 		}
 		regularData = data
 		foundRegular = true
@@ -508,26 +547,11 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	for j := layerCursor; j >= 0; j-- {
-		blob := blobs[layerPaths[j]]
-		if blob == nil {
-			continue
-		}
-		data, found, err := findFileInLayer(blob, cleanPath)
-		if errors.Is(err, errWhiteoutStop) {
-			return nil, fmt.Errorf("file %s was removed in layer %d", filePath, j)
-		}
-		if errors.Is(err, errPathNotRegular) {
-			return nil, fmt.Errorf("file %s is not a regular file at layer %d", filePath, j)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			return processContent(filePath, data, int64(len(data))), nil
-		}
+	data, err := walkBackForFile(layerPaths, blobs, cleanPath, filePath, layerCursor)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("file %s not found in any layer up to %d", filePath, layerCursor)
+	return processContent(filePath, data, int64(len(data))), nil
 }
 
 // ExtractRawFromLayer is the raw-bytes variant of ExtractFromLayer.
@@ -549,24 +573,5 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	for j := layerCursor; j >= 0; j-- {
-		blob := blobs[layerPaths[j]]
-		if blob == nil {
-			continue
-		}
-		data, found, err := findFileInLayer(blob, cleanPath)
-		if errors.Is(err, errWhiteoutStop) {
-			return nil, fmt.Errorf("file %s was removed in layer %d", filePath, j)
-		}
-		if errors.Is(err, errPathNotRegular) {
-			return nil, fmt.Errorf("file %s is not a regular file at layer %d", filePath, j)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			return data, nil
-		}
-	}
-	return nil, fmt.Errorf("file %s not found in any layer up to %d", filePath, layerCursor)
+	return walkBackForFile(layerPaths, blobs, cleanPath, filePath, layerCursor)
 }
