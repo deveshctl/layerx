@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.3] - 2026-05-28
+
 ### Added
 - Inspect local image archives without a Docker daemon: pass a path to a
   `docker save` tarball or OCI layout tarball (e.g. `layerx ./build/app.tar`)
