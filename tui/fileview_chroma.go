@@ -52,9 +52,25 @@ func highlightFileLines(path string, data []byte) []string {
 		return nil
 	}
 
-	out := strings.TrimSuffix(buf.String(), "\n")
-	if out == "" {
-		return []string{""}
+	// Match splitFileLines' empty-input contract: whitespace-only data
+	// (or empty data) splits to a nil slice, not []string{""}. Returning
+	// the latter would desync line counts against the non-highlighted
+	// renderer the moment the file viewer hits an empty/whitespace blob.
+	plain := splitFileLines(data)
+	if len(plain) == 0 {
+		return nil
 	}
-	return strings.Split(out, "\n")
+
+	out := strings.TrimSuffix(buf.String(), "\n")
+	var highlighted []string
+	if out != "" {
+		highlighted = strings.Split(out, "\n")
+	}
+	if len(highlighted) != len(plain) {
+		// Length mismatch would desync search/jump indexing against
+		// splitFileLines. Drop highlighting; the non-highlighted path
+		// will render the same lines without color.
+		return nil
+	}
+	return highlighted
 }

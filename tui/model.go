@@ -309,7 +309,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = stateReady
 		m.analysis = msg.analysis
-		m.efficiency = image.Efficiency(msg.analysis.Layers)
+		m.efficiency = image.EfficiencyFromAnalysis(msg.analysis)
 		if src, ok := m.resolver.(image.ExtractorSource); ok {
 			m.extractor = src.NewExtractor()
 		}

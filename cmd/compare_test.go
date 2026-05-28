@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -180,6 +181,11 @@ func TestValidateCompareFlags(t *testing.T) {
 		{"top above max", compareModeCompact, compareTopMax + 1, true},
 		{"top at min", compareModeCompact, compareTopMin, false},
 		{"top at max", compareModeCompact, compareTopMax, false},
+		// --top is documented as ignored in summary/full modes; passing an
+		// out-of-range value must not surface an error in those modes.
+		{"summary mode ignores top=0", compareModeSummary, 0, false},
+		{"full mode ignores top=0", compareModeFull, 0, false},
+		{"summary mode ignores oversized top", compareModeSummary, compareTopMax + 100, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -315,6 +321,22 @@ func TestRenderNoOp_PlainLanguageAndVerdict(t *testing.T) {
 	assert.Contains(t, out, "(full: sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789)")
 	// machine-parseable verdict line is preserved verbatim
 	assert.Contains(t, out, "verdict: noop digest=sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+	assert.True(t, strings.HasSuffix(out, "\n"), "must end with newline")
+}
+
+// Empty digest path: archive resolvers don't always expose an ImageID, so the
+// path-equality short-circuit calls renderNoOp(out, ""). The verdict line must
+// stay parseable (`reason=path-equal`, no empty `digest=`) and the no-op body
+// must not print a stray "digest:" line with nothing after it.
+func TestRenderNoOp_EmptyDigestUsesPathEqualReason(t *testing.T) {
+	var buf bytes.Buffer
+	renderNoOp(&buf, "")
+	out := buf.String()
+
+	assert.Contains(t, out, "Both inputs resolve to the same image content")
+	assert.Contains(t, out, "verdict: noop reason=path-equal")
+	assert.NotContains(t, out, "digest=", "empty digest must not produce a digest= verdict")
+	assert.NotContains(t, out, "digest:", "empty digest must not print a stray short-digest line")
 	assert.True(t, strings.HasSuffix(out, "\n"), "must end with newline")
 }
 
@@ -496,4 +518,60 @@ func TestRenderCompareReport_NoOpHelperDirectly(t *testing.T) {
 	last := lastLine(out)
 	assert.True(t, strings.HasPrefix(last, "verdict: noop digest=sha256:"),
 		"final line must be machine-parseable verdict; got %q", last)
+}
+
+// fakeResolver is a minimal Resolver for testing analyzeForCompare's wiring.
+// All methods return defaults; tests substitute hooks via the function fields.
+type fakeResolver struct {
+	resolveFn func(ctx context.Context, ref string, progress chan<- image.ProgressEvent) ([]image.Layer, error)
+	imageIDFn func(ctx context.Context, ref string) (string, error)
+}
+
+func (f *fakeResolver) Resolve(ctx context.Context, ref string) ([]image.Layer, error) {
+	return f.ResolveWithProgress(ctx, ref, nil)
+}
+func (f *fakeResolver) ResolveWithProgress(ctx context.Context, ref string, p chan<- image.ProgressEvent) ([]image.Layer, error) {
+	if f.resolveFn != nil {
+		return f.resolveFn(ctx, ref, p)
+	}
+	return nil, nil
+}
+func (f *fakeResolver) Inspect(ctx context.Context, ref string) (*image.ImageMeta, error) {
+	return &image.ImageMeta{}, nil
+}
+func (f *fakeResolver) ImageID(ctx context.Context, ref string) (string, error) {
+	if f.imageIDFn != nil {
+		return f.imageIDFn(ctx, ref)
+	}
+	return "", nil
+}
+
+// analyzeForCompare must close(progress) on every exit path so the drain
+// goroutine isn't leaked. Use a panicking resolver to exercise the
+// defer-close behavior.
+func TestAnalyzeForCompare_PanicInResolverUnwindsCleanly(t *testing.T) {
+	res := &fakeResolver{
+		resolveFn: func(ctx context.Context, ref string, p chan<- image.ProgressEvent) ([]image.Layer, error) {
+			panic("simulated resolver crash")
+		},
+	}
+	var stderr bytes.Buffer
+	done := make(chan struct{})
+	var panicked bool
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+			close(done)
+		}()
+		_, _, _ = analyzeForCompare(context.Background(), res, "x", false, "old", &stderr)
+	}()
+	select {
+	case <-done:
+		// expected — defer wg.Wait() / defer close(progress) unwound the goroutine.
+	case <-time.After(2 * time.Second):
+		t.Fatal("analyzeForCompare did not unwind within 2s — drain goroutine likely deadlocked")
+	}
+	assert.True(t, panicked, "panic must propagate out of analyzeForCompare")
 }

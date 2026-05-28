@@ -138,3 +138,139 @@ func TestEfficiency_StableOrderOnEqualWaste(t *testing.T) {
 		assert.Equal(t, "/c", result.WastedFiles[2].Path)
 	}
 }
+
+// install_clean_reinstall: a file is added, deleted via whiteout, and a
+// different file appears at the same path. The two distinct files live in
+// separate runs and neither is wasted. Pre-Round-8 the algorithm counted
+// both copies as a duplicate occurrence of the same path and flagged the
+// first as waste — the canonical apt-get install + apt-get clean +
+// apt-get install bug.
+func TestEfficiency_InstallCleanReinstall_NoWaste(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 100, Tree: makeTree(
+			makeDir("var", "/var",
+				makeFile("x", "/var/x", 100),
+			),
+		)},
+		{Index: 1, Size: 0, Tree: makeTree(
+			makeDir("var", "/var",
+				makeFile(".wh.x", "/var/.wh.x", 0),
+			),
+		)},
+		{Index: 2, Size: 60, Tree: makeTree(
+			makeDir("var", "/var",
+				makeFile("x", "/var/x", 60),
+			),
+		)},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(0), result.WastedBytes,
+		"a deletion between two writes means the first copy was properly cleaned up — not wasted")
+	assert.Empty(t, result.WastedFiles)
+}
+
+// duplicate_in_same_run: a file is added, then modified in the next layer
+// without any deletion in between. The first copy is shadowed by the second
+// — that is wasted bytes.
+func TestEfficiency_DuplicateInSameRun_IsWasted(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 100, Tree: makeTree(
+			makeDir("etc", "/etc",
+				makeFile("x", "/etc/x", 100),
+			),
+		)},
+		{Index: 1, Size: 100, Tree: makeTree(
+			makeDir("etc", "/etc",
+				makeFile("x", "/etc/x", 100),
+			),
+		)},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(100), result.WastedBytes)
+	require.Len(t, result.WastedFiles, 1)
+	assert.Equal(t, "/etc/x", result.WastedFiles[0].Path)
+	assert.Equal(t, int64(100), result.WastedFiles[0].TotalWasted)
+}
+
+// install -> modify -> clean -> reinstall: only the install->modify pair
+// inside the first run contributes waste; the post-clean reinstall is a
+// fresh run with one occurrence (no waste).
+func TestEfficiency_InstallModifyCleanReinstall_OnlyFirstRunWasted(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 100, Tree: makeTree(
+			makeDir("etc", "/etc",
+				makeFile("x", "/etc/x", 100),
+			),
+		)},
+		{Index: 1, Size: 80, Tree: makeTree(
+			makeDir("etc", "/etc",
+				makeFile("x", "/etc/x", 80),
+			),
+		)},
+		{Index: 2, Size: 0, Tree: makeTree(
+			makeDir("etc", "/etc",
+				makeFile(".wh.x", "/etc/.wh.x", 0),
+			),
+		)},
+		{Index: 3, Size: 60, Tree: makeTree(
+			makeDir("etc", "/etc",
+				makeFile("x", "/etc/x", 60),
+			),
+		)},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(100), result.WastedBytes,
+		"first run has occurrences (0,100)+(1,80); only the size-100 layer-0 copy is shadowed; the post-clean reinstall starts a new run")
+}
+
+// Opaque whiteout breaks a run just like an explicit per-file whiteout.
+func TestEfficiency_OpaqueWhiteout_BreaksRun(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 100, Tree: makeTree(
+			makeDir("var", "/var",
+				makeDir("cache", "/var/cache",
+					makeFile("x", "/var/cache/x", 100),
+				),
+			),
+		)},
+		{Index: 1, Size: 0, Tree: makeTree(
+			makeDir("var", "/var",
+				makeDir("cache", "/var/cache",
+					makeFile(".wh..wh..opq", "/var/cache/.wh..wh..opq", 0),
+				),
+			),
+		)},
+		{Index: 2, Size: 60, Tree: makeTree(
+			makeDir("var", "/var",
+				makeDir("cache", "/var/cache",
+					makeFile("x", "/var/cache/x", 60),
+				),
+			),
+		)},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(0), result.WastedBytes,
+		"opaque whiteout should reset run; the post-opaque copy is fresh")
+}
+
+// EfficiencyFromAnalysis must agree with Efficiency on the same inputs and
+// avoid the redundant Stack call.
+func TestEfficiencyFromAnalysis_MatchesEfficiency(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 100, Tree: makeTree(
+			makeFile("x", "/x", 100),
+		)},
+		{Index: 1, Size: 200, Tree: makeTree(
+			makeFile("x", "/x", 200),
+		)},
+	}
+	stacked := Stack(layers)
+	a := &Analysis{Layers: layers, StackedTrees: stacked}
+
+	fromAnalysis := EfficiencyFromAnalysis(a)
+	fromLayers := Efficiency(layers)
+
+	assert.Equal(t, fromLayers.WastedBytes, fromAnalysis.WastedBytes)
+	assert.InDelta(t, fromLayers.Score, fromAnalysis.Score, 0.0001)
+	assert.Equal(t, fromLayers.WastedFiles, fromAnalysis.WastedFiles)
+}

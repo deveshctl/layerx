@@ -119,3 +119,12 @@ func TestFinalLiveSize_SumsNetDeltas(t *testing.T) {
 	m.analysis.Layers[2].NetDelta = -20
 	assert.Equal(t, int64(130), m.finalLiveSize())
 }
+
+func TestWrapCommandLines_BreaksAtMidpointSpace(t *testing.T) {
+	// width=10, midpoint=5. The space at index 5 IS the midpoint and
+	// must qualify as a break point. The old `j > width/2` loop missed
+	// j == width/2 and fell through to the hard cut at width.
+	got := wrapCommandLines("abcde fghij", 10, 2)
+	assert.Equal(t, "abcde", got[0])
+	assert.Equal(t, "fghij", got[1])
+}

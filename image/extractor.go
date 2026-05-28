@@ -177,7 +177,7 @@ func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("no file found in tar stream")
 		}
 		if err != nil {
@@ -209,7 +209,7 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("no file found in tar stream")
 		}
 		if err != nil {
@@ -348,7 +348,7 @@ func readManifestFromSpool(spool *os.File) ([]byte, error) {
 	tr := tar.NewReader(spool)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("invalid image archive: manifest.json not found")
 		}
 		if err != nil {
@@ -375,7 +375,7 @@ func readBlobsFromSpool(spool *os.File, keep map[string]struct{}) (map[string][]
 	tr := tar.NewReader(spool)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

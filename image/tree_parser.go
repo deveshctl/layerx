@@ -2,6 +2,7 @@ package image
 
 import (
 	"archive/tar"
+	"errors"
 	"io"
 	"io/fs"
 	"path"
@@ -15,7 +16,7 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

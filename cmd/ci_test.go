@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/deveshctl/layerx/config"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildRules_DisablesLowestEfficiencyOnZeroOrNegative(t *testing.T) {
@@ -42,6 +44,44 @@ func TestErrCIFailed_DetectableThroughWrapping(t *testing.T) {
 	assert.True(t, errors.As(wrapped, &got), "wrapped sentinel must match")
 	assert.False(t, errors.As(errors.New("unrelated"), &got), "plain errors must not match")
 	assert.False(t, errors.As(fmt.Errorf("docker daemon down"), &got), "internal errors must not match")
+}
+
+// runCICheckInner must reject a config that disables every rule rather than
+// silently exit 0 on a bloated image. Without the guard the rules slice is
+// empty, ci.Evaluate's Passed defaults to true, and CI greenlights anything.
+func TestRunCICheckInner_RejectsAllRulesDisabled(t *testing.T) {
+	cfg := &config.Config{Rules: config.RulesConfig{
+		LowestEfficiency:         0,
+		HighestWastedBytes:       0,
+		HighestUserWastedPercent: 0,
+	}}
+	cmd := &cobra.Command{}
+	var le, huwp float64
+	var hwb int64
+	cmd.Flags().Float64Var(&le, "lowest-efficiency", 0, "")
+	cmd.Flags().Int64Var(&hwb, "highest-wasted-bytes", 0, "")
+	cmd.Flags().Float64Var(&huwp, "highest-user-wasted-percent", 0, "")
+
+	analysis, err := runCICheckInner(context.Background(), "nginx:latest", cfg, cmd, false, false)
+	require.Error(t, err)
+	assert.Nil(t, analysis)
+	assert.Contains(t, err.Error(), "no CI rules enabled")
+	assert.Contains(t, err.Error(), "--lowest-efficiency", "direct `layerx ci` invocation must surface flag names")
+	var ciFailed *ErrCIFailed
+	assert.False(t, errors.As(err, &ciFailed), "config error must not look like a rule failure")
+}
+
+// errNoCIRulesEnabled tailors the message based on how the user reached the
+// CI path: the `CI=true layerx IMG` shortcut runs through rootCmd, so naming
+// threshold flags is misleading (they belong to the ci subcommand). Lock the
+// branch so a future refactor doesn't collapse both messages.
+func TestErrNoCIRulesEnabled_MessagesDifferByPath(t *testing.T) {
+	direct := errNoCIRulesEnabled(false).Error()
+	viaEnv := errNoCIRulesEnabled(true).Error()
+
+	assert.Contains(t, direct, "--lowest-efficiency")
+	assert.Contains(t, viaEnv, "layerx ci`")
+	assert.NotEqual(t, direct, viaEnv, "messages must differ so the user gets path-appropriate guidance")
 }
 
 // --json must live on rootCmd's persistent flag set so it is inherited by

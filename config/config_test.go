@@ -99,3 +99,36 @@ func TestLoadFrom_RejectsNegativeWastedBytes(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "highest-wasted-bytes")
 }
+
+// keybindings is a documented (M12) top-level key. Strict YAML must accept it
+// so users following CLAUDE.md examples don't get their whole config rejected
+// when they include a keybindings block alongside rules.
+func TestLoadFrom_AcceptsKeybindingsBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  lowest-efficiency: 0.95
+keybindings:
+  quit: q
+  filter: /
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	assert.Equal(t, 0.95, cfg.Rules.LowestEfficiency)
+	assert.Equal(t, "q", cfg.Keybindings["quit"])
+	assert.Equal(t, "/", cfg.Keybindings["filter"])
+}
+
+// Strict mode must still reject genuinely unknown top-level keys so typos in
+// rules/keybindings names surface instead of silently being ignored.
+func TestLoadFrom_RejectsUnknownTopLevelKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`ruels:
+  lowest-efficiency: 0.9
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+}

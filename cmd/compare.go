@@ -77,6 +77,7 @@ Output ends with a single machine-parseable verdict line:
   verdict: ok
   verdict: regression reason=<comma-separated reasons>
   verdict: noop digest=<sha256...>
+  verdict: noop reason=path-equal       (archive paths matched without a digest)
 
 Progress messages (image pulls, exports) are written to stderr so the
 report on stdout stays grep-clean for CI gating. Pipe "2>/dev/null" to
@@ -170,11 +171,21 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 	noCache := noCacheRequested()
 
 	out := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
+
+	// Path-equality short-circuit: identical archive paths trivially resolve
+	// to the same content. The digest-based check below catches this too when
+	// the archive's ImageID is observable, but archive resolvers don't always
+	// expose a digest (e.g. malformed manifests, OCI variants), and a cheap
+	// path comparison gets us out before two full analyses.
+	if oldRef == newRef && isRegularFilePath(oldRef) {
+		renderNoOp(out, "")
+		return nil
+	}
 
 	// Fast path: try ImageID for both refs without analyzing. For archives
 	// and already-pulled Docker images this is cheap; if either side requires
@@ -227,7 +238,9 @@ func validateCompareFlags(mode string, top int) error {
 	default:
 		return fmt.Errorf("--mode must be one of compact|full|summary; got %q", mode)
 	}
-	if top < compareTopMin || top > compareTopMax {
+	// --top is only consulted in compact mode; let summary/full pass through
+	// any value (including 0) without rejecting them, matching the help text.
+	if mode == compareModeCompact && (top < compareTopMin || top > compareTopMax) {
 		return fmt.Errorf("--top must be in [%d, %d]; got %d", compareTopMin, compareTopMax, top)
 	}
 	return nil
@@ -245,13 +258,17 @@ func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string,
 	wg.Go(func() {
 		drainProgress(stderr, side, ref, progress)
 	})
+	// LIFO order matters: defer wg.Wait() registers FIRST so it runs LAST,
+	// after defer close(progress) has unblocked the drain goroutine. If
+	// AnalyzeWithOptions panics or returns through any future early-return
+	// path, the goroutine still exits and we don't deadlock.
+	defer wg.Wait()
+	defer close(progress)
 
 	analysis, err := image.AnalyzeWithOptions(ctx, resolver, ref, image.AnalyzeOptions{
 		NoCache:  noCache,
 		Progress: progress,
 	})
-	close(progress)
-	wg.Wait()
 
 	if err != nil {
 		return "", nil, err
@@ -344,12 +361,17 @@ func shortDigest(d string) string {
 
 // renderNoOp prints the same-digest message in plain language followed by the
 // machine-parseable verdict line. exit code stays 0; callers return nil.
+// When digest is empty (e.g. path-equality short-circuit on archives whose
+// resolvers can't expose an ImageID), the verdict line uses reason=path-equal
+// so parsers don't see an empty digest= value.
 func renderNoOp(w io.Writer, digest string) {
 	fmt.Fprintln(w, "Both inputs resolve to the same image content - no diff to show.")
 	if digest != "" {
 		fmt.Fprintf(w, "  digest: %s  (full: %s)\n", shortDigest(digest), digest)
+		fmt.Fprintf(w, "verdict: noop digest=%s\n", digest)
+		return
 	}
-	fmt.Fprintf(w, "verdict: noop digest=%s\n", digest)
+	fmt.Fprintln(w, "verdict: noop reason=path-equal")
 }
 
 // renderCompareReport writes a deterministic text report. The verdict line

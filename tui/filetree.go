@@ -217,7 +217,7 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 		fullName = ansi.Truncate(fullName, availableForName, "…")
 	}
 
-	nameWidth := len([]rune(fullName)) + len([]rune(originSuffix))
+	nameWidth := lipgloss.Width(fullName) + lipgloss.Width(originSuffix)
 	namePad := max(nameSpace-nameWidth, 0)
 
 	var diffGlyph string

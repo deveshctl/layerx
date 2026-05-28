@@ -38,6 +38,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and commands, so the LAYERS, FILE CHANGES, and WASTE CHANGES sections
   stay readable on real diffs.
 
+### Fixed
+- Ctrl+C now cancels `layerx ci`, `--json`, and `layerx compare` while a
+  slow image pull, export, or parse is in progress. Previously the process
+  hung until the operation completed even after the interrupt was sent.
+- CI mode no longer silently passes when every threshold is disabled.
+  Setting all of `lowest-efficiency`, `highest-wasted-bytes`, and
+  `highest-user-wasted-percent` to 0 (or omitting them all) now exits 2
+  with a clear message naming each flag and the config key.
+- `.layerx.yaml` files containing a `keybindings:` block now load
+  successfully. Strict mode previously rejected the entire config — rules
+  and all — when this section was present.
+- Efficiency scores no longer charge waste for files that were deleted
+  between layers and a different file with the same path was added later
+  (`apt-get install` → `apt-get clean` → reinstall). Each delete-then-readd
+  cycle is now treated as a separate run, so only true duplicates within a
+  single run count toward wasted bytes.
+- `wasted %` rule output now reads as a percent. The rule used to print
+  the raw fraction (e.g. `0.10`) labelled as a percent; it now renders as
+  `10.0%` in both Actual and Threshold columns. The `efficiency` rule
+  matches the same format (`92.5%`) so all three rules agree.
+- `layerx compare ./app.tar ./app.tar` is now recognized as a no-op
+  immediately, even when the resolver cannot return a content digest. The
+  short-circuit emits `verdict: noop reason=path-equal` so the verdict
+  line stays well-formed for parsers that scan for `digest=` or `reason=`.
+- `--top` is now ignored in `--mode summary` and `--mode full` instead of
+  rejecting `--top 0` with an error. Compact mode keeps the existing
+  range check.
+- Filenames with CJK or emoji characters no longer overflow the selected
+  filetree row. Padding now measures display width to match the unselected
+  branch.
+- Multi-GB layers (ML model images, dataset bundles) no longer load the
+  entire compressed blob into memory before parsing. Peak memory during
+  analysis stays bounded by the largest single layer's parsed file tree
+  rather than the largest compressed layer.
+- Long Dockerfile commands wrap on the nearest space within the panel
+  width, eliminating an off-by-one that could force a mid-word cut on
+  odd-width panels.
+
 ## [v1.2.3] - 2026-05-28
 
 ### Added
