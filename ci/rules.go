@@ -85,7 +85,7 @@ func (r HighestUserWastedPercent) Evaluate(result *image.EfficiencyResult, total
 	return RuleResult{
 		Passed:    passed,
 		Name:      r.Name(),
-		Actual:    fmt.Sprintf("%.2f", pct),
-		Threshold: fmt.Sprintf("%.2f", r.Threshold),
+		Actual:    fmt.Sprintf("%.1f%%", pct*100),
+		Threshold: fmt.Sprintf("%.1f%%", r.Threshold*100),
 	}
 }

@@ -45,13 +45,13 @@ type jsonFile struct {
 	DiffType string `json:"diffType"`
 }
 
-func runJSONExport(imageRef, outputPath string, noCache bool) error {
+func runJSONExport(ctx context.Context, imageRef, outputPath string, noCache bool) error {
 	resolver, err := selectResolver(imageRef)
 	if err != nil {
 		return err
 	}
 
-	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+	analysis, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
 		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
 		return err
@@ -64,7 +64,7 @@ func runJSONExport(imageRef, outputPath string, noCache bool) error {
 // re-resolving the image. Used when CI has already produced an analysis we
 // can reuse.
 func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) error {
-	efficiency := image.Efficiency(analysis.Layers)
+	efficiency := image.EfficiencyFromAnalysis(analysis)
 
 	export := buildJSONExport(analysis, efficiency)
 

@@ -111,7 +111,7 @@ func wrapCommandLines(cmd string, width int, maxLines int) []string {
 			break
 		}
 		breakAt := width
-		for j := width - 1; j > width/2; j-- {
+		for j := width - 1; j >= width/2; j-- {
 			if runes[j] == ' ' {
 				breakAt = j
 				break

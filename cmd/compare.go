@@ -170,11 +170,21 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 	noCache := noCacheRequested()
 
 	out := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
+
+	// Path-equality short-circuit: identical archive paths trivially resolve
+	// to the same content. The digest-based check below catches this too when
+	// the archive's ImageID is observable, but archive resolvers don't always
+	// expose a digest (e.g. malformed manifests, OCI variants), and a cheap
+	// path comparison gets us out before two full analyses.
+	if oldRef == newRef && isRegularFilePath(oldRef) {
+		renderNoOp(out, "")
+		return nil
+	}
 
 	// Fast path: try ImageID for both refs without analyzing. For archives
 	// and already-pulled Docker images this is cheap; if either side requires
@@ -227,7 +237,9 @@ func validateCompareFlags(mode string, top int) error {
 	default:
 		return fmt.Errorf("--mode must be one of compact|full|summary; got %q", mode)
 	}
-	if top < compareTopMin || top > compareTopMax {
+	// --top is only consulted in compact mode; let summary/full pass through
+	// any value (including 0) without rejecting them, matching the help text.
+	if mode == compareModeCompact && (top < compareTopMin || top > compareTopMax) {
 		return fmt.Errorf("--top must be in [%d, %d]; got %d", compareTopMin, compareTopMax, top)
 	}
 	return nil
@@ -245,13 +257,17 @@ func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string,
 	wg.Go(func() {
 		drainProgress(stderr, side, ref, progress)
 	})
+	// LIFO order matters: defer wg.Wait() registers FIRST so it runs LAST,
+	// after defer close(progress) has unblocked the drain goroutine. If
+	// AnalyzeWithOptions panics or returns through any future early-return
+	// path, the goroutine still exits and we don't deadlock.
+	defer wg.Wait()
+	defer close(progress)
 
 	analysis, err := image.AnalyzeWithOptions(ctx, resolver, ref, image.AnalyzeOptions{
 		NoCache:  noCache,
 		Progress: progress,
 	})
-	close(progress)
-	wg.Wait()
 
 	if err != nil {
 		return "", nil, err

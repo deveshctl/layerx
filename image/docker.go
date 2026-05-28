@@ -2,6 +2,7 @@ package image
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -277,8 +278,11 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		}
 	}
 
-	// Pass 2: stream each layer one at a time, parse, drop the buffer
-	// before reading the next. Peak heap = largest single layer.
+	// Pass 2: stream each layer one at a time. tar.Reader is an io.Reader
+	// bounded to the current entry, so wrapping it with the streaming
+	// gzip-detector lets ParseLayerTar consume the layer without buffering
+	// the full compressed blob. Peak heap = the FileTree of the layer being
+	// parsed, not the gzip bytes feeding it.
 	keep := make(map[string]int, len(manifest.Layers))
 	for i, p := range manifest.Layers {
 		keep[p] = i
@@ -290,7 +294,7 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 	tr := tar.NewReader(spool)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -300,20 +304,15 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		if !want {
 			continue
 		}
-		tarData, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
-		}
-		if len(tarData) == 0 {
+		if hdr.Size == 0 {
 			continue
 		}
-		dec, err := decompressIfGzip(tarData)
+		dec, err := decompressIfGzipStream(tr)
 		if err != nil {
 			return nil, fmt.Errorf("decompressing layer %s: %w", hdr.Name, err)
 		}
 		tree, parseErr := ParseLayerTar(dec)
 		dec.Close()
-		tarData = nil // drop before next iteration
 		if parseErr != nil {
 			return nil, fmt.Errorf("parsing layer %s: %w", hdr.Name, parseErr)
 		}
@@ -339,7 +338,7 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -376,7 +375,7 @@ func readEntryFromSpool(spool *os.File, name string) ([]byte, error) {
 	tr := tar.NewReader(spool)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("entry not found: %s", name)
 		}
 		if err != nil {
@@ -396,6 +395,26 @@ func decompressIfGzip(data []byte) (io.ReadCloser, error) {
 		return gzip.NewReader(bytes.NewReader(data))
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+// decompressIfGzipStream is the streaming variant of decompressIfGzip. It
+// peeks the first 2 bytes via a bufio.Reader and gzip-wraps the rest if the
+// gzip magic is present, otherwise returns the buffered reader unchanged.
+// Callers must Close the returned reader.
+//
+// Use this for layer blobs that may be arbitrarily large (multi-GB ML model
+// images): it avoids buffering the full compressed blob in memory before
+// decompression.
+func decompressIfGzipStream(r io.Reader) (io.ReadCloser, error) {
+	br := bufio.NewReader(r)
+	magic, err := br.Peek(2)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if len(magic) >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		return gzip.NewReader(br)
+	}
+	return io.NopCloser(br), nil
 }
 
 type dockerManifest struct {

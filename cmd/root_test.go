@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetVersionInfo_FullInfo(t *testing.T) {
@@ -77,4 +81,35 @@ func TestCombineCIAndJSONErr_BothFail_CIWinsButJSONWarned(t *testing.T) {
 	err := combineCIAndJSONErr(ciErr, jsonErr, &buf)
 	assert.ErrorIs(t, err, ciErr)
 	assert.Contains(t, buf.String(), "warning: JSON export failed: disk full")
+}
+
+// ExecuteContext must reach RunE through cmd.Context(); a cancelled context
+// passed in must arrive cancelled at the subcommand. main.go relies on this so
+// Ctrl+C cancels image pulls/exports inside ci/json/compare.
+func TestExecuteContext_PropagatesToRunE(t *testing.T) {
+	root := &cobra.Command{Use: "test-root"}
+	var observed context.Context
+	child := &cobra.Command{
+		Use: "child",
+		RunE: func(c *cobra.Command, args []string) error {
+			observed = c.Context()
+			return nil
+		},
+	}
+	root.AddCommand(child)
+	root.SetArgs([]string{"child"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, root.ExecuteContext(ctx))
+
+	require.NotNil(t, observed)
+	select {
+	case <-observed.Done():
+		// expected — cancelled context arrived intact
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("RunE's cmd.Context() was not cancelled")
+	}
 }

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 	"time"
 
 	"github.com/deveshctl/layerx/cmd"
@@ -27,7 +30,9 @@ func main() {
 		}
 	}
 	cmd.SetVersionInfo(version, commit, date)
-	err := cmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err := cmd.ExecuteContext(ctx)
 	if err == nil {
 		return
 	}

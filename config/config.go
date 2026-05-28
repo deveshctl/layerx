@@ -16,6 +16,11 @@ const defaultConfigFile = ".layerx.yaml"
 // Config holds all user-configurable settings.
 type Config struct {
 	Rules RulesConfig `yaml:"rules"`
+	// Keybindings is a placeholder for the M12 keybinding-override feature
+	// documented in CLAUDE.md. Declared here so yaml.Strict() accepts the
+	// documented top-level key without rejecting the whole config; semantics
+	// are wired up in M12.
+	Keybindings map[string]string `yaml:"keybindings,omitempty"`
 }
 
 // RulesConfig holds CI rule thresholds.

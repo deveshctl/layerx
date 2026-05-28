@@ -67,3 +67,12 @@ func TestHighestUserWastedPercent_DisabledWhenZero(t *testing.T) {
 	result := r.Evaluate(&image.EfficiencyResult{WastedBytes: 999999}, 1000)
 	assert.True(t, result.Passed)
 }
+
+// Actual / Threshold render as percentages so operators reading
+// "wasted %: 0.10 (threshold: 0.10)" don't misread 10% as 0.10%.
+func TestHighestUserWastedPercent_ActualAndThresholdRenderedAsPercent(t *testing.T) {
+	r := HighestUserWastedPercent{Threshold: 0.1}
+	result := r.Evaluate(&image.EfficiencyResult{WastedBytes: 100}, 1000)
+	assert.Equal(t, "10.0%", result.Actual)
+	assert.Equal(t, "10.0%", result.Threshold)
+}

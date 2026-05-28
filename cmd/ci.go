@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -115,7 +114,7 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 			// down). Nothing to export.
 			jsonErr = nil
 		default:
-			jsonErr = runJSONExport(imageRef, flagJSON, noCacheRequested())
+			jsonErr = runJSONExport(cmd.Context(), imageRef, flagJSON, noCacheRequested())
 		}
 		return combineCIAndJSONErr(ciErr, jsonErr, os.Stderr)
 	}
@@ -137,21 +136,25 @@ func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noC
 }
 
 func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
+	rules := buildRules(cfg, cmd)
+	if len(rules) == 0 {
+		return nil, fmt.Errorf("no CI rules enabled — set at least one threshold > 0 in .layerx.yaml or via --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent")
+	}
+
 	resolver, err := selectResolver(imageRef)
 	if err != nil {
 		return nil, err
 	}
 
-	analysis, err := image.AnalyzeWithOptions(context.Background(), resolver, imageRef,
+	analysis, err := image.AnalyzeWithOptions(cmd.Context(), resolver, imageRef,
 		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
 		return nil, err
 	}
 
-	efficiency := image.Efficiency(analysis.Layers)
-	rules := buildRules(cfg, cmd)
+	efficiency := image.EfficiencyFromAnalysis(analysis)
 	report := ci.Evaluate(efficiency, analysis.TotalSize, rules)
-	report.Print(os.Stdout)
+	report.Print(os.Stderr)
 
 	if report.ExitCode() != 0 {
 		return analysis, &ErrCIFailed{}

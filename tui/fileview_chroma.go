@@ -53,8 +53,18 @@ func highlightFileLines(path string, data []byte) []string {
 	}
 
 	out := strings.TrimSuffix(buf.String(), "\n")
-	if out == "" {
+	var highlighted []string
+	if out != "" {
+		highlighted = strings.Split(out, "\n")
+	}
+	if len(highlighted) != len(splitFileLines(data)) {
+		// Length mismatch would desync search/jump indexing against
+		// splitFileLines. Drop highlighting; the non-highlighted path
+		// will render the same lines without color.
+		return nil
+	}
+	if highlighted == nil {
 		return []string{""}
 	}
-	return strings.Split(out, "\n")
+	return highlighted
 }

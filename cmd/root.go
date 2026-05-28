@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -122,6 +123,14 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// ExecuteContext runs the root command with ctx wired through to every
+// subcommand's RunE via cmd.Context(). main.go installs a signal-cancelled
+// context here so Ctrl+C reaches into long-running analyze paths
+// (image pulls, exports) instead of waiting for them to return.
+func ExecuteContext(ctx context.Context) error {
+	return rootCmd.ExecuteContext(ctx)
+}
+
 func runInspect(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
 
@@ -142,6 +151,9 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		// onto the report.
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
+		// Forward the root cobra command's signal-cancellable context to
+		// ciCmd so runCICheckInner's image.AnalyzeWithOptions sees Ctrl+C.
+		ciCmd.SetContext(cmd.Context())
 		analysis, ciErr := executeCICheck(imageRef, cfg, ciCmd, noCache)
 		if flagJSON != "" {
 			var jsonErr error
@@ -151,7 +163,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 			case ciErr != nil:
 				jsonErr = nil
 			default:
-				jsonErr = runJSONExport(imageRef, flagJSON, noCache)
+				jsonErr = runJSONExport(cmd.Context(), imageRef, flagJSON, noCache)
 			}
 			return combineCIAndJSONErr(ciErr, jsonErr, os.Stderr)
 		}
@@ -159,7 +171,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	if flagJSON != "" {
-		return runJSONExport(imageRef, flagJSON, noCache)
+		return runJSONExport(cmd.Context(), imageRef, flagJSON, noCache)
 	}
 
 	resolver, err := selectResolver(imageRef)
