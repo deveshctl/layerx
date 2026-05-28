@@ -71,6 +71,22 @@ type fileContentMsg struct {
 	err       error
 }
 
+// highlightedMsg carries the result of running Chroma syntax highlighting
+// on a previously-rendered file. Highlighting is deferred to a tea.Cmd
+// because chroma's lexer can spend hundreds of milliseconds tokenising a
+// large source file; running it inline in Update would freeze the TUI
+// (no key handling, no spinner, no resize) for that whole window.
+//
+// The requestID is the same one stamped on the originating fileContentMsg;
+// a stale highlight (user already navigated to another file) is discarded.
+// lines may be nil when the file is binary, the lexer is unavailable, or
+// the highlight step errored — in any of those cases the renderer falls
+// back to the plain-text path.
+type highlightedMsg struct {
+	requestID uint64
+	lines     []string
+}
+
 // analysisMsg is sent when the background fetch completes.
 type analysisMsg struct {
 	analysis *image.Analysis
@@ -208,7 +224,7 @@ func NewModel(cfg Config) model {
 		imageRef:    cfg.ImageRef,
 		resolver:    cfg.Resolver,
 		progressCh:  ch,
-		writeFile:   os.WriteFile,
+		writeFile:   atomicWriteFile,
 		statFile:    os.Stat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
@@ -367,10 +383,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewState = viewReady
 		m.viewContent = msg.content
 		m.viewHighlightedLines = nil
-		if msg.content != nil && !msg.content.Binary && len(msg.content.Data) > 0 {
-			m.viewHighlightedLines = highlightFileLines(msg.content.Path, msg.content.Data)
-		}
 		m.viewOffset = 0
+		// Defer Chroma syntax highlighting to a tea.Cmd. Tokenising even a
+		// few hundred KB of source can take hundreds of ms; running it
+		// inline here would freeze the TUI (no input, no spinner, no
+		// resize handling) until the lexer returned. The plain-text
+		// renderer is used until highlightedMsg arrives, then the colored
+		// lines swap in.
+		if msg.content != nil && !msg.content.Binary && len(msg.content.Data) > 0 {
+			return m, highlightFileCmd(msg.requestID, msg.content.Path, msg.content.Data)
+		}
+		return m, nil
+
+	case highlightedMsg:
+		// A late highlight for a file the user has already navigated away
+		// from — discard. Without the gate, switching between large files
+		// quickly would leave the wrong colors painted on the wrong file.
+		if msg.requestID != m.viewRequestID {
+			return m, nil
+		}
+		m.viewHighlightedLines = msg.lines
 		return m, nil
 
 	case fileSaveMsg:
@@ -1550,6 +1582,95 @@ func uniquePath(ctx context.Context, stat func(string) (os.FileInfo, error), fil
 	}
 	return "", fmt.Errorf("save target busy: 1000 candidates already exist for %s", filename)
 }
+
+// atomicWriteFile writes data to name via a same-directory temp file and an
+// os.Rename — the production default for model.writeFile. Tests inject a
+// plain in-memory function and never touch this code.
+//
+// Why the indirection: the previous implementation called os.WriteFile, which
+// truncates and writes in place. Two failure modes followed:
+//
+//  1. Process kill (Ctrl+C, SIGKILL, OOM, power loss) mid-write left a
+//     partially-written file at the user's chosen path — silent corruption,
+//     no error surfaced. Users running `x` to extract a config file from a
+//     production image and aborting because the daemon froze would end up
+//     with a half-truncated config that looked legitimate.
+//  2. Write errors after partial bytes had reached disk left the same kind
+//     of partial-content corruption with the error visible — but by that
+//     point the user-visible file at `name` already had the wrong contents.
+//
+// Atomic-replace via tempfile + rename guarantees that `name` either holds
+// the complete pre-write content (if it existed) or the complete new content;
+// it never holds a mix. On POSIX rename is atomic. Go's os.Rename on Windows
+// is implemented via MoveFileEx with MOVEFILE_REPLACE_EXISTING, so it
+// replaces an existing target atomically — uniquePath's pre-probe handles
+// the user-visible "don't overwrite" intent at a higher level.
+//
+// The temp file is created in the same directory as the target so rename
+// stays within one filesystem (cross-fs rename returns EXDEV). It is
+// removed on any failure path so a crashed save doesn't leak a stray
+// .layerx-save-XXXXXX file next to the user's data.
+//
+// Permissions are applied via the open file descriptor (tmp.Chmod) before
+// Close, eliminating the post-close window in which a virus scanner or
+// indexer can hold the path open and reject a path-based Chmod on Windows.
+//
+// Symlinks: if `name` resolves through a symlink, the rename targets the
+// link's resolved path so the symlink itself is preserved (matching the
+// semantics of os.WriteFile, which opens with O_TRUNC and writes through
+// the symlink to its target). Only `not exist` errors fall back to writing
+// at `name` directly — other resolution failures (EACCES, ELOOP) surface
+// to the caller rather than silently writing at the link.
+//
+// Durability: after rename, the parent directory is fsynced on POSIX so
+// the rename survives power loss. On Windows the directory fsync call is
+// a no-op (the OS does not expose this primitive); the rename itself is
+// already MFT-journaled so power-loss safety still holds via NTFS rather
+// than via this code.
+func atomicWriteFile(name string, data []byte, perm os.FileMode) error {
+	target := name
+	if resolved, err := filepath.EvalSymlinks(name); err == nil {
+		target = resolved
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	dir := filepath.Dir(target)
+	tmp, err := os.CreateTemp(dir, ".layerx-save-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// On any error path below, remove the temp; on success the rename has
+	// already moved it so Remove is a no-op.
+	cleanup := func() { _ = os.Remove(tmpName) }
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(applyUmask(perm)); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		cleanup()
+		return err
+	}
+	syncDir(dir)
+	return nil
+}
+
 
 func (m *model) scrollViewDown() {
 	maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)

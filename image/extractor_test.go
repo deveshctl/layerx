@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -612,4 +613,106 @@ func TestExtractFromLayer_DirectoryAtPath(t *testing.T) {
 	_, err = e.ExtractFromLayer(context.Background(), "img", "/etc/foo", 1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a regular file")
+}
+
+// walkBackForFile must invoke its blobLoader lazily: the prior implementation
+// pre-loaded every kept blob into a map before walking, which OOMed on
+// multi-GB ML / dataset images. The contract this test pins is "load is
+// called at most once per visited layer, never beyond the first hit".
+func TestWalkBackForFile_LazyLoaderStopsAtFirstHit(t *testing.T) {
+	layerPaths := []string{
+		"layer0/layer.tar",
+		"layer1/layer.tar",
+		"layer2/layer.tar",
+	}
+	// Only layer2 contains the file; walking back from cursor=2, the first
+	// load (layer2) finds it and the walk stops. layer1 / layer0 must NOT be
+	// loaded — that is the whole point of lazy loading.
+	target := "tmp/a.txt"
+	blobs := map[string][]byte{
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/other": "x"}),
+		"layer1/layer.tar": buildLayerTarFromMap(t, map[string]string{"etc/other": "y"}),
+		"layer2/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/a.txt": "v2"}),
+	}
+	loadCalls := make(map[string]int)
+	loader := func(name string) ([]byte, error) {
+		loadCalls[name]++
+		return blobs[name], nil
+	}
+
+	data, err := walkBackForFile(layerPaths, loader, target, "/"+target, 2)
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(data))
+	assert.Equal(t, 1, loadCalls["layer2/layer.tar"], "found layer must be loaded once")
+	assert.Equal(t, 0, loadCalls["layer1/layer.tar"], "subsequent layers must NOT be loaded after a hit")
+	assert.Equal(t, 0, loadCalls["layer0/layer.tar"], "subsequent layers must NOT be loaded after a hit")
+}
+
+// walkBackForFile continues past a layer that does not contain the path. The
+// loader is invoked once per visited layer, in walk-back order. This pins the
+// "skip layers without the file, keep walking" branch.
+func TestWalkBackForFile_LoadsOnlyVisitedLayers(t *testing.T) {
+	layerPaths := []string{
+		"layer0/layer.tar",
+		"layer1/layer.tar",
+		"layer2/layer.tar",
+		"layer3/layer.tar",
+	}
+	// Cursor = 2 — layer3 must NOT be loaded. layer2 (no hit), then layer1
+	// (hit). layer0 must NOT be loaded.
+	target := "tmp/a.txt"
+	blobs := map[string][]byte{
+		"layer0/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/a.txt": "v0"}),
+		"layer1/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/a.txt": "v1"}),
+		"layer2/layer.tar": buildLayerTarFromMap(t, map[string]string{"etc/other": "x"}),
+		"layer3/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/a.txt": "v3"}),
+	}
+	loadOrder := []string{}
+	loader := func(name string) ([]byte, error) {
+		loadOrder = append(loadOrder, name)
+		return blobs[name], nil
+	}
+
+	data, err := walkBackForFile(layerPaths, loader, target, "/"+target, 2)
+	require.NoError(t, err)
+	assert.Equal(t, "v1", string(data))
+	assert.Equal(t, []string{"layer2/layer.tar", "layer1/layer.tar"}, loadOrder,
+		"loader must be called for layer2 (skip) then layer1 (hit) only")
+}
+
+// readSingleBlobFromSpool must reject a blob whose tar header declares a
+// size above MaxLayerBlobSize. Without the cap the prior io.ReadAll would
+// OOM on a malformed manifest claiming a single blob is multi-PB.
+func TestReadSingleBlobFromSpool_OversizedHeaderRejected(t *testing.T) {
+	// Build an outer tar where one blob's header.Size lies far above
+	// MaxLayerBlobSize. The body is a few bytes; the cap fires off the
+	// header alone before any allocation.
+	var outer bytes.Buffer
+	tw := tar.NewWriter(&outer)
+	hdr := &tar.Header{
+		Name:     "huge/layer.tar",
+		Mode:     0644,
+		Size:     MaxLayerBlobSize + 1,
+		Typeflag: tar.TypeReg,
+	}
+	require.NoError(t, tw.WriteHeader(hdr))
+	// Write a tiny body — readSingleBlobFromSpool checks the header before
+	// it ever reads bytes, so the body length doesn't matter here.
+	_, err := tw.Write([]byte("x"))
+	// tar.Writer rejects body shorter than declared Size at Close time, so
+	// abort cleanly here before exercising the test.
+	if err != nil {
+		t.Skipf("test setup: tar writer rejected oversized header body: %v", err)
+	}
+	_ = tw.Close()
+
+	tmp, err := os.CreateTemp(t.TempDir(), "spool-*.tar")
+	require.NoError(t, err)
+	defer tmp.Close()
+	_, err = tmp.Write(outer.Bytes())
+	require.NoError(t, err)
+
+	_, err = readSingleBlobFromSpool(tmp, "huge/layer.tar")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too large")
 }

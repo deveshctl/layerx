@@ -398,6 +398,16 @@ func formatWasteRow(r wasteRow, selected bool, innerWidth int) string {
 	return b.String()
 }
 
+// truncateLeft trims the left side of s so it fits within width display
+// columns, prefixing the result with "…" when truncation actually occurs.
+//
+// Display columns, not rune count: a CJK ideograph or wide emoji occupies
+// two cells, so taking "the last N runes" of a string can overflow the
+// column budget by up to N. Peel runes off the right while summing each
+// rune's lipgloss.Width contribution and stop when adding another would
+// blow the budget. Without this, a Japanese / Chinese / emoji file path
+// rendered in the waste panel would push the surrounding columns out of
+// alignment and corrupt the table layout.
 func truncateLeft(s string, width int) string {
 	if width <= 0 {
 		return ""
@@ -408,10 +418,17 @@ func truncateLeft(s string, width int) string {
 	if width <= 1 {
 		return ansi.Truncate(s, width, "")
 	}
-	keep := width - 1
+	keep := width - 1 // one cell reserved for the "…" prefix
 	runes := []rune(s)
-	if keep >= len(runes) {
-		return s
+	used := 0
+	startIdx := len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		w := lipgloss.Width(string(runes[i]))
+		if used+w > keep {
+			break
+		}
+		used += w
+		startIdx = i
 	}
-	return "…" + string(runes[len(runes)-keep:])
+	return "…" + string(runes[startIdx:])
 }

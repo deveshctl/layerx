@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1307,13 +1308,25 @@ func TestFileContentMsgSetsViewReady(t *testing.T) {
 }
 
 func TestFileContentMsgPopulatesHighlightCache(t *testing.T) {
+	// Highlighting now defers to a tea.Cmd that emits highlightedMsg —
+	// running chroma inline in Update was freezing the TUI on large
+	// source files. The cache is populated by the second message, not
+	// the first. This test pins the two-step async flow so a regression
+	// to inline highlighting (which would re-introduce the freeze) is
+	// caught.
 	m := setupModel()
 	m.viewState = viewLoading
 
 	content := &image.FileContent{Path: "main.go", Data: []byte("package main\n"), Size: 13}
-	updated, _ := m.Update(fileContentMsg{content: content})
+	updated, cmd := m.Update(fileContentMsg{requestID: m.viewRequestID, content: content})
 	um := updated.(model)
-	require.NotNil(t, um.viewHighlightedLines, "highlight cache must be populated on content arrival to avoid recomputing per frame")
+	assert.Nil(t, um.viewHighlightedLines, "highlight must defer to a tea.Cmd, not run inline in Update")
+	require.NotNil(t, cmd, "non-binary text content must dispatch a highlight cmd")
+
+	hm, ok := cmd().(highlightedMsg)
+	require.True(t, ok, "expected highlightedMsg from highlight cmd, got %T", cmd())
+	updated2, _ := um.Update(hm)
+	require.NotNil(t, updated2.(model).viewHighlightedLines, "highlight cache must be populated after the async cmd's message arrives")
 }
 
 func TestEscClearsHighlightCache(t *testing.T) {
@@ -1831,4 +1844,102 @@ func TestStatusBarEnterHintDirShowsToggleNotView(t *testing.T) {
 	// avoids false matches on words like "viewport" if any other hint text
 	// grows that way later.
 	assert.NotContains(t, bar, " view")
+}
+
+// atomicWriteFile must materialize the target only after the bytes are fully
+// written and synced — never as a partial truncation. This pins the
+// temp+rename contract: the caller-visible target either does not exist
+// or holds the complete payload, never a half-write.
+func TestAtomicWriteFile_TargetVisibleOnlyOnCompletion(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.txt")
+	payload := []byte("complete content")
+
+	require.NoError(t, atomicWriteFile(target, payload, 0644))
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, payload, got)
+
+	// No stray temp file is left next to the target.
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.False(t, strings.HasPrefix(e.Name(), ".layerx-save-"),
+			"stray temp file %q must not survive a successful save", e.Name())
+	}
+}
+
+// atomicWriteFile must replace an existing file atomically, never leaving
+// the user with the empty intermediate state os.WriteFile produced when
+// killed mid-write.
+func TestAtomicWriteFile_ReplacesExistingAtomically(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.txt")
+	require.NoError(t, os.WriteFile(target, []byte("OLD"), 0644))
+
+	require.NoError(t, atomicWriteFile(target, []byte("NEW PAYLOAD"), 0644))
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("NEW PAYLOAD"), got)
+}
+
+// atomicWriteFile must not leak a temp file when the target directory does
+// not exist. Pre-fix os.WriteFile failed straight away with the same
+// behaviour; the rename-based implementation must match.
+func TestAtomicWriteFile_FailsCleanlyOnMissingDir(t *testing.T) {
+	// CreateTemp inside a non-existent dir fails before any write happens —
+	// no leaked temp anywhere, matching os.WriteFile's behaviour.
+	err := atomicWriteFile(filepath.Join(t.TempDir(), "no-such-dir", "out.txt"), []byte("x"), 0644)
+	require.Error(t, err)
+}
+
+// fileContentMsg must dispatch a tea.Cmd that performs Chroma highlighting
+// asynchronously. The Update goroutine returns immediately; the highlighted
+// lines arrive via highlightedMsg in a later turn. Without this seam, a
+// large source file could freeze the TUI for hundreds of milliseconds while
+// chroma tokenised it.
+func TestFileContentMsg_DispatchesHighlightCmd(t *testing.T) {
+	m := setupModel()
+	m.viewRequestID = 9
+	src := []byte("package main\n\nfunc main() {}\n")
+	updated, cmd := m.Update(fileContentMsg{
+		requestID: 9,
+		content: &image.FileContent{
+			Path: "main.go",
+			Data: src,
+		},
+	})
+	um := updated.(model)
+
+	// Highlight must NOT have been computed inside Update — that's the bug
+	// we're fixing. Lines arrive in a follow-up message.
+	assert.Nil(t, um.viewHighlightedLines, "highlight must defer to a tea.Cmd, not run inline")
+	require.NotNil(t, cmd, "fileContentMsg must dispatch a highlight cmd for non-binary text")
+
+	// Run the dispatched Cmd; expect a highlightedMsg with matching requestID.
+	msg := cmd()
+	hm, ok := msg.(highlightedMsg)
+	require.True(t, ok, "expected highlightedMsg, got %T", msg)
+	assert.Equal(t, uint64(9), hm.requestID)
+
+	// Apply it; viewHighlightedLines is now populated (or nil if Chroma
+	// declined to highlight; the contract is that it's set, not its content).
+	updated2, _ := um.Update(hm)
+	_ = updated2
+}
+
+// A late highlight from a previous extract must be discarded once the user
+// has navigated to a different file. Without the requestID gate, switching
+// files quickly would leave stale colors painted on the wrong file.
+func TestHighlightedMsg_StaleRequestIDDiscarded(t *testing.T) {
+	m := setupModel()
+	m.viewRequestID = 12
+	m.viewHighlightedLines = []string{"current"}
+
+	updated, _ := m.Update(highlightedMsg{requestID: 11, lines: []string{"stale"}})
+	um := updated.(model)
+	assert.Equal(t, []string{"current"}, um.viewHighlightedLines,
+		"stale highlight must not overwrite the current one")
 }

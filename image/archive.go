@@ -240,10 +240,11 @@ func (e *ArchiveExtractor) ExtractFromLayer(ctx context.Context, imageRef string
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, blobs, err := e.loadLayerTars(layerCursor + 1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(layerCursor + 1)
 	if err != nil {
 		return nil, err
 	}
+	defer closeFn()
 	if layerCursor >= len(layerPaths) {
 		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
 	}
@@ -253,7 +254,7 @@ func (e *ArchiveExtractor) ExtractFromLayer(ctx context.Context, imageRef string
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	data, err := walkBackForFile(layerPaths, blobs, cleanPath, filePath, layerCursor)
+	data, err := walkBackForFile(layerPaths, load, cleanPath, filePath, layerCursor)
 	if err != nil {
 		return nil, err
 	}
@@ -265,10 +266,11 @@ func (e *ArchiveExtractor) ExtractRawFromLayer(ctx context.Context, imageRef str
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, blobs, err := e.loadLayerTars(layerCursor + 1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(layerCursor + 1)
 	if err != nil {
 		return nil, err
 	}
+	defer closeFn()
 	if layerCursor >= len(layerPaths) {
 		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
 	}
@@ -278,39 +280,44 @@ func (e *ArchiveExtractor) ExtractRawFromLayer(ctx context.Context, imageRef str
 		return nil, fmt.Errorf("invalid file path: %s", filePath)
 	}
 
-	return walkBackForFile(layerPaths, blobs, cleanPath, filePath, layerCursor)
+	return walkBackForFile(layerPaths, load, cleanPath, filePath, layerCursor)
 }
 
-// loadLayerTars opens the archive and returns the manifest's Layers slice
-// plus a name-to-bytes map for the first maxLayers entries.
+// loadLayerSource opens the archive and returns the manifest's Layers slice
+// plus a lazy blob loader scoped to the first maxLayers entries. The caller
+// MUST defer closeFn to release the file handle.
 //
-// Memory bound mirrors DockerExtractor.loadLayerTars: only the requested
-// blobs are held in memory, peak heap is the largest single needed blob.
-// maxLayers must be > 0 — Extract / ExtractRaw discover the layer count via
-// layerCount() first so they never need an "all layers" sentinel.
-func (e *ArchiveExtractor) loadLayerTars(maxLayers int) ([]string, map[string][]byte, error) {
+// Memory bound mirrors DockerExtractor.loadLayerSource: peak heap is one
+// blob (the largest one walkBackForFile happens to read), not the sum of
+// every blob up to layerCursor. maxLayers must be > 0 — Extract / ExtractRaw
+// discover the layer count via layerCount() first so they never need an
+// "all layers" sentinel.
+func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, load blobLoader, closeFn func(), err error) {
 	if maxLayers <= 0 {
-		return nil, nil, fmt.Errorf("loadLayerTars: maxLayers must be > 0, got %d", maxLayers)
+		return nil, nil, nil, fmt.Errorf("loadLayerSource: maxLayers must be > 0, got %d", maxLayers)
 	}
 	f, err := openArchive(e.path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	defer f.Close()
+	cleanup := func() { _ = f.Close() }
 
 	manifestData, err := readManifestFromSpool(f)
 	if err != nil {
-		return nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}
+		cleanup()
+		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}
 	}
 
 	var manifests []dockerManifest
 	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return nil, nil, &ErrInvalidArchive{Path: e.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
+		cleanup()
+		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
 	}
 	if len(manifests) == 0 {
-		return nil, nil, &ErrInvalidArchive{Path: e.path, Cause: errors.New("empty manifest")}
+		cleanup()
+		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: errors.New("empty manifest")}
 	}
-	layerPaths := manifests[0].Layers
+	layerPaths = manifests[0].Layers
 
 	keepCount := min(maxLayers, len(layerPaths))
 	keep := make(map[string]struct{}, keepCount)
@@ -318,10 +325,28 @@ func (e *ArchiveExtractor) loadLayerTars(maxLayers int) ([]string, map[string][]
 		keep[p] = struct{}{}
 	}
 
-	blobs, err := readBlobsFromSpool(f, keep)
+	idx, err := scanBlobIndex(f)
 	if err != nil {
-		return nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}
+		cleanup()
+		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}
 	}
 
-	return layerPaths, blobs, nil
+	load = func(name string) ([]byte, error) {
+		if _, ok := keep[name]; !ok {
+			return nil, nil
+		}
+		size, present := idx[name]
+		if !present {
+			return nil, nil
+		}
+		if size > MaxLayerBlobSize {
+			return nil, &ErrInvalidArchive{Path: e.path, Cause: fmt.Errorf("layer blob %s too large: %d bytes (limit %d)", name, size, MaxLayerBlobSize)}
+		}
+		data, err := readSingleBlobFromSpool(f, name)
+		if err != nil {
+			return nil, &ErrInvalidArchive{Path: e.path, Cause: err}
+		}
+		return data, nil
+	}
+	return layerPaths, load, cleanup, nil
 }
