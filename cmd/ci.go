@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -103,7 +104,7 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	analysis, ciErr := executeCICheck(imageRef, cfg, cmd, noCacheRequested())
+	analysis, ciErr := executeCICheck(cmd.Context(), imageRef, cfg, cmd, noCacheRequested())
 	if flagJSON != "" {
 		var jsonErr error
 		switch {
@@ -121,8 +122,8 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 	return ciErr
 }
 
-func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
-	analysis, err := runCICheckInner(imageRef, cfg, cmd, noCache)
+func executeCICheck(ctx context.Context, imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
+	analysis, err := runCICheckInner(ctx, imageRef, cfg, cmd, noCache)
 	// ciCmd has SilenceErrors=true and root.go silences errors when CI=true,
 	// so cobra will not print anything for us. Surface non-CIFailed errors
 	// (e.g. Docker daemon down) to stderr ourselves; the CIFailed sentinel
@@ -135,10 +136,10 @@ func executeCICheck(imageRef string, cfg *config.Config, cmd *cobra.Command, noC
 	return analysis, err
 }
 
-func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
+func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool) (*image.Analysis, error) {
 	rules := buildRules(cfg, cmd)
 	if len(rules) == 0 {
-		return nil, fmt.Errorf("no CI rules enabled — set at least one threshold > 0 in .layerx.yaml or via --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent")
+		return nil, errNoCIRulesEnabled(cmd)
 	}
 
 	resolver, err := selectResolver(imageRef)
@@ -146,7 +147,7 @@ func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, no
 		return nil, err
 	}
 
-	analysis, err := image.AnalyzeWithOptions(cmd.Context(), resolver, imageRef,
+	analysis, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
 		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
 		return nil, err
@@ -154,12 +155,26 @@ func runCICheckInner(imageRef string, cfg *config.Config, cmd *cobra.Command, no
 
 	efficiency := image.EfficiencyFromAnalysis(analysis)
 	report := ci.Evaluate(efficiency, analysis.TotalSize, rules)
-	report.Print(os.Stderr)
+	report.Print(os.Stdout)
 
 	if report.ExitCode() != 0 {
 		return analysis, &ErrCIFailed{}
 	}
 	return analysis, nil
+}
+
+// errNoCIRulesEnabled produces a context-aware error when every threshold is
+// 0 / disabled. The exact wording depends on how the user reached the CI path:
+// invoking `layerx ci` exposes the threshold flags, while the `CI=true layerx
+// IMG` shortcut runs the same code without those flags being part of the
+// surface (the parent command is `layerx`, not `layerx ci`). In the shortcut
+// case we steer users to the config file rather than naming flags they can't
+// pass.
+func errNoCIRulesEnabled(cmd *cobra.Command) error {
+	if cmd != nil && cmd.Name() == "ci" {
+		return fmt.Errorf("no CI rules enabled — set at least one threshold > 0 in .layerx.yaml or via --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent")
+	}
+	return fmt.Errorf("no CI rules enabled — set at least one threshold > 0 in .layerx.yaml (or invoke `layerx ci` directly to use --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent)")
 }
 
 func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {

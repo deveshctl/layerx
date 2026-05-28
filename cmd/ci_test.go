@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -61,7 +62,7 @@ func TestRunCICheckInner_RejectsAllRulesDisabled(t *testing.T) {
 	cmd.Flags().Int64Var(&hwb, "highest-wasted-bytes", 0, "")
 	cmd.Flags().Float64Var(&huwp, "highest-user-wasted-percent", 0, "")
 
-	analysis, err := runCICheckInner("nginx:latest", cfg, cmd, false)
+	analysis, err := runCICheckInner(context.Background(), "nginx:latest", cfg, cmd, false)
 	require.Error(t, err)
 	assert.Nil(t, analysis)
 	assert.Contains(t, err.Error(), "no CI rules enabled")

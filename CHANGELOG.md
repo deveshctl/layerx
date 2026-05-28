@@ -56,12 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single run count toward wasted bytes.
 - `wasted %` rule output now reads as a percent. The rule used to print
   the raw fraction (e.g. `0.10`) labelled as a percent; it now renders as
-  `10.0%` in both Actual and Threshold columns.
-- `layerx ci` PASS/FAIL verdict line now goes to stderr, matching the
-  other subcommands. `layerx ci --json out.json` keeps stdout grep-clean.
+  `10.0%` in both Actual and Threshold columns. The `efficiency` rule
+  matches the same format (`92.5%`) so all three rules agree.
 - `layerx compare ./app.tar ./app.tar` is now recognized as a no-op
   immediately, even when the resolver cannot return a content digest. The
-  short-circuit fires before any analysis runs.
+  short-circuit emits `verdict: noop reason=path-equal` so the verdict
+  line stays well-formed for parsers that scan for `digest=` or `reason=`.
 - `--top` is now ignored in `--mode summary` and `--mode full` instead of
   rejecting `--top 0` with an error. Compact mode keeps the existing
   range check.

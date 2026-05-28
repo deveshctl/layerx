@@ -65,17 +65,29 @@ func renderCommandBar(cmd string, width int) string {
 	maxLines := 3
 	wrappedLines := wrapCommandLines(cmd, width-2, maxLines)
 
+	// Determine the count of non-empty wrapped lines so we don't emit
+	// trailing newlines for unfilled rows. wrapCommandLines preserves a
+	// fixed-length return for caller-test stability; the fixup happens
+	// here at render time.
+	filled := 0
+	for _, wl := range wrappedLines {
+		if wl != "" {
+			filled++
+		}
+	}
+
 	prefix := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("▶ ")
 
 	var sb strings.Builder
-	for i, wl := range wrappedLines {
+	for i := range filled {
+		wl := wrappedLines[i]
 		if i == 0 {
 			styled := highlightInstruction(wl)
 			sb.WriteString(prefix + styled)
 		} else {
 			sb.WriteString("  " + styleWithFg(commandColor).Render(wl))
 		}
-		if i < maxLines-1 {
+		if i < filled-1 {
 			sb.WriteString("\n")
 		}
 	}

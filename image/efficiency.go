@@ -34,11 +34,23 @@ func Efficiency(layers []Layer) *EfficiencyResult {
 
 // EfficiencyFromAnalysis is the preferred entry point when the caller already
 // has stacked trees (which Analysis carries). Avoids re-running Stack.
+//
+// Falls back to recomputing Stack(layers) if the carried StackedTrees are
+// missing or out of sync with the layer count — defensive against an
+// Analysis that was built or mutated outside AnalyzeWithOptions (e.g. by a
+// test, or by a future caller that constructs an Analysis directly). The
+// efficiency computation requires len(stacked) == len(layers) to align
+// snapshot indices; without this guard a divergent input would produce a
+// silently wrong score.
 func EfficiencyFromAnalysis(a *Analysis) *EfficiencyResult {
 	if a == nil || len(a.Layers) == 0 {
 		return &EfficiencyResult{Score: 1.0}
 	}
-	return computeEfficiency(a.Layers, a.StackedTrees)
+	stacked := a.StackedTrees
+	if len(stacked) != len(a.Layers) {
+		stacked = Stack(a.Layers)
+	}
+	return computeEfficiency(a.Layers, stacked)
 }
 
 // occurrence records a single layer-i appearance of a path with the bytes
@@ -49,6 +61,20 @@ type efficiencyOccurrence struct {
 }
 
 func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
+	// Build a path→FileNode index per stacked snapshot once. pathRuns then does
+	// O(1) lookups instead of recursing through the tree once per (path,
+	// snapshot) pair, which restored the analysis from quadratic to linear in
+	// total file count for layered images with many shared paths.
+	indices := make([]map[string]*FileNode, len(stacked))
+	for i, tree := range stacked {
+		if tree == nil || tree.Root == nil {
+			continue
+		}
+		idx := make(map[string]*FileNode)
+		indexTree(tree.Root, idx)
+		indices[i] = idx
+	}
+
 	// Collect every path that ever appeared across the raw layers, regardless
 	// of whether it was later removed. The stacked-tree walk decides occupancy
 	// per snapshot.
@@ -66,7 +92,7 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	var wastedFiles []WastedFile
 
 	for path := range paths {
-		runs := pathRuns(path, stacked)
+		runs := pathRuns(path, indices)
 		var pathWaste int64
 		var occurrenceCount int
 		for _, run := range runs {
@@ -79,6 +105,11 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 			}
 		}
 		if pathWaste == 0 {
+			// Path appears in multiple layers but every duplicate has size 0
+			// (typical for symlinks, empty marker files, or directory entries
+			// that show up as files in some tar emitters). They contribute
+			// nothing to wasted bytes; surfacing them in the "top wasted
+			// files" list would only clutter the output.
 			continue
 		}
 		wastedBytes += pathWaste
@@ -123,12 +154,32 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	}
 }
 
-// pathRuns walks the stacked trees and groups occurrences of path into runs
-// separated by Removed snapshots or absences (path missing from the snapshot,
-// e.g. inside an opaque-whiteouted directory). Within a run, an occurrence is
-// recorded only at snapshots where the path was Added or Modified — the layer
-// that actually wrote new bytes. Unchanged carryover does not contribute.
-func pathRuns(path string, stacked []*FileTree) [][]efficiencyOccurrence {
+// indexTree populates idx with every non-whiteout node reachable from root,
+// keyed by FileNode.Path. The map is consumed by pathRuns for O(1) per-path
+// lookups across stacked snapshots. Hardlinks and whiteouts are skipped to
+// match walkFiles' notion of "real files" — pathRuns only ever asks for paths
+// walkFiles produced.
+func indexTree(node *FileNode, idx map[string]*FileNode) {
+	for _, child := range node.Children {
+		if isWhiteoutName(child.Name) {
+			continue
+		}
+		if child.Path != "" {
+			idx[child.Path] = child
+		}
+		if child.IsDir {
+			indexTree(child, idx)
+		}
+	}
+}
+
+// pathRuns walks the per-snapshot path indices and groups occurrences of path
+// into runs separated by Removed snapshots or absences (path missing from the
+// snapshot, e.g. inside an opaque-whiteouted directory). Within a run, an
+// occurrence is recorded only at snapshots where the path was Added or
+// Modified — the layer that actually wrote new bytes. Unchanged carryover does
+// not contribute.
+func pathRuns(path string, indices []map[string]*FileNode) [][]efficiencyOccurrence {
 	var runs [][]efficiencyOccurrence
 	var cur []efficiencyOccurrence
 
@@ -139,14 +190,14 @@ func pathRuns(path string, stacked []*FileTree) [][]efficiencyOccurrence {
 		}
 	}
 
-	for i, tree := range stacked {
-		if tree == nil || tree.Root == nil {
+	for i, idx := range indices {
+		if idx == nil {
 			flush()
 			continue
 		}
-		node := findByPath(tree.Root, path)
+		node, ok := idx[path]
 		switch {
-		case node == nil:
+		case !ok:
 			flush()
 		case node.DiffType == Removed:
 			flush()
@@ -157,44 +208,6 @@ func pathRuns(path string, stacked []*FileTree) [][]efficiencyOccurrence {
 	}
 	flush()
 	return runs
-}
-
-// findByPath returns the node at path within root, or nil. Path is the
-// absolute Path stored on FileNode; descent uses Path-prefix on directories
-// and exact match on leaves.
-func findByPath(root *FileNode, path string) *FileNode {
-	if root == nil {
-		return nil
-	}
-	if root.Path == path {
-		return root
-	}
-	for _, child := range root.Children {
-		if child.Path == path {
-			return child
-		}
-		if child.IsDir && isPathPrefix(child.Path, path) {
-			if found := findByPath(child, path); found != nil {
-				return found
-			}
-		}
-	}
-	return nil
-}
-
-// isPathPrefix returns true if prefix is a directory prefix of full. Both
-// values come from FileNode.Path which uses forward slashes.
-func isPathPrefix(prefix, full string) bool {
-	if prefix == "" || prefix == "/" {
-		return true
-	}
-	if len(full) <= len(prefix) {
-		return false
-	}
-	if full[:len(prefix)] != prefix {
-		return false
-	}
-	return full[len(prefix)] == '/'
 }
 
 // walkLiveFiles is walkFiles but skips Removed leaves so the denominator

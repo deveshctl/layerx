@@ -77,6 +77,7 @@ Output ends with a single machine-parseable verdict line:
   verdict: ok
   verdict: regression reason=<comma-separated reasons>
   verdict: noop digest=<sha256...>
+  verdict: noop reason=path-equal       (archive paths matched without a digest)
 
 Progress messages (image pulls, exports) are written to stderr so the
 report on stdout stays grep-clean for CI gating. Pipe "2>/dev/null" to
@@ -360,12 +361,17 @@ func shortDigest(d string) string {
 
 // renderNoOp prints the same-digest message in plain language followed by the
 // machine-parseable verdict line. exit code stays 0; callers return nil.
+// When digest is empty (e.g. path-equality short-circuit on archives whose
+// resolvers can't expose an ImageID), the verdict line uses reason=path-equal
+// so parsers don't see an empty digest= value.
 func renderNoOp(w io.Writer, digest string) {
 	fmt.Fprintln(w, "Both inputs resolve to the same image content - no diff to show.")
 	if digest != "" {
 		fmt.Fprintf(w, "  digest: %s  (full: %s)\n", shortDigest(digest), digest)
+		fmt.Fprintf(w, "verdict: noop digest=%s\n", digest)
+		return
 	}
-	fmt.Fprintf(w, "verdict: noop digest=%s\n", digest)
+	fmt.Fprintln(w, "verdict: noop reason=path-equal")
 }
 
 // renderCompareReport writes a deterministic text report. The verdict line

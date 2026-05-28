@@ -152,9 +152,11 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
 		// Forward the root cobra command's signal-cancellable context to
-		// ciCmd so runCICheckInner's image.AnalyzeWithOptions sees Ctrl+C.
-		ciCmd.SetContext(cmd.Context())
-		analysis, ciErr := executeCICheck(imageRef, cfg, ciCmd, noCache)
+		// runCICheckInner so image.AnalyzeWithOptions sees Ctrl+C. We pass
+		// the context explicitly rather than mutating ciCmd.SetContext —
+		// ciCmd is package-level state, and a leaked context outlives the
+		// invocation.
+		analysis, ciErr := executeCICheck(cmd.Context(), imageRef, cfg, ciCmd, noCache)
 		if flagJSON != "" {
 			var jsonErr error
 			switch {

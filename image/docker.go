@@ -408,7 +408,10 @@ func decompressIfGzip(data []byte) (io.ReadCloser, error) {
 func decompressIfGzipStream(r io.Reader) (io.ReadCloser, error) {
 	br := bufio.NewReader(r)
 	magic, err := br.Peek(2)
-	if err != nil && !errors.Is(err, io.EOF) {
+	// Peek returns io.EOF on a totally empty body and io.ErrUnexpectedEOF on
+	// a 1-byte body. Both are legitimate for a tiny non-gzip layer (e.g. an
+	// empty placeholder); treat them as "not gzip, just hand back the bytes".
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 	if len(magic) >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
