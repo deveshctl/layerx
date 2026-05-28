@@ -34,6 +34,9 @@ func main() {
 	if _, ok := errors.AsType[*cmd.ErrCIFailed](err); ok {
 		os.Exit(1)
 	}
+	if _, ok := errors.AsType[*cmd.ErrCompareRegression](err); ok {
+		os.Exit(1)
+	}
 	os.Exit(2)
 }
 

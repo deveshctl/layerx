@@ -46,6 +46,7 @@ Other platforms: see [Install](#install).
 |-------------|------------------------------------------------------|---------------------------------------------------------|
 | Interactive | `layerx IMAGE_OR_ARCHIVE`                            | Exploring layers, diffs, file contents, wasted bytes    |
 | CI          | `layerx ci IMAGE_OR_ARCHIVE` or `CI=true layerx ...` | Pipeline gates on efficiency / wasted bytes             |
+| Compare     | `layerx compare OLD NEW`                             | Side-by-side deltas between two builds; CI regression gate |
 | Export      | `layerx --json out.json IMAGE_OR_ARCHIVE`            | Scripts, dashboards, `jq`                               |
 
 `IMAGE_OR_ARCHIVE` is auto-detected: an existing file is read directly without contacting any container runtime, anything else is resolved through the Docker daemon. All three modes accept either form.
@@ -66,6 +67,26 @@ See [TUI keybindings](#tui-keybindings) for the full shortcut list.
 - Three configurable rules: lowest efficiency, highest wasted bytes, highest user-wasted percent
 - Exits `0` on pass, `1` on rule failure, `2` on internal error
 - Configurable via `.layerx.yaml` or CLI flags
+
+### Compare two images
+
+```bash
+# Compare a release tag against the previous one
+layerx compare myapp:1.4.0 myapp:1.5.0
+
+# Mix archives and refs freely
+layerx compare ./build/prev.tar myapp:next
+
+# Show every diff entry instead of the top-N summary
+layerx compare --mode full myapp:old myapp:new
+```
+
+- Reports size, efficiency, layer, file, and waste deltas in a deterministic text report with consistently aligned columns
+- Default compact mode shows the largest deltas per section with a `... and N more` counter; `--mode full` prints everything; `--mode summary` keeps only the header and verdict
+- Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, or `verdict: noop digest=<sha256>` when both sides resolve to the same image
+- Exit codes: `0` no regression, `1` regression detected, `2` operational error (daemon down, archive missing, etc.)
+- Live progress on stderr while resolving remote images — pulling, exporting, parsing, and the resolved digest are all surfaced per side. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating
+- Running `layerx compare` with no arguments prints a short usage hint with concrete examples instead of an opaque error
 
 ### JSON export
 
