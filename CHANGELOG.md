@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `layerx compare OLD NEW` reports size, efficiency, layer, file, and waste
+  deltas between two images side-by-side. Both arguments accept the same
+  inputs as `layerx` itself (image refs and local archives, in any mix), so
+  you can compare a registry tag against a freshly-built tarball without
+  pushing first.
+- Output ends with a one-line `verdict:` summary (`ok`, `regression
+  reason=...`, or `noop digest=...`) that is easy to grep from CI logs.
+  `layerx compare` exits 1 on regression (efficiency dropped or wasted bytes
+  grew) and 2 on operational errors (daemon down, archive missing), so it
+  drops into a build pipeline as a gate without extra wrapping.
+- `--mode compact|full|summary` and `--top N` control verbosity: compact
+  (default) shows the largest deltas with a "... and N more" counter, full
+  prints every entry, summary keeps only the header and verdict.
+
 ## [v1.2.3] - 2026-05-28
 
 ### Added
