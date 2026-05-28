@@ -178,7 +178,7 @@ func TestValidateCompareFlags(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			flagCompareMode = tc.mode
 			flagCompareTop = tc.top
-			err := validateCompareFlags()
+			err := validateCompareFlags(tc.mode, tc.top)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -222,9 +222,9 @@ func TestRankFileDiffsByDelta_StableAndDescending(t *testing.T) {
 
 func TestTruncate_HandlesShortBudgets(t *testing.T) {
 	assert.Equal(t, "abc", truncate("abc", 3))
-	assert.Equal(t, "ab…", truncate("abcdef", 3))
-	assert.Equal(t, "…", truncate("abcdef", 1))
-	assert.Equal(t, "…", truncate("abcdef", 0))
+	assert.Equal(t, "a..", truncate("abcdef", 3))
+	assert.Equal(t, ".", truncate("abcdef", 1))
+	assert.Equal(t, "", truncate("abcdef", 0))
 }
 
 // lastLine returns the final newline-terminated line of s for assertion

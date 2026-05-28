@@ -98,6 +98,13 @@ type CompareResult struct {
 // files), so "compare against nothing" is symmetric with regular diffs.
 // Returns nil only when both inputs are nil. CompareAnalysis never mutates
 // its inputs.
+//
+// When one side is empty (nil or zero layers), Efficiency() returns the
+// degenerate Score=1.0 baseline for that side. To prevent that phantom
+// baseline from making the populated side look "worse" (a spurious
+// regression in the verdict), the EfficiencySummary deltas are zeroed when
+// either side has no layers — the diff still surfaces every Added/Removed
+// file, but score/waste deltas only carry meaning when both sides are real.
 func CompareAnalysis(before, after *Analysis) *CompareResult {
 	if before == nil && after == nil {
 		return nil
@@ -112,6 +119,12 @@ func CompareAnalysis(before, after *Analysis) *CompareResult {
 	beforeEff := Efficiency(before.Layers)
 	afterEff := Efficiency(after.Layers)
 
+	bothPopulated := len(before.Layers) > 0 && len(after.Layers) > 0
+	var afterPeer *EfficiencyResult
+	if bothPopulated {
+		afterPeer = beforeEff
+	}
+
 	r := &CompareResult{
 		Before: ImageSummary{
 			ImageRef:   before.ImageRef,
@@ -124,7 +137,7 @@ func CompareAnalysis(before, after *Analysis) *CompareResult {
 			TotalSize:  after.TotalSize,
 		},
 		BeforeEfficiency: efficiencySummary(beforeEff, nil),
-		AfterEfficiency:  efficiencySummary(afterEff, beforeEff),
+		AfterEfficiency:  efficiencySummary(afterEff, afterPeer),
 	}
 
 	r.LayerDiffs = buildLayerDiffs(before.Layers, after.Layers)
@@ -137,21 +150,43 @@ func CompareAnalysis(before, after *Analysis) *CompareResult {
 
 // IsRegression reports whether `after` is materially worse than `before`:
 // wasted bytes increased OR efficiency score dropped beyond a small epsilon.
-// Returns false on a nil receiver.
+// Returns false on a nil receiver. Reads the precomputed delta fields so
+// the verdict and the rendered numbers share one source of truth.
 func (r *CompareResult) IsRegression() bool {
 	if r == nil {
 		return false
 	}
-	if r.AfterEfficiency.WastedBytes > r.BeforeEfficiency.WastedBytes {
+	if r.AfterEfficiency.WastedBytesDelta > 0 {
 		return true
 	}
-	if r.BeforeEfficiency.Score-r.AfterEfficiency.Score > scoreEpsilon {
+	if -r.AfterEfficiency.ScoreDelta > scoreEpsilon {
 		return true
 	}
 	return false
 }
 
+// RegressionReasons returns the canonical list of regression reasons, in
+// the stable order ["efficiency", "waste"]. Empty slice when no regression.
+// Defined alongside IsRegression so the verdict line and the gate share a
+// single decision; callers must not recompute reasons from raw fields.
+func (r *CompareResult) RegressionReasons() []string {
+	if r == nil {
+		return nil
+	}
+	var reasons []string
+	if -r.AfterEfficiency.ScoreDelta > scoreEpsilon {
+		reasons = append(reasons, "efficiency")
+	}
+	if r.AfterEfficiency.WastedBytesDelta > 0 {
+		reasons = append(reasons, "waste")
+	}
+	return reasons
+}
+
 func efficiencySummary(self, peer *EfficiencyResult) EfficiencySummary {
+	if self == nil {
+		return EfficiencySummary{}
+	}
 	s := EfficiencySummary{
 		Score:       self.Score,
 		WastedBytes: self.WastedBytes,
@@ -409,7 +444,6 @@ func buildWarnings(before, after []Layer, diffs []LayerDiff) []string {
 		}
 		if !d.CommandsMatch {
 			out = append(out, fmt.Sprintf("layer %d command differs (rebuild may have shifted layers; later indexes may be misaligned)", d.Index))
-			break
 		}
 	}
 	return out
