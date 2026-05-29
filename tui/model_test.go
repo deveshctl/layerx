@@ -165,10 +165,44 @@ func TestQuitFromErrorState(t *testing.T) {
 	assert.True(t, m.quitting)
 }
 
-func TestEscapeQuits(t *testing.T) {
+func TestEscapeDoesNotQuitInStateReady(t *testing.T) {
+	// Round-9 fix: Esc is dismiss-only in stateReady. Mashing Esc after
+	// closing a viewer used to fall through to tea.Quit; the new contract
+	// reserves quitting for q / ctrl+c. Quit on Esc still applies in
+	// stateLoading and stateError, where it is the documented escape
+	// hatch.
 	m := setupModel()
 	m = send(m, keyPressSpecial(tea.KeyEscape))
-	assert.True(t, m.quitting)
+	assert.False(t, m.quitting, "Esc in stateReady with nothing to dismiss must not quit")
+}
+
+// Esc must still quit the loading screen — the documented "Press q or Esc to
+// exit" UX runs on stateLoading and stateError.
+func TestEscapeQuitsInStateLoading(t *testing.T) {
+	m := NewModel(Config{ImageRef: "test:latest"})
+	m.width = 120
+	m.height = 40
+	// state defaults to stateLoading
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.True(t, m.quitting, "Esc in stateLoading must quit (documented escape hatch)")
+	// quit-cancels-everything contract (model.go cancelInflight): the
+	// fetch context must be cancelled so the in-flight Docker pull does
+	// not outlive the TUI. A refactor that drops cancelInflight() from
+	// the Esc-quit branch would silently leak the pull goroutine.
+	assert.ErrorIs(t, m.fetchCtx.Err(), context.Canceled,
+		"Esc-quit must cancel fetchCtx so the in-flight pull is torn down")
+}
+
+func TestEscapeQuitsInStateError(t *testing.T) {
+	m := NewModel(Config{ImageRef: "test:latest"})
+	m.width = 120
+	m.height = 40
+	m.state = stateError
+	m.errMsg = "test error"
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.True(t, m.quitting, "Esc in stateError must quit (documented escape hatch)")
+	assert.ErrorIs(t, m.fetchCtx.Err(), context.Canceled,
+		"Esc-quit must cancel fetchCtx so the in-flight pull is torn down")
 }
 
 // --- Tab switches focus ------------------------------------------------------
@@ -1072,15 +1106,18 @@ func TestDiffPlusFilterCompose(t *testing.T) {
 
 // --- Esc precedence ----------------------------------------------------------
 
-func TestEscQuitsWhenFilterNotActive(t *testing.T) {
+func TestEscDoesNotQuitWhenNothingDismissable(t *testing.T) {
+	// Round-9 fix: in stateReady Esc must not quit even when nothing is
+	// dismissable. Pre-fix this caused mash-Esc on a closed viewer to
+	// silently exit the app (M08 Gate C regression).
 	m := setupModelWithDiffs()
 	m.filterActive = false
 	m.showHelp = false
 	m = send(m, keyPressSpecial(tea.KeyEscape))
-	assert.True(t, m.quitting)
+	assert.False(t, m.quitting, "Esc with nothing to dismiss must be a no-op in stateReady")
 }
 
-func TestEscClosesHelpBeforeQuit(t *testing.T) {
+func TestEscClosesHelpDoesNotQuit(t *testing.T) {
 	m := setupModelWithDiffs()
 	m.showHelp = true
 	m = send(m, keyPressSpecial(tea.KeyEscape))
@@ -1263,6 +1300,25 @@ func TestEscClosesFileViewer(t *testing.T) {
 	um := updated.(model)
 	assert.Equal(t, viewNone, um.viewState)
 	assert.Nil(t, um.viewContent)
+}
+
+// Round-9 regression: mashing Esc on a file viewer used to close the viewer
+// on the first press and then quit the app on the second. M08 Gate C calls
+// "mash Esc — no state corruption" out as a checked behaviour, and silent
+// quit-on-second-Esc is exactly the regression the bug-scan flagged.
+func TestEscMashOnFileViewerDoesNotQuit(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/test", Data: []byte("hi")}
+
+	// First Esc: closes viewer.
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.Equal(t, viewNone, m.viewState)
+	assert.False(t, m.quitting)
+
+	// Second Esc (the "mash"): must NOT quit.
+	m = send(m, keyPressSpecial(tea.KeyEscape))
+	assert.False(t, m.quitting, "second Esc after closing viewer must not quit the app")
 }
 
 func TestViewerScrollDown(t *testing.T) {

@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `layerx compare` table columns now align consistently across long paths
   and commands, so the LAYERS, FILE CHANGES, and WASTE CHANGES sections
   stay readable on real diffs.
+- **Breaking:** Esc in the main TUI no longer quits the app when nothing
+  is dismissable. Esc still closes the file viewer, the wasted-files
+  overlay, the help overlay, and clears an active filter, but mashing it
+  past those layers is now a no-op instead of a silent quit. Quit
+  remains on `q` and `Ctrl+C`. On the loading and error screens Esc
+  continues to exit, matching the on-screen "Press q or Esc to exit"
+  hint.
 
 ### Fixed
 - Ctrl+C now cancels `layerx ci`, `--json`, and `layerx compare` while a
@@ -97,6 +104,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Layer blob loading is now bounded by an explicit per-blob size cap.
   A malformed image archive that declares a single layer is petabytes
   no longer causes runaway allocation.
+- Image pulls now fail loudly when the registry rejects the request.
+  Authentication failures, "manifest not found", and registry 5xx
+  responses arrive from the daemon as in-band JSON `errorDetail`
+  events on a 200 stream; previously both the progress and
+  non-progress paths swallowed those events and reported the pull as
+  successful, then surfaced as a confusing "manifest.json not found"
+  during export. The error message from the registry is now returned
+  as the pull failure cause.
+- An empty, whitespace-only, or comments-only `.layerx.yaml` no longer
+  blocks startup. The M12 contract treats such files identically to a
+  missing config — fall back to defaults — and a stub placeholder file
+  in a repository will load cleanly.
+- Replacing a regular file with a hardlink at the same path is now
+  charged as wasted bytes. The original file's bytes still ship in the
+  earlier layer's tar even though the live filesystem now points
+  elsewhere, so the prior contents are dead weight in the image. The
+  efficiency walk previously skipped the replacement node entirely and
+  the prior occurrence dropped out of the waste total.
 
 ## [v1.2.3] - 2026-05-28
 

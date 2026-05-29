@@ -441,7 +441,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.scheduleStatusClear(2 * time.Second)
 
 	case tea.KeyPressMsg:
-		// Esc has precedence: viewer search → viewer → filter (active) → filter (confirmed) → help → quit
+		// Esc has precedence: viewer search → viewer → waste → filter
+		// (active) → filter (confirmed) → help. In stateReady Esc is
+		// dismiss-only — falling through to tea.Quit caused mash-Esc on a
+		// closed viewer to silently quit the app, which Gate C in M08
+		// flagged as a regression. Esc still exits the loading and error
+		// screens, where it is the documented escape hatch ("Press q or
+		// Esc to exit").
 		if msg.Code == tea.KeyEscape {
 			if m.viewState != viewNone {
 				if m.viewSearchActive {
@@ -487,6 +493,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.showHelp {
 				m.showHelp = false
+				return m, nil
+			}
+			// In stateReady, Esc has nothing left to dismiss — swallow it.
+			// Quit is reserved for q / ctrl+c. In stateLoading and
+			// stateError the documented UX is "Press q or Esc to exit",
+			// so honour that fall-through there.
+			if m.state == stateReady {
 				return m, nil
 			}
 			m.quitting = true
@@ -1223,6 +1236,9 @@ func (m model) viewLoading() tea.View {
 		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
 	}
 
+	lines = append(lines, "")
+	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	lines = append(lines, "  "+hintStyle.Render("Press q or Esc to exit."))
 	lines = append(lines, "")
 
 	boxWidth := 52

@@ -253,6 +253,40 @@ func TestEfficiency_OpaqueWhiteout_BreaksRun(t *testing.T) {
 		"opaque whiteout should reset run; the post-opaque copy is fresh")
 }
 
+// regular_file_replaced_by_hardlink: a file is added as real bytes in layer 0
+// and replaced by a hardlink at the same path in layer 1. The original 1KB
+// still ships in layer 0's tar even though the live filesystem now points
+// elsewhere — those bytes are dead weight and must be charged as waste.
+// Pre-fix indexTree skipped the hardlink at snapshot 1, so pathRuns flushed
+// the run as a single occurrence and the 1KB silently vanished from the
+// total.
+func TestEfficiency_RegularFileReplacedByHardlink_IsWasted(t *testing.T) {
+	hardlink := makeFile("foo", "/foo", 0)
+	hardlink.IsHardlink = true
+	hardlink.Linkname = "/bar"
+
+	layers := []Layer{
+		{Index: 0, Size: 1000, Tree: makeTree(
+			makeFile("foo", "/foo", 1000),
+			makeFile("bar", "/bar", 1000),
+		)},
+		{Index: 1, Size: 0, Tree: makeTree(hardlink)},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(1000), result.WastedBytes,
+		"layer 0's 1KB at /foo is dead weight once layer 1 replaces it with a hardlink")
+	// liveBytes = /bar (1000); /foo at the final snapshot is a hardlink
+	// (size 0 in tar). totalBytes = 1000 live + 1000 wasted = 2000.
+	assert.Equal(t, 0.5, result.Score, "score must reflect 1KB waste against 2KB total")
+	require.Len(t, result.WastedFiles, 1)
+	assert.Equal(t, "/foo", result.WastedFiles[0].Path)
+	assert.Equal(t, int64(1000), result.WastedFiles[0].TotalWasted)
+	// LayerCount counts byte-contributing occurrences only — the size=0
+	// hardlink replacement extends the run but does not contribute bytes.
+	assert.Equal(t, 1, result.WastedFiles[0].LayerCount,
+		"only layer 0 contributed bytes; the layer-1 hardlink is size 0")
+}
+
 // EfficiencyFromAnalysis must agree with Efficiency on the same inputs and
 // avoid the redundant Stack call.
 func TestEfficiencyFromAnalysis_MatchesEfficiency(t *testing.T) {

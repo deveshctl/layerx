@@ -190,7 +190,7 @@ source <(layerx completion bash)
 | `j` / `k`   | Move up / down                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
 | `Enter`     | Open file viewer; expand or collapse a folder                |
-| `Esc`       | Back (close search → close viewer → clear filter → quit)     |
+| `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |
 | `/`         | Filter file tree (tree) / search in viewer (viewer)          |
 | `n` / `N`   | Next / previous search match (viewer)                        |
 | `y`         | Copy file path to clipboard                                  |

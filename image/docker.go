@@ -125,26 +125,25 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	}
 	defer rc.Close()
 
-	if progress != nil {
-		if err := r.streamPullProgress(ctx, rc, progress); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
-			return &ErrPullFailed{Ref: imageRef, Cause: err}
+	if err := r.streamPullProgress(ctx, rc, progress); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
 		}
-	} else {
-		if _, err := io.Copy(io.Discard, rc); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
-			return &ErrPullFailed{Ref: imageRef, Cause: err}
-		}
+		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
 	return nil
 }
 
 // streamPullProgress reads JSON pull events and sends progress updates.
-// Returns the first stream error encountered, or nil on clean EOF.
+// Returns an error if the stream reports a transport-level failure (decode
+// error, daemon hang-up) or an in-band errorDetail event (auth failure,
+// "manifest not found", registry 5xx). The Docker daemon returns HTTP 200
+// for /images/create even when the pull fails, encoding the failure as an
+// inline JSON errorDetail message — so the in-band check is required to
+// avoid reporting a failed pull as success.
+//
+// progress may be nil; in that case the stream is still consumed and the
+// errorDetail check still runs, but no progress events are emitted.
 func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.ImagePullResponse, progress chan<- ProgressEvent) error {
 	type layerProgress struct {
 		current int64
@@ -157,7 +156,39 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 		if err != nil {
 			return err
 		}
+		// In-band failure (auth, manifest-not-found, registry 5xx): the
+		// daemon returns HTTP 200 and encodes the failure as an
+		// errorDetail JSON message. Surface as a real error rather than
+		// reporting the pull as success. When errorDetail.Message is
+		// empty, fall back to the daemon-supplied Code and Status
+		// (e.g. Code=401 with Status="Pulling from private/foo") so the
+		// user gets some diagnostic content even on registries that
+		// emit terse error events.
+		if msg.Error != nil {
+			if msg.Error.Message != "" {
+				return errors.New(msg.Error.Message)
+			}
+			parts := []string{"pull failed"}
+			if msg.Error.Code != 0 {
+				parts = append(parts, fmt.Sprintf("registry error code %d", msg.Error.Code))
+			}
+			if msg.Status != "" {
+				parts = append(parts, "last status: "+msg.Status)
+			}
+			if len(parts) == 1 {
+				parts = append(parts, "registry returned an empty error")
+			}
+			return errors.New(strings.Join(parts, "; "))
+		}
 		if msg.ID == "" {
+			continue
+		}
+
+		// progress==nil callers (CI, JSON export) only need the
+		// errorDetail check above. Skip the per-layer bookkeeping below
+		// — pre-diff, those callers used io.Copy(io.Discard) and avoided
+		// the work entirely; preserve that for chatty large pulls.
+		if progress == nil {
 			continue
 		}
 
