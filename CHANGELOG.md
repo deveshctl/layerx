@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Running `layerx` with no image argument now prints the usage block again,
+  not just the bare `Error: accepts 1 arg(s), received 0` line. v1.3.0's
+  fix to silence the usage dump on config and daemon errors went too broad
+  and swallowed it on missing-argument errors too, where the help text is
+  exactly what the user needs.
+
 ## [v1.3.0] - 2026-05-30
 
 Compare two builds, declare path rules, and pin the config and JSON schemas.

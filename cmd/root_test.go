@@ -114,18 +114,36 @@ func TestExecuteContext_PropagatesToRunE(t *testing.T) {
 	}
 }
 
-// rootCmd must silence cobra's default usage block on RunE errors. Without
-// this, every config-parse error, "image not found" error, or daemon-down
-// error gets a 60-line help dump tacked on after the one-line message —
-// burying the actual problem.
+// rootCmd must silence cobra's default usage block on RunE errors (bad
+// config, daemon down, image not found) — but NOT on arg-validation errors
+// where the usage block IS the appropriate response. Bare `layerx` with no
+// image argument is the canonical example: a user who ran the binary with
+// no args wants to see how to use it, not a one-line cobra error alone.
 //
-// This is the structural guarantee. The behavioral counterpart below
-// (TestRootCmd_BadConfig_NoUsageDump) exercises the same contract end-to-end
-// through cobra so a future change that swaps mechanisms (e.g. custom error
-// handler) can't quietly regress the user-visible behavior.
-func TestRootCmd_SilenceUsageIsSet(t *testing.T) {
-	assert.True(t, rootCmd.SilenceUsage,
-		"rootCmd.SilenceUsage must be true so config/daemon errors are not buried under the usage block")
+// Pinning both halves of the contract:
+//   - TestRootCmd_NoArgs_ShowsUsage              — bare `layerx` → usage visible
+//   - TestRootCmd_BadConfig_NoUsageDump (below)  — RunE error    → usage silenced
+func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
+	var stderr bytes.Buffer
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetArgs(nil)
+	})
+
+	err := rootCmd.Execute()
+	require.Error(t, err, "missing image argument must produce an error")
+
+	out := stderr.String()
+	assert.Contains(t, out, "Error:",
+		"cobra must print the one-line error so the user sees what failed")
+	assert.Contains(t, out, "accepts 1 arg",
+		"the arg-count error must reach the user")
+	assert.Contains(t, out, "Usage:",
+		"usage block must accompany an arg-validation error — that IS the help the user needs")
 }
 
 // End-to-end: invoke rootCmd with a malformed .layerx.yaml in cwd. The error
@@ -150,6 +168,11 @@ func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
 		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
 		rootCmd.SetArgs(nil)
+		// runInspect flips rootCmd.SilenceUsage to true on entry; since
+		// rootCmd is package-level, that flip leaks across tests in the
+		// same binary. Reset so TestRootCmd_NoArgs_ShowsUsage sees the
+		// declared default regardless of test ordering.
+		rootCmd.SilenceUsage = false
 	})
 
 	err := rootCmd.Execute()
