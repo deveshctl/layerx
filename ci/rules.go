@@ -29,15 +29,35 @@ type Rule interface {
 	Evaluate(ctx EvalContext) []RuleResult
 }
 
+// RuleKind classifies a rule's reporting bucket. Report.Print uses Kind to
+// route results into the "Global Rules:" / "Path Rules:" output sections —
+// each rule stamps Kind onto every RuleResult it emits, so the printer never
+// needs to consult an allowlist or the Rule that produced the result.
+type RuleKind int
+
+const (
+	// RuleKindGlobal — rules that evaluate one image-wide property
+	// (efficiency score, total wasted bytes). Always emit a single
+	// RuleResult; render under the "Global Rules:" section.
+	RuleKindGlobal RuleKind = iota
+
+	// RuleKindPath — rules that match against per-layer trees or wasted
+	// files. Emit one RuleResult per finding (or one PASS result if no
+	// findings); render under the "Path Rules:" section.
+	RuleKindPath
+)
+
 // RuleResult holds the outcome of evaluating a single rule.
 //
 // RuleID identifies the specific finding (e.g. "block:/root/.cache@layer-3")
 // for log-grep / future --rule-id filtering. Name is the human-readable rule
 // kind ("efficiency", "block", "deny-waste"). Detail is optional context shown
-// in the report — file path, layer index, etc.
+// in the report — file path, layer index, etc. Kind controls which output
+// section (Global vs Path Rules) the printer routes the result into.
 type RuleResult struct {
 	RuleID    string
 	Name      string
+	Kind      RuleKind
 	Passed    bool
 	Actual    string
 	Threshold string
@@ -63,6 +83,7 @@ func (r LowestEfficiency) Evaluate(ctx EvalContext) []RuleResult {
 	return []RuleResult{{
 		RuleID:    r.Name(),
 		Name:      r.Name(),
+		Kind:      RuleKindGlobal,
 		Passed:    passed,
 		Actual:    fmt.Sprintf("%.1f%%", result.Score*100),
 		Threshold: fmt.Sprintf("%.1f%%", r.Threshold*100),
@@ -86,6 +107,7 @@ func (r HighestWastedBytes) Evaluate(ctx EvalContext) []RuleResult {
 	return []RuleResult{{
 		RuleID:    r.Name(),
 		Name:      r.Name(),
+		Kind:      RuleKindGlobal,
 		Passed:    passed,
 		Actual:    image.FormatBytes(result.WastedBytes),
 		Threshold: image.FormatBytes(r.Threshold),
@@ -114,6 +136,7 @@ func (r HighestUserWastedPercent) Evaluate(ctx EvalContext) []RuleResult {
 	return []RuleResult{{
 		RuleID:    r.Name(),
 		Name:      r.Name(),
+		Kind:      RuleKindGlobal,
 		Passed:    passed,
 		Actual:    fmt.Sprintf("%.1f%%", pct*100),
 		Threshold: fmt.Sprintf("%.1f%%", r.Threshold*100),

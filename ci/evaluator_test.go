@@ -236,3 +236,43 @@ func TestReport_Print_GroupedSections(t *testing.T) {
 	require.Greater(t, gIdx, -1)
 	require.Greater(t, pIdx, gIdx, "Path Rules section must follow Global Rules section")
 }
+
+// Kind is the contract that splits report sections — pin it on every
+// RuleResult emitted by the built-in rules so a future rule that forgets
+// to stamp Kind (defaults to RuleKindGlobal) doesn't silently slip into
+// the wrong section.
+func TestEvaluate_RuleResultKindStamped(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.5,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{
+			{Path: "/usr/lib/foo.pyc", TotalWasted: 50, LayerCount: 2},
+		},
+	}
+	layer := image.Layer{
+		Index: 0, ID: "lay0", Tree: image.NewFileTree(),
+	}
+	layer.Tree.Root.AddChild(&image.FileNode{
+		Name: "/tmp/x", Path: "/tmp/x", DiffType: image.Added,
+	})
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+		HighestUserWastedPercent{Threshold: 0.1},
+		BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}},
+		DenyWastePathRule{ID: "deny-pyc", Patterns: []string{"**/*.pyc"}},
+		MaxLayerCountRule{ID: "cap", MaxCount: 1},
+	}
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 1000, Layers: []image.Layer{layer}}, rules)
+
+	gotByName := map[string]RuleKind{}
+	for _, r := range report.Results {
+		gotByName[r.Name] = r.Kind
+	}
+	assert.Equal(t, RuleKindGlobal, gotByName["efficiency"])
+	assert.Equal(t, RuleKindGlobal, gotByName["wasted bytes"])
+	assert.Equal(t, RuleKindGlobal, gotByName["wasted %"])
+	assert.Equal(t, RuleKindPath, gotByName["block"])
+	assert.Equal(t, RuleKindPath, gotByName["deny-waste"])
+	assert.Equal(t, RuleKindPath, gotByName["max-layer-count"])
+}

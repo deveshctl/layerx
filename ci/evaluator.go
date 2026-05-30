@@ -116,15 +116,18 @@ func (r *Report) Print(w io.Writer) {
 	fmt.Fprintf(w, "\n  Exit code: 1\n")
 }
 
-// splitResults partitions a result slice into globals (efficiency rules) and
-// path-rule findings, preserving original order within each group.
+// splitResults partitions a result slice into globals and path-rule findings,
+// preserving original order within each group. Each rule stamps Kind onto
+// every RuleResult it emits, so the printer never needs to consult an
+// allowlist or know the concrete rule type — adding a new global or path
+// rule needs no changes here.
 func splitResults(all []RuleResult) (globals, paths []RuleResult) {
 	for _, r := range all {
-		switch r.Name {
-		case "efficiency", "wasted bytes", "wasted %":
-			globals = append(globals, r)
-		default:
+		switch r.Kind {
+		case RuleKindPath:
 			paths = append(paths, r)
+		default:
+			globals = append(globals, r)
 		}
 	}
 	return globals, paths

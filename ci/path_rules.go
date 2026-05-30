@@ -67,6 +67,7 @@ func (r BlockPathRule) Evaluate(ctx EvalContext) []RuleResult {
 				results = append(results, RuleResult{
 					RuleID:    fmt.Sprintf("%s:%s@layer-%d", r.ID, node.Path, layer.Index),
 					Name:      r.Name(),
+					Kind:      RuleKindPath,
 					Passed:    false,
 					Actual:    node.Path,
 					Threshold: pat,
@@ -81,6 +82,7 @@ func (r BlockPathRule) Evaluate(ctx EvalContext) []RuleResult {
 		return []RuleResult{{
 			RuleID:    r.ID,
 			Name:      r.Name(),
+			Kind:      RuleKindPath,
 			Passed:    true,
 			Actual:    "0",
 			Threshold: fmt.Sprintf("%d patterns", len(r.Patterns)),
@@ -111,6 +113,7 @@ func (r DenyWastePathRule) Evaluate(ctx EvalContext) []RuleResult {
 				results = append(results, RuleResult{
 					RuleID:    fmt.Sprintf("%s:%s", r.ID, wf.Path),
 					Name:      r.Name(),
+					Kind:      RuleKindPath,
 					Passed:    false,
 					Actual:    fmt.Sprintf("%s (%d layers, %s)", wf.Path, wf.LayerCount, image.FormatBytes(wf.TotalWasted)),
 					Threshold: pat,
@@ -123,6 +126,7 @@ func (r DenyWastePathRule) Evaluate(ctx EvalContext) []RuleResult {
 		return []RuleResult{{
 			RuleID:    r.ID,
 			Name:      r.Name(),
+			Kind:      RuleKindPath,
 			Passed:    true,
 			Actual:    "0",
 			Threshold: fmt.Sprintf("%d patterns", len(r.Patterns)),
@@ -147,6 +151,7 @@ func (r MaxLayerCountRule) Evaluate(ctx EvalContext) []RuleResult {
 		return []RuleResult{{
 			RuleID:    r.ID,
 			Name:      r.Name(),
+			Kind:      RuleKindPath,
 			Passed:    true,
 			Actual:    "disabled",
 			Threshold: "disabled",
@@ -159,6 +164,7 @@ func (r MaxLayerCountRule) Evaluate(ctx EvalContext) []RuleResult {
 				results = append(results, RuleResult{
 					RuleID:    fmt.Sprintf("%s:%s", r.ID, wf.Path),
 					Name:      r.Name(),
+					Kind:      RuleKindPath,
 					Passed:    false,
 					Actual:    fmt.Sprintf("%s (%d layers)", wf.Path, wf.LayerCount),
 					Threshold: fmt.Sprintf("%d layers", r.MaxCount),
@@ -170,6 +176,7 @@ func (r MaxLayerCountRule) Evaluate(ctx EvalContext) []RuleResult {
 		return []RuleResult{{
 			RuleID:    r.ID,
 			Name:      r.Name(),
+			Kind:      RuleKindPath,
 			Passed:    true,
 			Actual:    "0",
 			Threshold: fmt.Sprintf("%d layers", r.MaxCount),
