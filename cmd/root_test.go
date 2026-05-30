@@ -120,12 +120,20 @@ func TestExecuteContext_PropagatesToRunE(t *testing.T) {
 // image argument is the canonical example: a user who ran the binary with
 // no args wants to see how to use it, not a one-line cobra error alone.
 //
+// Stream split (from cobra/command.go ~line 1160-1170):
+//   - The "Error: ..." line is written via PrintErrln → ErrOrStderr (stderr)
+//   - The Usage block is written via Println          → OutOrStderr (stdout)
+//
+// In a real terminal both default to os.Stderr so the user sees them
+// together, but in a test the streams must be captured separately or one
+// half of the output goes missing.
+//
 // Pinning both halves of the contract:
 //   - TestRootCmd_NoArgs_ShowsUsage              — bare `layerx` → usage visible
 //   - TestRootCmd_BadConfig_NoUsageDump (below)  — RunE error    → usage silenced
 func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
-	var stderr bytes.Buffer
-	rootCmd.SetOut(&bytes.Buffer{})
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
 	rootCmd.SetArgs([]string{})
 	t.Cleanup(func() {
@@ -137,19 +145,23 @@ func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 	err := rootCmd.Execute()
 	require.Error(t, err, "missing image argument must produce an error")
 
-	out := stderr.String()
-	assert.Contains(t, out, "Error:",
-		"cobra must print the one-line error so the user sees what failed")
-	assert.Contains(t, out, "accepts 1 arg",
+	errOut := stderr.String()
+	assert.Contains(t, errOut, "Error:",
+		"cobra must print the one-line error to stderr so the user sees what failed")
+	assert.Contains(t, errOut, "accepts 1 arg",
 		"the arg-count error must reach the user")
-	assert.Contains(t, out, "Usage:",
+
+	stdOut := stdout.String()
+	assert.Contains(t, stdOut, "Usage:",
 		"usage block must accompany an arg-validation error — that IS the help the user needs")
+	assert.Contains(t, stdOut, "layerx [flags] IMAGE_OR_ARCHIVE",
+		"the usage line must include the rootCmd Use string")
 }
 
 // End-to-end: invoke rootCmd with a malformed .layerx.yaml in cwd. The error
 // chain runs config.Load → returns parse error → cobra prints "Error: ..."
-// to stderr. Without SilenceUsage the full usage block follows, drowning the
-// error.
+// to stderr. Without SilenceUsage the full usage block follows on stdout,
+// drowning the error.
 //
 // This test never reaches the Docker daemon: config.Load fails at line 137 of
 // runInspect, well before resolver selection at line 179. Safe to run in CI.
@@ -158,10 +170,11 @@ func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
 	// .layerx.yaml so config.Load() picks it up.
 	writeConfig(t, "rules:\n  lowest-efficiency: not-a-number\n")
 
-	// Capture cobra's writer streams. Cobra prints both errors and the
-	// usage block through cmd.ErrOrStderr().
-	var stderr bytes.Buffer
-	rootCmd.SetOut(&bytes.Buffer{})
+	// Capture both streams. Cobra prints the error line via PrintErrln
+	// (stderr) and the usage block via Println (stdout) — see the
+	// stream-split note on TestRootCmd_NoArgs_ShowsUsage above.
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
 	rootCmd.SetArgs([]string{"fake:latest"})
 	t.Cleanup(func() {
@@ -180,11 +193,18 @@ func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
 	assert.Contains(t, err.Error(), "loading config",
 		"error chain must identify the config-load step")
 
-	out := stderr.String()
-	assert.Contains(t, out, "Error:",
+	errOut := stderr.String()
+	assert.Contains(t, errOut, "Error:",
 		"cobra must still print the one-line error so the user sees what failed")
-	assert.NotContains(t, out, "Usage:",
-		"usage block must be silenced — the error is the message, not a help nudge")
-	assert.NotContains(t, out, "Inspect a container image",
-		"the Long description must not be dumped to stderr on a config error")
+
+	// Usage goes to stdout, not stderr — assert it's missing from BOTH so a
+	// future cobra change that re-routes the usage block can't sneak the
+	// dump back in through the other stream.
+	stdOut := stdout.String()
+	assert.NotContains(t, stdOut, "Usage:",
+		"usage block must be silenced on RunE errors — the error is the message, not a help nudge")
+	assert.NotContains(t, stdOut, "Inspect a container image",
+		"the Long description must not be dumped on a config error")
+	assert.NotContains(t, errOut, "Usage:",
+		"usage block must not appear on stderr either")
 }
