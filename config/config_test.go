@@ -156,3 +156,250 @@ func TestLoadFrom_EmptyFile_UsesDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadFrom_Version_Default(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  lowest-efficiency: 0.9
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	assert.Equal(t, 1, cfg.Version, "absent version: defaults to 1")
+}
+
+func TestLoadFrom_Version_Explicit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: 1
+rules:
+  lowest-efficiency: 0.9
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	assert.Equal(t, 1, cfg.Version)
+}
+
+func TestLoadFrom_Version_Unknown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: 2
+rules:
+  lowest-efficiency: 0.9
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "version")
+	assert.Contains(t, err.Error(), "1")
+}
+
+func TestLoadFrom_PathRules_FlatForm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: 1
+rules:
+  lowest-efficiency: 0.9
+path-rules:
+  block:
+    - "**/.git/**"
+    - /tmp/**
+  deny-waste:
+    - "**/*.pyc"
+  max-layer-count: 3
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.PathRules, 3)
+
+	assert.Equal(t, "block", cfg.PathRules[0].ID)
+	assert.Equal(t, PathRuleBlock, cfg.PathRules[0].Type)
+	assert.Equal(t, []string{"**/.git/**", "/tmp/**"}, cfg.PathRules[0].Paths)
+
+	assert.Equal(t, "deny-waste", cfg.PathRules[1].ID)
+	assert.Equal(t, PathRuleDenyWaste, cfg.PathRules[1].Type)
+
+	assert.Equal(t, "max-layer-count", cfg.PathRules[2].ID)
+	assert.Equal(t, PathRuleMaxLayerCount, cfg.PathRules[2].Type)
+	assert.Equal(t, 3, cfg.PathRules[2].Threshold)
+}
+
+func TestLoadFrom_PathRules_FlatForm_Partial(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  block:
+    - /tmp/**
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.PathRules, 1)
+	assert.Equal(t, PathRuleBlock, cfg.PathRules[0].Type)
+}
+
+func TestLoadFrom_PathRules_ListForm(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  - id: no-apt-cache
+    type: block
+    paths:
+      - /var/lib/apt/lists/**
+  - id: no-pyc-waste
+    type: deny-waste
+    paths: ["**/*.pyc"]
+  - id: dedupe-cap
+    type: max-layer-count
+    threshold: 3
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.PathRules, 3)
+	assert.Equal(t, "no-apt-cache", cfg.PathRules[0].ID)
+	assert.Equal(t, PathRuleBlock, cfg.PathRules[0].Type)
+	assert.Equal(t, "no-pyc-waste", cfg.PathRules[1].ID)
+	assert.Equal(t, "dedupe-cap", cfg.PathRules[2].ID)
+	assert.Equal(t, 3, cfg.PathRules[2].Threshold)
+}
+
+func TestLoadFrom_PathRules_ListForm_DuplicateID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  - id: foo
+    type: block
+    paths: [/a/**]
+  - id: foo
+    type: deny-waste
+    paths: [/b/**]
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate id")
+	assert.Contains(t, err.Error(), "foo")
+}
+
+func TestLoadFrom_PathRules_ListForm_MissingType(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  - id: foo
+    paths: [/a/**]
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "type")
+	assert.Contains(t, err.Error(), "foo")
+}
+
+func TestLoadFrom_PathRules_ListForm_MissingID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  - type: block
+    paths: [/a/**]
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "id")
+}
+
+func TestLoadFrom_PathRules_ListForm_UnknownType(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  - id: foo
+    type: blokc
+    paths: [/a/**]
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "blokc")
+	assert.Contains(t, err.Error(), "block")
+}
+
+func TestLoadFrom_PathRules_InvalidGlob(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  block:
+    - "[invalid"
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid glob")
+	assert.Contains(t, err.Error(), "[invalid")
+}
+
+func TestLoadFrom_PathRules_MaxLayerCount_Range(t *testing.T) {
+	cases := []struct {
+		name      string
+		yaml      string
+		wantError string
+	}{
+		{
+			name:      "one_rejected",
+			yaml:      "path-rules:\n  max-layer-count: 1\n",
+			wantError: ">= 2",
+		},
+		{
+			name:      "negative_rejected",
+			yaml:      "path-rules:\n  max-layer-count: -1\n",
+			wantError: ">= 0",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".layerx.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tc.yaml), 0644))
+
+			_, err := LoadFrom(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantError)
+		})
+	}
+}
+
+// max-layer-count: 0 is treated as disabled (rule absent), not an error.
+// The flat normalizer drops it via the `flat.MaxLayerCount != 0` check.
+func TestLoadFrom_PathRules_MaxLayerCount_ZeroDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  max-layer-count: 0
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.PathRules, "max-layer-count: 0 must produce no rule (treated as disabled)")
+}
+
+// Mixing forms is impossible at the YAML AST level — a node is either a
+// mapping or a sequence, not both. This test pins that goccy gives a clean
+// error rather than silently picking one.
+func TestLoadFrom_PathRules_BothForms_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	// Sequence syntax with mapping-like content — invalid YAML structure
+	// for our schema; goccy will error one way or another.
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  block: [a]
+  - id: foo
+    type: block
+    paths: [/a/**]
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+}
