@@ -35,6 +35,7 @@ Thumbs.db
 layerx.md
 layerx_guide.md
 CLAUDE.md
+docs/superpowers/
 
 # Vendor (we use modules, not vendoring)
 /vendor/
