@@ -147,10 +147,11 @@ func TestJSONExport_SchemaRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	var schema struct {
-		ImageRef   string `json:"imageRef"`
-		TotalSize  int64  `json:"totalSize"`
-		LayerCount int    `json:"layerCount"`
-		Efficiency struct {
+		SchemaVersion string `json:"schemaVersion"`
+		ImageRef      string `json:"imageRef"`
+		TotalSize     int64  `json:"totalSize"`
+		LayerCount    int    `json:"layerCount"`
+		Efficiency    struct {
 			Score       float64 `json:"score"`
 			WastedBytes int64   `json:"wastedBytes"`
 			WastedFiles []struct {
@@ -174,6 +175,8 @@ func TestJSONExport_SchemaRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &schema))
 
+	assert.Equal(t, jsonSchemaVersion, schema.SchemaVersion,
+		"schemaVersion is part of the locked schema; if jsonSchemaVersion changes, this test must be updated to match")
 	assert.Equal(t, "nginx:latest", schema.ImageRef)
 	assert.Equal(t, int64(100), schema.TotalSize)
 	assert.Equal(t, 1, schema.LayerCount)
