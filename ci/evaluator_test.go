@@ -21,7 +21,7 @@ func TestEvaluate_AllPass(t *testing.T) {
 		HighestWastedBytes{Threshold: 1000},
 		HighestUserWastedPercent{Threshold: 0.1},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	assert.True(t, report.Passed)
 	assert.Equal(t, 0, report.ExitCode())
 }
@@ -36,7 +36,7 @@ func TestEvaluate_OneFails(t *testing.T) {
 		LowestEfficiency{Threshold: 0.9},
 		HighestWastedBytes{Threshold: 1000},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	assert.False(t, report.Passed)
 	assert.Equal(t, 1, report.ExitCode())
 }
@@ -54,7 +54,7 @@ func TestEvaluate_AllFail(t *testing.T) {
 		HighestWastedBytes{Threshold: 1000},
 		HighestUserWastedPercent{Threshold: 0.1},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	assert.False(t, report.Passed)
 	assert.Equal(t, 1, report.ExitCode())
 	assert.Equal(t, 3, len(report.Results))
@@ -66,7 +66,7 @@ func TestReport_Print_Pass(t *testing.T) {
 		WastedBytes: 0,
 		WastedFiles: []image.WastedFile{},
 	}
-	report := Evaluate(eff, 1000, []Rule{LowestEfficiency{Threshold: 0.9}})
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 1000}, []Rule{LowestEfficiency{Threshold: 0.9}})
 	var buf bytes.Buffer
 	report.Print(&buf)
 	assert.Contains(t, buf.String(), "PASS")
@@ -85,7 +85,7 @@ func TestReport_Print_Fail(t *testing.T) {
 	rules := []Rule{
 		LowestEfficiency{Threshold: 0.9},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	var buf bytes.Buffer
 	report.Print(&buf)
 
@@ -110,7 +110,7 @@ func TestEvaluate_TopWasteLimitedTo10(t *testing.T) {
 		WastedBytes: 1500,
 		WastedFiles: files,
 	}
-	report := Evaluate(eff, 3000, []Rule{LowestEfficiency{Threshold: 0.9}})
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 3000}, []Rule{LowestEfficiency{Threshold: 0.9}})
 	require.Len(t, report.TopWaste, 10)
 }
 
@@ -120,7 +120,7 @@ func TestEvaluate_NoRules(t *testing.T) {
 		WastedBytes: 1000,
 		WastedFiles: []image.WastedFile{},
 	}
-	report := Evaluate(eff, 2000, []Rule{})
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 2000}, []Rule{})
 	assert.True(t, report.Passed)
 	assert.Equal(t, 0, report.ExitCode())
 }
@@ -136,7 +136,7 @@ func TestEvaluate_TopWasteIsIndependent(t *testing.T) {
 		WastedBytes: 600,
 		WastedFiles: files,
 	}
-	report := Evaluate(eff, 1200, nil)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 1200}, nil)
 	require.Len(t, report.TopWaste, 3)
 	assert.Equal(t, "/a", report.TopWaste[0].Path)
 

@@ -159,7 +159,12 @@ func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, c
 	}
 
 	efficiency := image.EfficiencyFromAnalysis(analysis)
-	report := ci.Evaluate(efficiency, analysis.TotalSize, rules)
+	report := ci.Evaluate(ci.EvalContext{
+		Efficiency:   efficiency,
+		TotalSize:    analysis.TotalSize,
+		Layers:       analysis.Layers,
+		StackedTrees: analysis.StackedTrees,
+	}, rules)
 	report.Print(os.Stdout)
 
 	if report.ExitCode() != 0 {

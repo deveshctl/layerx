@@ -15,29 +15,32 @@ type Report struct {
 	Score    float64
 }
 
-// Evaluate runs all rules against the efficiency result and returns a report.
-// A nil efficiency argument is treated as a zero-value result (score 0, no
-// wasted files); rules still run, which lets callers surface "no analysis
-// available" cleanly without needing to nil-guard at every call site.
-func Evaluate(efficiency *image.EfficiencyResult, totalSize int64, rules []Rule) *Report {
-	if efficiency == nil {
-		efficiency = &image.EfficiencyResult{}
+// Evaluate runs all rules against the given context and returns a report.
+// A nil ctx.Efficiency is treated as a zero-value result (score 0, no
+// wasted files); rules still run.
+//
+// One Rule may emit multiple RuleResults — path rules typically emit one
+// per matched path. The report's Passed flag is the AND of every result.
+func Evaluate(ctx EvalContext, rules []Rule) *Report {
+	if ctx.Efficiency == nil {
+		ctx.Efficiency = &image.EfficiencyResult{}
 	}
 	report := &Report{
 		Passed: true,
-		Score:  efficiency.Score,
+		Score:  ctx.Efficiency.Score,
 	}
 
 	for _, rule := range rules {
-		result := rule.Evaluate(efficiency, totalSize)
-		report.Results = append(report.Results, result)
-		if !result.Passed {
-			report.Passed = false
+		for _, r := range rule.Evaluate(ctx) {
+			report.Results = append(report.Results, r)
+			if !r.Passed {
+				report.Passed = false
+			}
 		}
 	}
 
-	limit := min(10, len(efficiency.WastedFiles))
-	report.TopWaste = append([]image.WastedFile(nil), efficiency.WastedFiles[:limit]...)
+	limit := min(10, len(ctx.Efficiency.WastedFiles))
+	report.TopWaste = append([]image.WastedFile(nil), ctx.Efficiency.WastedFiles[:limit]...)
 
 	return report
 }
