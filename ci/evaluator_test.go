@@ -3,6 +3,7 @@ package ci
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -145,4 +146,93 @@ func TestEvaluate_TopWasteIsIndependent(t *testing.T) {
 	eff.WastedFiles[0].TotalWasted = -1
 	assert.Equal(t, "/a", report.TopWaste[0].Path, "TopWaste must own its backing array")
 	assert.Equal(t, int64(300), report.TopWaste[0].TotalWasted)
+}
+
+// One BlockPathRule matching N paths produces N entries in Report.Results,
+// each with Passed: false. This pins the per-violation contract that the
+// report printer relies on.
+func TestEvaluate_OneViolationPerResult(t *testing.T) {
+	layer := image.Layer{
+		Index: 0,
+		ID:    "lay0",
+		Tree:  image.NewFileTree(),
+	}
+	for _, p := range []string{"/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d", "/tmp/e"} {
+		layer.Tree.Root.AddChild(&image.FileNode{
+			Name: p, Path: p, DiffType: image.Added,
+		})
+	}
+	r := BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}}
+	report := Evaluate(EvalContext{
+		Efficiency: &image.EfficiencyResult{},
+		Layers:     []image.Layer{layer},
+	}, []Rule{r})
+	failures := 0
+	for _, r := range report.Results {
+		if !r.Passed {
+			failures++
+		}
+	}
+	assert.Equal(t, 5, failures, "one rule, 5 matches → 5 failure entries in report.Results")
+}
+
+// Mixing global + path rules: globals pass, one path rule fails. The report
+// must contain ALL four results (3 globals + 1 path) and Passed: false.
+func TestEvaluate_MixedRulesPassFail(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.95,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{},
+	}
+	layer := image.Layer{
+		Index: 0, ID: "lay0", Tree: image.NewFileTree(),
+	}
+	layer.Tree.Root.AddChild(&image.FileNode{
+		Name: "/tmp/x", Path: "/tmp/x", DiffType: image.Added,
+	})
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+		HighestUserWastedPercent{Threshold: 0.1},
+		BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}},
+	}
+	report := Evaluate(EvalContext{
+		Efficiency: eff,
+		TotalSize:  10000,
+		Layers:     []image.Layer{layer},
+	}, rules)
+	assert.False(t, report.Passed)
+	assert.Len(t, report.Results, 4, "3 globals + 1 path-rule violation = 4 results")
+}
+
+// Print groups results into "Global Rules:" / "Path Rules:" sections in
+// the documented order. CHANGELOG calls this a Breaking change for log
+// scrapers, so it gets an explicit pin.
+func TestReport_Print_GroupedSections(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.85,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{},
+	}
+	layer := image.Layer{
+		Index: 0, ID: "lay0", Tree: image.NewFileTree(),
+	}
+	layer.Tree.Root.AddChild(&image.FileNode{
+		Name: "/tmp/x", Path: "/tmp/x", DiffType: image.Added,
+	})
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}},
+	}
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000, Layers: []image.Layer{layer}}, rules)
+	var buf bytes.Buffer
+	report.Print(&buf)
+	out := buf.String()
+	assert.Contains(t, out, "Global Rules:")
+	assert.Contains(t, out, "Path Rules:")
+	// Globals must appear before Path rules.
+	gIdx := strings.Index(out, "Global Rules:")
+	pIdx := strings.Index(out, "Path Rules:")
+	require.Greater(t, gIdx, -1)
+	require.Greater(t, pIdx, gIdx, "Path Rules section must follow Global Rules section")
 }

@@ -214,6 +214,17 @@ func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {
 		rules = append(rules, ci.HighestUserWastedPercent{Threshold: huwp})
 	}
 
+	for _, spec := range cfg.PathRules {
+		switch spec.Type {
+		case config.PathRuleBlock:
+			rules = append(rules, ci.BlockPathRule{ID: spec.ID, Patterns: spec.Paths})
+		case config.PathRuleDenyWaste:
+			rules = append(rules, ci.DenyWastePathRule{ID: spec.ID, Patterns: spec.Paths})
+		case config.PathRuleMaxLayerCount:
+			rules = append(rules, ci.MaxLayerCountRule{ID: spec.ID, MaxCount: spec.Threshold})
+		}
+	}
+
 	return rules
 }
 

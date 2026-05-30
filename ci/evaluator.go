@@ -54,6 +54,26 @@ func (r *Report) ExitCode() int {
 }
 
 // Print writes the human-readable report to w.
+//
+// Output shape (Pass case):
+//
+//	PASS: Image efficiency check passed (score: 95%)
+//
+// Output shape (Fail case):
+//
+//	FAIL: Image efficiency check failed
+//
+//	Global Rules:
+//	  efficiency:    85.0% (threshold: 90.0%)  FAIL
+//	  wasted bytes:  12 MB (threshold: 50 MB)  PASS
+//
+//	Path Rules:
+//	  block:         /var/lib/apt/lists/x  layer 3 (abc123)  (threshold: /var/lib/apt/lists/**)  FAIL
+//	  deny-waste:    /usr/lib/python/foo.pyc (2 layers, 100 B)  (threshold: **/*.pyc)  FAIL
+//
+//	Top wasted files: …
+//
+//	Exit code: 1
 func (r *Report) Print(w io.Writer) {
 	if r.Passed {
 		fmt.Fprintf(w, "  PASS: Image efficiency check passed (score: %.0f%%)\n", r.Score*100)
@@ -61,15 +81,28 @@ func (r *Report) Print(w io.Writer) {
 	}
 
 	fmt.Fprintf(w, "  FAIL: Image efficiency check failed\n\n")
-	fmt.Fprintf(w, "  Results:\n")
 
-	for _, result := range r.Results {
-		status := "PASS"
-		if !result.Passed {
-			status = "FAIL"
+	globals, paths := splitResults(r.Results)
+	if len(globals) > 0 {
+		fmt.Fprintf(w, "  Global Rules:\n")
+		for _, result := range globals {
+			fmt.Fprintf(w, "    %-14s %s (threshold: %s)  %s\n",
+				result.Name+":", result.Actual, result.Threshold, statusFor(result))
 		}
-		fmt.Fprintf(w, "    %-14s %s (threshold: %s)  %s\n",
-			result.Name+":", result.Actual, result.Threshold, status)
+	}
+	if len(paths) > 0 {
+		if len(globals) > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "  Path Rules:\n")
+		for _, result := range paths {
+			detail := ""
+			if result.Detail != "" {
+				detail = "  " + result.Detail
+			}
+			fmt.Fprintf(w, "    %-14s %s%s  (threshold: %s)  %s\n",
+				result.Name+":", result.Actual, detail, result.Threshold, statusFor(result))
+		}
 	}
 
 	if len(r.TopWaste) > 0 {
@@ -81,4 +114,25 @@ func (r *Report) Print(w io.Writer) {
 	}
 
 	fmt.Fprintf(w, "\n  Exit code: 1\n")
+}
+
+// splitResults partitions a result slice into globals (efficiency rules) and
+// path-rule findings, preserving original order within each group.
+func splitResults(all []RuleResult) (globals, paths []RuleResult) {
+	for _, r := range all {
+		switch r.Name {
+		case "efficiency", "wasted bytes", "wasted %":
+			globals = append(globals, r)
+		default:
+			paths = append(paths, r)
+		}
+	}
+	return globals, paths
+}
+
+func statusFor(r RuleResult) string {
+	if r.Passed {
+		return "PASS"
+	}
+	return "FAIL"
 }
