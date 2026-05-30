@@ -159,7 +159,12 @@ func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, c
 	}
 
 	efficiency := image.EfficiencyFromAnalysis(analysis)
-	report := ci.Evaluate(efficiency, analysis.TotalSize, rules)
+	report := ci.Evaluate(ci.EvalContext{
+		Efficiency:   efficiency,
+		TotalSize:    analysis.TotalSize,
+		Layers:       analysis.Layers,
+		StackedTrees: analysis.StackedTrees,
+	}, rules)
 	report.Print(os.Stdout)
 
 	if report.ExitCode() != 0 {
@@ -207,6 +212,17 @@ func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {
 	}
 	if huwp > 0 {
 		rules = append(rules, ci.HighestUserWastedPercent{Threshold: huwp})
+	}
+
+	for _, spec := range cfg.PathRules {
+		switch spec.Type {
+		case config.PathRuleBlock:
+			rules = append(rules, ci.BlockPathRule{ID: spec.ID, Patterns: spec.Paths})
+		case config.PathRuleDenyWaste:
+			rules = append(rules, ci.DenyWastePathRule{ID: spec.ID, Patterns: spec.Paths})
+		case config.PathRuleMaxLayerCount:
+			rules = append(rules, ci.MaxLayerCountRule{ID: spec.ID, MaxCount: spec.Threshold})
+		}
 	}
 
 	return rules

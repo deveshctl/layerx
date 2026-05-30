@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -146,10 +147,11 @@ func TestJSONExport_SchemaRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	var schema struct {
-		ImageRef   string `json:"imageRef"`
-		TotalSize  int64  `json:"totalSize"`
-		LayerCount int    `json:"layerCount"`
-		Efficiency struct {
+		SchemaVersion string `json:"schemaVersion"`
+		ImageRef      string `json:"imageRef"`
+		TotalSize     int64  `json:"totalSize"`
+		LayerCount    int    `json:"layerCount"`
+		Efficiency    struct {
 			Score       float64 `json:"score"`
 			WastedBytes int64   `json:"wastedBytes"`
 			WastedFiles []struct {
@@ -173,6 +175,8 @@ func TestJSONExport_SchemaRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &schema))
 
+	assert.Equal(t, jsonSchemaVersion, schema.SchemaVersion,
+		"schemaVersion is part of the locked schema; if jsonSchemaVersion changes, this test must be updated to match")
 	assert.Equal(t, "nginx:latest", schema.ImageRef)
 	assert.Equal(t, int64(100), schema.TotalSize)
 	assert.Equal(t, 1, schema.LayerCount)
@@ -246,4 +250,35 @@ func TestWriteJSONAtomic_ConcurrentRunsDontCollide(t *testing.T) {
 	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
 	require.NoError(t, err)
 	assert.Empty(t, leftovers, "no tmp files must remain after concurrent writes")
+}
+
+// TestJSON_SchemaVersionFirstField pins two contracts simultaneously:
+//  1. The exported JSON contains "schemaVersion": "1.0.0".
+//  2. SchemaVersion is the FIRST field in the output (encoding/json
+//     preserves struct declaration order).
+//
+// (2) is what lets downstream tools `head -n2 out.json | grep schemaVersion`
+// without parsing.
+func TestJSON_SchemaVersionFirstField(t *testing.T) {
+	analysis := &image.Analysis{
+		ImageRef:     "test:latest",
+		Layers:       []image.Layer{{Index: 0, ID: "abc", Size: 100}},
+		StackedTrees: []*image.FileTree{image.NewFileTree()},
+		TotalSize:    100,
+	}
+	efficiency := &image.EfficiencyResult{Score: 1.0}
+	export := buildJSONExport(analysis, efficiency)
+
+	require.Equal(t, "1.0.0", export.SchemaVersion)
+
+	data, err := json.MarshalIndent(export, "", "  ")
+	require.NoError(t, err)
+	out := string(data)
+	assert.Contains(t, out, `"schemaVersion": "1.0.0"`)
+
+	// Field-order pin: schemaVersion appears before imageRef.
+	svIdx := strings.Index(out, "schemaVersion")
+	irIdx := strings.Index(out, "imageRef")
+	require.Greater(t, svIdx, -1, "schemaVersion must be present")
+	require.Greater(t, irIdx, svIdx, "schemaVersion must appear before imageRef")
 }

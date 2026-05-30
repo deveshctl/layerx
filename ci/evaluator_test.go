@@ -3,6 +3,7 @@ package ci
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -21,7 +22,7 @@ func TestEvaluate_AllPass(t *testing.T) {
 		HighestWastedBytes{Threshold: 1000},
 		HighestUserWastedPercent{Threshold: 0.1},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	assert.True(t, report.Passed)
 	assert.Equal(t, 0, report.ExitCode())
 }
@@ -36,7 +37,7 @@ func TestEvaluate_OneFails(t *testing.T) {
 		LowestEfficiency{Threshold: 0.9},
 		HighestWastedBytes{Threshold: 1000},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	assert.False(t, report.Passed)
 	assert.Equal(t, 1, report.ExitCode())
 }
@@ -54,7 +55,7 @@ func TestEvaluate_AllFail(t *testing.T) {
 		HighestWastedBytes{Threshold: 1000},
 		HighestUserWastedPercent{Threshold: 0.1},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	assert.False(t, report.Passed)
 	assert.Equal(t, 1, report.ExitCode())
 	assert.Equal(t, 3, len(report.Results))
@@ -66,7 +67,7 @@ func TestReport_Print_Pass(t *testing.T) {
 		WastedBytes: 0,
 		WastedFiles: []image.WastedFile{},
 	}
-	report := Evaluate(eff, 1000, []Rule{LowestEfficiency{Threshold: 0.9}})
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 1000}, []Rule{LowestEfficiency{Threshold: 0.9}})
 	var buf bytes.Buffer
 	report.Print(&buf)
 	assert.Contains(t, buf.String(), "PASS")
@@ -85,7 +86,7 @@ func TestReport_Print_Fail(t *testing.T) {
 	rules := []Rule{
 		LowestEfficiency{Threshold: 0.9},
 	}
-	report := Evaluate(eff, 10000, rules)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000}, rules)
 	var buf bytes.Buffer
 	report.Print(&buf)
 
@@ -110,7 +111,7 @@ func TestEvaluate_TopWasteLimitedTo10(t *testing.T) {
 		WastedBytes: 1500,
 		WastedFiles: files,
 	}
-	report := Evaluate(eff, 3000, []Rule{LowestEfficiency{Threshold: 0.9}})
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 3000}, []Rule{LowestEfficiency{Threshold: 0.9}})
 	require.Len(t, report.TopWaste, 10)
 }
 
@@ -120,7 +121,7 @@ func TestEvaluate_NoRules(t *testing.T) {
 		WastedBytes: 1000,
 		WastedFiles: []image.WastedFile{},
 	}
-	report := Evaluate(eff, 2000, []Rule{})
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 2000}, []Rule{})
 	assert.True(t, report.Passed)
 	assert.Equal(t, 0, report.ExitCode())
 }
@@ -136,7 +137,7 @@ func TestEvaluate_TopWasteIsIndependent(t *testing.T) {
 		WastedBytes: 600,
 		WastedFiles: files,
 	}
-	report := Evaluate(eff, 1200, nil)
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 1200}, nil)
 	require.Len(t, report.TopWaste, 3)
 	assert.Equal(t, "/a", report.TopWaste[0].Path)
 
@@ -145,4 +146,133 @@ func TestEvaluate_TopWasteIsIndependent(t *testing.T) {
 	eff.WastedFiles[0].TotalWasted = -1
 	assert.Equal(t, "/a", report.TopWaste[0].Path, "TopWaste must own its backing array")
 	assert.Equal(t, int64(300), report.TopWaste[0].TotalWasted)
+}
+
+// One BlockPathRule matching N paths produces N entries in Report.Results,
+// each with Passed: false. This pins the per-violation contract that the
+// report printer relies on.
+func TestEvaluate_OneViolationPerResult(t *testing.T) {
+	layer := image.Layer{
+		Index: 0,
+		ID:    "lay0",
+		Tree:  image.NewFileTree(),
+	}
+	for _, p := range []string{"/tmp/a", "/tmp/b", "/tmp/c", "/tmp/d", "/tmp/e"} {
+		layer.Tree.Root.AddChild(&image.FileNode{
+			Name: p, Path: p, DiffType: image.Added,
+		})
+	}
+	r := BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}}
+	report := Evaluate(EvalContext{
+		Efficiency: &image.EfficiencyResult{},
+		Layers:     []image.Layer{layer},
+	}, []Rule{r})
+	failures := 0
+	for _, r := range report.Results {
+		if !r.Passed {
+			failures++
+		}
+	}
+	assert.Equal(t, 5, failures, "one rule, 5 matches → 5 failure entries in report.Results")
+}
+
+// Mixing global + path rules: globals pass, one path rule fails. The report
+// must contain ALL four results (3 globals + 1 path) and Passed: false.
+func TestEvaluate_MixedRulesPassFail(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.95,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{},
+	}
+	layer := image.Layer{
+		Index: 0, ID: "lay0", Tree: image.NewFileTree(),
+	}
+	layer.Tree.Root.AddChild(&image.FileNode{
+		Name: "/tmp/x", Path: "/tmp/x", DiffType: image.Added,
+	})
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+		HighestUserWastedPercent{Threshold: 0.1},
+		BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}},
+	}
+	report := Evaluate(EvalContext{
+		Efficiency: eff,
+		TotalSize:  10000,
+		Layers:     []image.Layer{layer},
+	}, rules)
+	assert.False(t, report.Passed)
+	assert.Len(t, report.Results, 4, "3 globals + 1 path-rule violation = 4 results")
+}
+
+// Print groups results into "Global Rules:" / "Path Rules:" sections in
+// the documented order. CHANGELOG calls this a Breaking change for log
+// scrapers, so it gets an explicit pin.
+func TestReport_Print_GroupedSections(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.85,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{},
+	}
+	layer := image.Layer{
+		Index: 0, ID: "lay0", Tree: image.NewFileTree(),
+	}
+	layer.Tree.Root.AddChild(&image.FileNode{
+		Name: "/tmp/x", Path: "/tmp/x", DiffType: image.Added,
+	})
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}},
+	}
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 10000, Layers: []image.Layer{layer}}, rules)
+	var buf bytes.Buffer
+	report.Print(&buf)
+	out := buf.String()
+	assert.Contains(t, out, "Global Rules:")
+	assert.Contains(t, out, "Path Rules:")
+	// Globals must appear before Path rules.
+	gIdx := strings.Index(out, "Global Rules:")
+	pIdx := strings.Index(out, "Path Rules:")
+	require.Greater(t, gIdx, -1)
+	require.Greater(t, pIdx, gIdx, "Path Rules section must follow Global Rules section")
+}
+
+// Kind is the contract that splits report sections — pin it on every
+// RuleResult emitted by the built-in rules so a future rule that forgets
+// to stamp Kind (defaults to RuleKindGlobal) doesn't silently slip into
+// the wrong section.
+func TestEvaluate_RuleResultKindStamped(t *testing.T) {
+	eff := &image.EfficiencyResult{
+		Score:       0.5,
+		WastedBytes: 100,
+		WastedFiles: []image.WastedFile{
+			{Path: "/usr/lib/foo.pyc", TotalWasted: 50, LayerCount: 2},
+		},
+	}
+	layer := image.Layer{
+		Index: 0, ID: "lay0", Tree: image.NewFileTree(),
+	}
+	layer.Tree.Root.AddChild(&image.FileNode{
+		Name: "/tmp/x", Path: "/tmp/x", DiffType: image.Added,
+	})
+	rules := []Rule{
+		LowestEfficiency{Threshold: 0.9},
+		HighestWastedBytes{Threshold: 1000},
+		HighestUserWastedPercent{Threshold: 0.1},
+		BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}},
+		DenyWastePathRule{ID: "deny-pyc", Patterns: []string{"**/*.pyc"}},
+		MaxLayerCountRule{ID: "cap", MaxCount: 1},
+	}
+	report := Evaluate(EvalContext{Efficiency: eff, TotalSize: 1000, Layers: []image.Layer{layer}}, rules)
+
+	gotByName := map[string]RuleKind{}
+	for _, r := range report.Results {
+		gotByName[r.Name] = r.Kind
+	}
+	assert.Equal(t, RuleKindGlobal, gotByName["efficiency"])
+	assert.Equal(t, RuleKindGlobal, gotByName["wasted bytes"])
+	assert.Equal(t, RuleKindGlobal, gotByName["wasted %"])
+	assert.Equal(t, RuleKindPath, gotByName["block"])
+	assert.Equal(t, RuleKindPath, gotByName["deny-waste"])
+	assert.Equal(t, RuleKindPath, gotByName["max-layer-count"])
 }

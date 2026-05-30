@@ -10,13 +10,22 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
+// jsonExport is the on-disk shape of `layerx --json`. SchemaVersion is the
+// FIRST field so it appears first in encoding/json output (which preserves
+// struct declaration order). Downstream consumers can pin against it.
 type jsonExport struct {
-	ImageRef   string         `json:"imageRef"`
-	TotalSize  int64          `json:"totalSize"`
-	LayerCount int            `json:"layerCount"`
-	Efficiency jsonEfficiency `json:"efficiency"`
-	Layers     []jsonLayer    `json:"layers"`
+	SchemaVersion string         `json:"schemaVersion"`
+	ImageRef      string         `json:"imageRef"`
+	TotalSize     int64          `json:"totalSize"`
+	LayerCount    int            `json:"layerCount"`
+	Efficiency    jsonEfficiency `json:"efficiency"`
+	Layers        []jsonLayer    `json:"layers"`
 }
+
+// jsonSchemaVersion identifies the format produced by buildJSONExport.
+// Bump per semver: patch for non-breaking field additions, minor for
+// additive structural changes, major for incompatible changes.
+const jsonSchemaVersion = "1.0.0"
 
 type jsonEfficiency struct {
 	Score       float64          `json:"score"`
@@ -83,9 +92,10 @@ func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) erro
 
 func buildJSONExport(analysis *image.Analysis, efficiency *image.EfficiencyResult) *jsonExport {
 	export := &jsonExport{
-		ImageRef:   analysis.ImageRef,
-		TotalSize:  analysis.TotalSize,
-		LayerCount: len(analysis.Layers),
+		SchemaVersion: jsonSchemaVersion,
+		ImageRef:      analysis.ImageRef,
+		TotalSize:     analysis.TotalSize,
+		LayerCount:    len(analysis.Layers),
 		Efficiency: jsonEfficiency{
 			Score:       efficiency.Score,
 			WastedBytes: efficiency.WastedBytes,

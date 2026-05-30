@@ -51,6 +51,12 @@ Other platforms: see [Install](#install).
 
 `IMAGE_OR_ARCHIVE` is auto-detected: an existing file is read directly without contacting any container runtime, anything else is resolved through the Docker daemon. All three modes accept either form.
 
+Deeper guides live in [`docs/`](docs/):
+
+- [Configuration reference](docs/configuration.md) — every `.layerx.yaml` field, both path-rules forms, starter flavours
+- [CI integration](docs/ci-integration.md) — GitHub Actions and GitLab CI recipes, threshold recommendations, exit codes
+- [JSON export](docs/json-export.md) — full schema, `jq` one-liners, scripting use cases
+
 ### Interactive explorer
 
 - Browse layers with vim keys; see Dockerfile command, size, short digest
@@ -90,7 +96,7 @@ layerx compare --mode full myapp:old myapp:new
 
 ### JSON export
 
-Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks.
+Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks. See [docs/json-export.md](docs/json-export.md) for the full schema, jq one-liners, and scripting recipes.
 
 ---
 
@@ -147,7 +153,7 @@ sudo rpm -i layerx_linux_arm64.rpm
 
 ### Direct download
 
-Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.2.2`) in the URLs above.
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.3.0`) in the URLs above.
 
 ### Build from source
 
@@ -222,13 +228,46 @@ source <(layerx completion bash)
 Drop a `.layerx.yaml` in your project root:
 
 ```yaml
+version: 1
+
 rules:
   lowest-efficiency: 0.9
   highest-wasted-bytes: 52428800    # 50MB
   highest-user-wasted-percent: 0.1
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - /tmp/**
+  deny-waste:
+    - "**/*.pyc"
 ```
 
+See `layerx init` (below) for ready-made configs by language.
+
 CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
+
+For the full field reference, path-rule semantics, and worked examples, see [docs/configuration.md](docs/configuration.md). For end-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit-code reference), see [docs/ci-integration.md](docs/ci-integration.md).
+
+### Starter configs
+
+Run `layerx init` to drop a ready-made `.layerx.yaml` in your repo:
+
+```bash
+layerx init --flavour node       # Node.js / npm / yarn / pnpm
+layerx init --flavour python     # CPython, .pyc and __pycache__ rules
+layerx init --flavour java       # Maven, Gradle, multi-stage targets
+layerx init --flavour go         # tighter thresholds for Go images
+layerx init --flavour generic    # baseline — works for any stack
+```
+
+Each starter blocks build-time caches (`/root/.npm/...`, `/root/.cache/pip/...`,
+etc.) and version-control metadata, and flags wasteful layer patterns
+(`node_modules` reinstalled per layer, `.pyc` files duplicated). Edit the
+file after init to tune for your repo.
+
+The starter configs live in [`cmd/examples/`](cmd/examples/) for browsing
+or copy-paste.
 
 ---
 

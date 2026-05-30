@@ -1,0 +1,19 @@
+# layerx Java starter config
+# Targets the multi-stage-build mistake of copying target/ into the
+# runtime image instead of just the fat JAR.
+version: 1
+
+rules:
+  lowest-efficiency: 0.9
+  highest-user-wasted-percent: 0.1
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - "/root/.m2/repository/**"   # Maven local repo, build-time only
+    - "/root/.gradle/caches/**"
+    - "/tmp/**"
+
+  deny-waste:
+    - "**/*.jar.original"          # spring-boot rebuild artifact
+    - "**/target/**"               # Maven build output leaking into runtime

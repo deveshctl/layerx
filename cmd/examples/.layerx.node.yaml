@@ -1,0 +1,21 @@
+# layerx Node.js starter config
+# Catches the two patterns that consistently bloat Node images:
+# package-manager caches and node_modules rebuilt across layers.
+version: 1
+
+rules:
+  lowest-efficiency: 0.9
+  highest-user-wasted-percent: 0.1
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - "**/.npm/_cacache/**"      # npm cache, never needed at runtime
+    - "**/.yarn/cache/**"
+    - "**/.pnpm-store/**"
+    - "/root/.npm/**"
+    - "/tmp/**"
+
+  deny-waste:
+    - "**/node_modules/**"        # reinstalled across layers = wasted
+    - "**/*.map"                  # source maps in production rarely needed

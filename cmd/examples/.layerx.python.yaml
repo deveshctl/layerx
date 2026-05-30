@@ -1,0 +1,18 @@
+# layerx Python starter config
+# __pycache__ is the single most common Python image waste source.
+version: 1
+
+rules:
+  lowest-efficiency: 0.9
+  highest-user-wasted-percent: 0.1
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - "/root/.cache/pip/**"       # pip download cache
+    - "**/__pycache__/**"
+    - "/tmp/**"
+
+  deny-waste:
+    - "**/*.pyc"
+    - "**/*.pyo"
