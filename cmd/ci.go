@@ -24,6 +24,15 @@ func (e *ErrCIFailed) Error() string {
 	return "CI check failed"
 }
 
+// ErrCIUsage is returned when the user invoked `layerx ci` with the wrong
+// number of arguments. ciArgs writes a short hint to stderr; the sentinel
+// itself carries no message body so cobra doesn't double-print after it.
+// main.go has no special case for this sentinel, so it exits 2 (operational
+// error), matching ErrCompareUsage.
+type ErrCIUsage struct{}
+
+func (e *ErrCIUsage) Error() string { return "usage" }
+
 var (
 	flagLowestEfficiency         float64
 	flagHighestWastedBytes       int64
@@ -78,7 +87,7 @@ Cache:
 
   # Force a fresh analysis, ignoring any cached result
   layerx ci --no-cache nginx:latest`,
-	Args:          cobra.ExactArgs(1),
+	Args:          ciArgs,
 	RunE:          runCICmd,
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -90,6 +99,38 @@ func init() {
 	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule)")
 
 	rootCmd.AddCommand(ciCmd)
+}
+
+// ciArgs is a custom cobra args validator: on zero or wrong count it prints a
+// short usage hint to stderr (synopsis + 3 examples) and returns the
+// ErrCIUsage sentinel so main.go exits 2 without cobra adding its own
+// "Error: accepts 1 arg(s)" line. ciCmd has SilenceErrors=true and
+// SilenceUsage=true, so without this validator a bare `layerx ci` produced
+// only cobra's terse "accepts 1 arg(s), received 0" with no actionable help.
+// Mirrors compareArgs in cmd/compare.go.
+func ciArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 1 {
+		return nil
+	}
+	w := cmd.ErrOrStderr()
+	if len(args) == 0 {
+		fmt.Fprintln(w, "layerx ci: run efficiency checks for CI pipelines")
+	} else {
+		fmt.Fprintf(w, "layerx ci: needs exactly 1 image argument, got %d\n", len(args))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  layerx ci [flags] IMAGE_OR_ARCHIVE")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Examples:")
+	fmt.Fprintln(w, "  layerx ci nginx:latest")
+	fmt.Fprintln(w, "  layerx ci ./build/app.tar")
+	fmt.Fprintln(w, "  layerx ci --lowest-efficiency 0.95 nginx:latest")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "The argument may be a Docker image reference or a path to a tar archive")
+	fmt.Fprintln(w, "produced by `docker save` (or an OCI layout tarball).")
+	fmt.Fprintln(w, "Run `layerx ci --help` for the full reference.")
+	return &ErrCIUsage{}
 }
 
 func runCICmd(cmd *cobra.Command, args []string) error {

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bare `layerx` (no image argument) shows the usage block again. v1.3.0
   silenced usage on the root command for all error paths, which also
   suppressed help when args were missing.
+- Bare `layerx ci` (no image argument) now prints a one-line synopsis,
+  the Usage line, and three concrete examples to stderr instead of just
+  cobra's terse `accepts 1 arg(s), received 0` with no actionable help.
+  The same hint appears for too-many-args invocations. Exit code stays 2.
 - Malformed `.layerx.yaml` errors print a section-specific reference
   excerpt (rules, path-rules, version) when the failing section is known,
   or a general config hint otherwise — never the full command usage block.
