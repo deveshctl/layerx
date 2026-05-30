@@ -38,14 +38,13 @@ func presentConfigLoadFailure(cmd *cobra.Command, err error) {
 // chain contains a tagged *config.LoadError; otherwise the general config
 // hint. A hint is always printed so the user has a next step.
 func printConfigSectionHint(w io.Writer, err error) {
+	// errors.AsType walks the full error chain itself — no manual unwrap
+	// loop needed. A nil section falls through to SectionHelp's general
+	// fallback. Matches the AsType pattern used elsewhere in cmd/ for
+	// sentinel-error checks (cmd/ci.go, cmd/compare.go).
 	section := ""
-	for err != nil {
-		var loadErr *config.LoadError
-		if errors.As(err, &loadErr) {
-			section = loadErr.Section
-			break
-		}
-		err = errors.Unwrap(err)
+	if loadErr, ok := errors.AsType[*config.LoadError](err); ok {
+		section = loadErr.Section
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, config.SectionHelp(section))

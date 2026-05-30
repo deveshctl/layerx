@@ -149,14 +149,16 @@ func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 
 	errOut := stderr.String()
 	stdOut := stdout.String()
-	combined := stdOut + errOut
 	assert.Contains(t, errOut, "Error:",
 		"cobra must print the one-line error to stderr so the user sees what failed")
 	assert.Contains(t, errOut, "accepts 1 arg",
 		"the arg-count error must reach the user")
-	assert.Contains(t, combined, "Usage:",
+	// Cobra writes the Usage block via cmd.Println → OutOrStdout. Pin the
+	// stream split strictly so a regression that re-routes Usage to stderr
+	// (or drops it entirely) cannot pass under a merged-buffer check.
+	assert.Contains(t, stdOut, "Usage:",
 		"usage block must accompany an arg-validation error — that IS the help the user needs")
-	assert.Contains(t, combined, "layerx [flags] IMAGE_OR_ARCHIVE",
+	assert.Contains(t, stdOut, "layerx [flags] IMAGE_OR_ARCHIVE",
 		"the usage line must include the rootCmd Use string")
 }
 
@@ -167,9 +169,10 @@ func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 // This test never reaches the Docker daemon: config load fails well before
 // resolver selection. Safe to run in CI.
 func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
-	// rules: null is rejected deterministically by decodeRules on every platform.
-	// Avoid "not-a-number" scalars — goccy's coercion varies and can skip the
-	// config-load path this test is meant to exercise.
+	// rules: null is rejected deterministically by the pre-decode AST walk
+	// in config.LoadFrom (see rejectNullSections). Use it here rather than
+	// "not-a-number" scalars — goccy's coercion of those varies and can
+	// skip the config-load path this test is meant to exercise.
 	writeConfig(t, "rules: null\n")
 	resetRootCmdFlags(t)
 

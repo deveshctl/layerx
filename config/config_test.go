@@ -100,18 +100,33 @@ func TestLoadFrom_RejectsNegativeWastedBytes(t *testing.T) {
 	assert.Contains(t, err.Error(), "highest-wasted-bytes")
 }
 
+// rules: null silently zeroing CI thresholds is the primary regression this
+// rejection guards against. Pin every YAML spelling of null — explicit
+// `null`, the `~` shorthand, and a bare `rules:` key (implicit null) — so
+// goccy or our pre-decode walk regressing on any one of them surfaces
+// immediately.
 func TestLoadFrom_RejectsRulesNull(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".layerx.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("rules: null\n"), 0644))
+	cases := map[string]string{
+		"explicit_null":   "rules: null\n",
+		"tilde_shorthand": "rules: ~\n",
+		"bare_key":        "rules:\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".layerx.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
 
-	_, err := LoadFrom(path)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must be a mapping, not null")
+			_, err := LoadFrom(path)
+			require.Error(t, err, "rules-null variant must be rejected")
+			assert.Contains(t, err.Error(), "must be a mapping, not null")
 
-	var loadErr *LoadError
-	require.ErrorAs(t, err, &loadErr)
-	assert.Equal(t, SectionRules, loadErr.Section)
+			var loadErr *LoadError
+			require.ErrorAs(t, err, &loadErr)
+			assert.Equal(t, SectionRules, loadErr.Section,
+				"the LoadError must be tagged with SectionRules so the CLI prints the rules-section hint")
+		})
+	}
 }
 
 func TestLoadFrom_ValidationError_HasSection(t *testing.T) {

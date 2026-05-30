@@ -11,6 +11,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 )
 
 const defaultConfigFile = ".layerx.yaml"
@@ -89,6 +90,16 @@ func LoadFrom(path string) (*Config, error) {
 		return Default(), nil
 	}
 
+	// Pre-decode null check. goccy's struct decoder lowers a YAML null
+	// scalar (`rules: null`, `rules: ~`, or a bare `rules:` key) into the
+	// rawConfig.Rules ast.Node field as Go nil — never as a *ast.NullNode
+	// the receiver could detect after the fact. Catching null requires
+	// inspecting the document AST before the strict struct decode runs;
+	// otherwise `rules: null` silently zeros the user's CI thresholds.
+	if err := rejectNullSections(path, data); err != nil {
+		return nil, err
+	}
+
 	// Decode into rawConfig so rules and path-rules stay as AST nodes for
 	// shape validation before defaults are applied.
 	var raw rawConfig
@@ -114,10 +125,79 @@ func LoadFrom(path string) (*Config, error) {
 		Keybindings: raw.Keybindings,
 	}
 
+	// Restore the documented "absent version: defaults to 1" contract
+	// (see Version field comment). The rawConfig refactor lost the
+	// configToRaw(Default()) seed that previously carried this default.
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, newLoadError(path, validationSection(err.Error()), err)
 	}
 	return cfg, nil
+}
+
+// rejectNullSections parses the raw bytes once and rejects any top-level key
+// whose value is an explicit YAML null when the loader's contract requires a
+// mapping. The strict struct decode that runs afterwards cannot tell `key:`
+// from absent — both surface as a Go nil ast.Node — so a separate pass is
+// the only place to enforce "if the user wrote it, it must be a mapping".
+//
+// Currently only `rules:` is checked. `path-rules:` accepts null as
+// "no path rules" by design (see normalizePathRules), and other top-level
+// keys are scalars or maps where strict decode catches the malformed shape.
+func rejectNullSections(path string, data []byte) error {
+	f, err := parser.ParseBytes(data, 0)
+	if err != nil {
+		// Don't shadow the strict decode pass's richer error; just let it
+		// run and surface its message.
+		return nil
+	}
+	if f == nil || len(f.Docs) == 0 {
+		return nil
+	}
+	for _, doc := range f.Docs {
+		if doc == nil || doc.Body == nil {
+			continue
+		}
+		if err := checkRulesNotNull(path, doc.Body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkRulesNotNull walks one document body looking for a top-level `rules`
+// key whose value is *ast.NullNode. Returns the SectionRules-tagged error if
+// found; nil otherwise (including when the key is absent).
+func checkRulesNotNull(path string, body ast.Node) error {
+	visit := func(key, value ast.Node) error {
+		if key == nil || value == nil {
+			return nil
+		}
+		if key.String() != "rules" {
+			return nil
+		}
+		if _, isNull := value.(*ast.NullNode); isNull {
+			return newLoadError(path, SectionRules,
+				fmt.Errorf("must be a mapping, not null"))
+		}
+		return nil
+	}
+	switch n := body.(type) {
+	case *ast.MappingNode:
+		for _, kv := range n.Values {
+			if err := visit(kv.Key, kv.Value); err != nil {
+				return err
+			}
+		}
+	case *ast.MappingValueNode:
+		if err := visit(n.Key, n.Value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hasYAMLContent reports whether data contains anything that would parse to a

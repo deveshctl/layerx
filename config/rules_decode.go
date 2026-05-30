@@ -8,14 +8,18 @@ import (
 )
 
 // decodeRules interprets the raw AST node for the top-level "rules" key.
-// A missing node keeps defaults. null and non-mapping shapes error so a
-// structurally invalid rules block cannot silently zero out thresholds.
+// A nil node (rules: absent, or rules: null after the document-level guard)
+// returns defaults. Non-mapping shapes (scalars, sequences) error so the
+// loader does not silently coerce malformed input into zero values.
+//
+// `rules: null` is rejected upstream by rejectNullSections in config.go —
+// goccy maps a YAML null scalar into an ast.Node field as Go nil rather
+// than a *ast.NullNode, so the type-assertion path that used to live here
+// could never fire. The pre-decode AST walk catches it before this function
+// runs.
 func decodeRules(node ast.Node, defaults RulesConfig) (RulesConfig, error) {
 	if node == nil {
 		return defaults, nil
-	}
-	if _, ok := node.(*ast.NullNode); ok {
-		return RulesConfig{}, fmt.Errorf("must be a mapping, not null")
 	}
 	switch node.(type) {
 	case *ast.MappingNode, *ast.MappingValueNode:
