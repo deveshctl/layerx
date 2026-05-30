@@ -24,6 +24,13 @@ type EvalContext struct {
 // Rule evaluates one aspect of image efficiency. A rule may produce multiple
 // RuleResults (e.g. one per matched path for BlockPathRule); efficiency rules
 // always return exactly one.
+//
+// When invoked through the package-level Evaluate(ctx, rules) function,
+// ctx.Efficiency is guaranteed non-nil — the evaluator nil-guards before
+// running rules so each rule body can dereference ctx.Efficiency directly.
+// Tests calling rule.Evaluate(EvalContext{}) directly must populate
+// ctx.Efficiency themselves; rules nil-check ctx.Layers and
+// ctx.StackedTrees because those are optional even in production.
 type Rule interface {
 	Name() string
 	Evaluate(ctx EvalContext) []RuleResult
@@ -49,11 +56,22 @@ const (
 
 // RuleResult holds the outcome of evaluating a single rule.
 //
-// RuleID identifies the specific finding (e.g. "block:/root/.cache@layer-3")
-// for log-grep / future --rule-id filtering. Name is the human-readable rule
-// kind ("efficiency", "block", "deny-waste"). Detail is optional context shown
-// in the report — file path, layer index, etc. Kind controls which output
-// section (Global vs Path Rules) the printer routes the result into.
+//   - RuleID identifies the specific finding for log-grep / future
+//     --rule-id filtering. For globals, RuleID equals Name. For path
+//     rules, RuleID typically encodes the location of the finding
+//     (e.g. "block:/root/.cache@layer-3" or "deny-pyc:/usr/lib/foo.pyc").
+//   - Name is the human-readable rule kind shown in the report column
+//     ("efficiency", "block", "deny-waste"). Multiple findings from the
+//     same rule share the same Name.
+//   - Kind controls which output section (Global vs Path Rules) the
+//     printer routes the result into.
+//   - Actual / Threshold render in the standard "X (threshold: Y)"
+//     format. For path rules, Actual is the bare path; the layer index,
+//     count, and byte size live in Detail.
+//   - Detail is optional context shown between Actual and the threshold
+//     parens for path rules — file path qualifier, layer location, etc.
+//     Globals leave Detail empty; the printer skips it for global
+//     results.
 type RuleResult struct {
 	RuleID    string
 	Name      string
