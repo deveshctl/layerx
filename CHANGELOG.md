@@ -77,6 +77,10 @@ Two breaking changes — see Changed.
 - `.layerx.yaml` files containing a `keybindings:` block now load
   successfully. Strict mode previously rejected the entire config — rules
   and all — when this section was present.
+- A malformed `.layerx.yaml` no longer drowns the parse error under the
+  full `layerx --help` output. The error line ("parsing .layerx.yaml:
+  line 4 column 5: ...") is now the last thing printed, so the failure
+  is visible at a glance instead of buried in 60 lines of usage text.
 - Efficiency scores no longer charge waste for files that were deleted
   between layers and a different file with the same path was added later
   (`apt-get install` → `apt-get clean` → reinstall). Each delete-then-readd

@@ -81,6 +81,13 @@ Environment:
   layerx ci nginx:latest`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInspect,
+	// Errors returned from runInspect (bad config, daemon down, image not
+	// found) are user-facing one-liners — cobra dumping the full usage block
+	// after them buries the actual message in 60+ lines of help text. Keep
+	// the "Error: ..." line cobra prints, drop the usage afterthought. The
+	// ci and compare subcommands set this on their own command declarations
+	// for the same reason.
+	SilenceUsage: true,
 }
 
 func init() {
@@ -146,11 +153,10 @@ func runInspect(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		// The CI report is already printed by executeCICheck; suppress
-		// cobra's default error/usage output so an ErrCIFailed return
-		// doesn't tack a redundant "Error: ..." line and usage block
-		// onto the report.
+		// cobra's default error output so an ErrCIFailed return doesn't
+		// tack a redundant "Error: ..." line onto the report. Usage is
+		// already silenced at the rootCmd declaration.
 		cmd.SilenceErrors = true
-		cmd.SilenceUsage = true
 		// Forward the root cobra command's signal-cancellable context to
 		// runCICheckInner so image.AnalyzeWithOptions sees Ctrl+C. We pass
 		// the context explicitly rather than mutating ciCmd.SetContext —
