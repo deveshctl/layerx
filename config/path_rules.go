@@ -8,13 +8,6 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// rawPathRules is the intermediate shape used during decoding. The loader
-// captures the raw AST node so we can dispatch on its kind (mapping vs.
-// sequence) and produce []PathRuleSpec via normalizePathRules.
-type rawPathRules struct {
-	Node ast.Node
-}
-
 // flatPathRules mirrors the flat YAML form for direct unmarshal:
 //
 //	path-rules:
