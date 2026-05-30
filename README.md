@@ -222,13 +222,43 @@ source <(layerx completion bash)
 Drop a `.layerx.yaml` in your project root:
 
 ```yaml
+version: 1
+
 rules:
   lowest-efficiency: 0.9
-  highest-wasted-bytes: 52428800    # 50MB
   highest-user-wasted-percent: 0.1
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - /tmp/**
+  deny-waste:
+    - "**/*.pyc"
 ```
 
+See `layerx init` (below) for ready-made configs by language.
+
 CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
+
+### Starter configs
+
+Run `layerx init` to drop a ready-made `.layerx.yaml` in your repo:
+
+```bash
+layerx init --flavour node       # Node.js / npm / yarn / pnpm
+layerx init --flavour python     # CPython, .pyc and __pycache__ rules
+layerx init --flavour java       # Maven, Gradle, multi-stage targets
+layerx init --flavour go         # tighter thresholds for Go images
+layerx init --flavour generic    # baseline — works for any stack
+```
+
+Each starter blocks build-time caches (`/root/.npm/...`, `/root/.cache/pip/...`,
+etc.) and version-control metadata, and flags wasteful layer patterns
+(`node_modules` reinstalled per layer, `.pyc` files duplicated). Edit the
+file after init to tune for your repo.
+
+The starter configs live in [`cmd/examples/`](cmd/examples/) for browsing
+or copy-paste.
 
 ---
 

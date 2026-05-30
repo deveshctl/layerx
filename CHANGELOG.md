@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--mode compact|full|summary` and `--top N` control verbosity: compact
   (default) shows the largest deltas with a "... and N more" counter, full
   prints every entry, summary keeps only the header and verdict.
+- `.layerx.yaml` accepts a new `path-rules` section with three rule kinds:
+  `block` (fail if any layer wrote matching paths, even if a later layer
+  deleted them), `deny-waste` (fail if matching paths appear in more than
+  one layer), and `max-layer-count` (fail if any one path appears in more
+  than N layers). Globs use `**` for recursive matches.
+- `layerx init --flavour <node|python|java|go|generic>` writes a starter
+  `.layerx.yaml` tuned for that stack. Path rules ship off by default —
+  running `init` is the explicit opt-in.
+- `--json` export gains a top-level `schemaVersion` field (currently
+  `"1.0.0"`) so downstream tools can pin against the format.
+- `.layerx.yaml` accepts an optional `version: 1` field at the root.
+  Unset means 1; future schema changes will rev this.
 
 ### Changed
 - `layerx compare` with no arguments now prints a short usage hint with
@@ -44,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remains on `q` and `Ctrl+C`. On the loading and error screens Esc
   continues to exit, matching the on-screen "Press q or Esc to exit"
   hint.
+- **Breaking:** the CI report now groups results into `Global Rules:` and
+  `Path Rules:` sections. Log scrapers that grep the previous flat-list
+  format need to update their patterns. Exit codes and JSON output are
+  unchanged.
 
 ### Fixed
 - Ctrl+C now cancels `layerx ci`, `--json`, and `layerx compare` while a
