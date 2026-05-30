@@ -100,6 +100,35 @@ func TestLoadFrom_RejectsNegativeWastedBytes(t *testing.T) {
 	assert.Contains(t, err.Error(), "highest-wasted-bytes")
 }
 
+func TestLoadFrom_RejectsRulesNull(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("rules: null\n"), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be a mapping, not null")
+
+	var loadErr *LoadError
+	require.ErrorAs(t, err, &loadErr)
+	assert.Equal(t, SectionRules, loadErr.Section)
+}
+
+func TestLoadFrom_ValidationError_HasSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  lowest-efficiency: 1.5
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+
+	var loadErr *LoadError
+	require.ErrorAs(t, err, &loadErr)
+	assert.Equal(t, SectionRules, loadErr.Section)
+}
+
 // keybindings is a documented (M12) top-level key. Strict YAML must accept it
 // so users following CLAUDE.md examples don't get their whole config rejected
 // when they include a keybindings block alongside rules.

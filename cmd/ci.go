@@ -99,9 +99,9 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig(cmd)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
 
 	analysis, ciErr := executeCICheck(cmd.Context(), imageRef, cfg, cmd, noCacheRequested(), false)

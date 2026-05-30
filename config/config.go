@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -37,11 +38,12 @@ type Config struct {
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
 }
 
-// rawConfig mirrors Config but captures path-rules as a raw AST node so the
-// loader can dispatch on its kind. Used only inside LoadFrom — never exposed.
+// rawConfig mirrors Config but captures rules and path-rules as raw AST nodes
+// so the loader can reject null/malformed shapes before they zero defaults.
+// Used only inside LoadFrom — never exposed.
 type rawConfig struct {
 	Version     int               `yaml:"version,omitempty"`
-	Rules       RulesConfig       `yaml:"rules"`
+	Rules       ast.Node          `yaml:"rules,omitempty"`
 	PathRules   ast.Node          `yaml:"path-rules,omitempty"`
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
 }
@@ -87,51 +89,35 @@ func LoadFrom(path string) (*Config, error) {
 		return Default(), nil
 	}
 
-	// Two-pass decode: first into rawConfig (captures path-rules as a raw
-	// AST node), then normalize to the canonical Config shape. The raw
-	// pass is seeded from Default() via configToRaw so any default-bearing
-	// field on Config flows through without LoadFrom needing to enumerate
-	// each one. New defaultable fields added later need only land in
-	// Default() and the configToRaw / rawToConfig pair.
-	raw := configToRaw(Default())
+	// Decode into rawConfig so rules and path-rules stay as AST nodes for
+	// shape validation before defaults are applied.
+	var raw rawConfig
 	dec := yaml.NewDecoder(bytes.NewReader(data), yaml.Strict())
 	if err := dec.Decode(&raw); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+		return nil, newLoadError(path, inferParseSection(err), err)
 	}
 
-	cfg := rawToConfig(raw)
+	rules, err := decodeRules(raw.Rules, Default().Rules)
+	if err != nil {
+		return nil, newLoadError(path, SectionRules, err)
+	}
+
 	specs, err := normalizePathRules(raw.PathRules)
 	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
+		return nil, newLoadError(path, SectionPathRules, err)
 	}
-	cfg.PathRules = specs
+
+	cfg := &Config{
+		Version:     raw.Version,
+		Rules:       rules,
+		PathRules:   specs,
+		Keybindings: raw.Keybindings,
+	}
 
 	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("validating %s: %w", path, err)
+		return nil, newLoadError(path, validationSection(err.Error()), err)
 	}
 	return cfg, nil
-}
-
-// configToRaw projects a Config onto its rawConfig mirror, used by LoadFrom
-// to seed the YAML decoder with default values. PathRules is intentionally
-// not copied — the caller is interested in the raw AST node, which the
-// decoder fills in directly.
-func configToRaw(c *Config) rawConfig {
-	return rawConfig{
-		Version:     c.Version,
-		Rules:       c.Rules,
-		Keybindings: c.Keybindings,
-	}
-}
-
-// rawToConfig is the inverse projection. Caller is responsible for setting
-// PathRules from the normalized AST node afterward.
-func rawToConfig(r rawConfig) *Config {
-	return &Config{
-		Version:     r.Version,
-		Rules:       r.Rules,
-		Keybindings: r.Keybindings,
-	}
 }
 
 // hasYAMLContent reports whether data contains anything that would parse to a
@@ -167,6 +153,35 @@ func (c *Config) validate() error {
 		return fmt.Errorf("rules.highest-wasted-bytes must be >= 0; got %d", c.Rules.HighestWastedBytes)
 	}
 	return nil
+}
+
+func validationSection(msg string) string {
+	switch {
+	case strings.HasPrefix(msg, "version:"):
+		return SectionVersion
+	case strings.HasPrefix(msg, "rules."):
+		return SectionRules
+	default:
+		return ""
+	}
+}
+
+// inferParseSection maps strict YAML parse errors to a config section when
+// the library surfaces a field path; otherwise returns "".
+func inferParseSection(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "path-rules"):
+		return SectionPathRules
+	case strings.Contains(msg, "keybindings"):
+		return SectionKeybindings
+	case strings.Contains(msg, "rules"):
+		return SectionRules
+	case strings.Contains(msg, "version"):
+		return SectionVersion
+	default:
+		return ""
+	}
 }
 
 // PathRuleType identifies one of the three supported path-rule kinds.
