@@ -226,6 +226,7 @@ version: 1
 
 rules:
   lowest-efficiency: 0.9
+  highest-wasted-bytes: 52428800    # 50MB
   highest-user-wasted-percent: 0.1
 
 path-rules:
