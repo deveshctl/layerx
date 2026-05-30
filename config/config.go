@@ -48,7 +48,11 @@ func Load() (*Config, error) {
 }
 
 // LoadFrom reads config from the specified path.
-// Returns default config if the file does not exist.
+// Returns default config if the file does not exist, is empty, or contains
+// only whitespace/comments — the M12 contract treats absent and content-less
+// configs identically: "use defaults". A bytes.TrimSpace pre-check handles
+// this without depending on the YAML decoder's empty-input error shape,
+// which has varied across goccy/go-yaml releases.
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,6 +60,14 @@ func LoadFrom(path string) (*Config, error) {
 			return Default(), nil
 		}
 		return nil, err
+	}
+
+	// Strip comments and check if anything substantive remains. A YAML
+	// document containing only `# comment` lines parses to nothing; we
+	// fall back to defaults rather than letting the decoder's behaviour
+	// on zero-document input drive the result.
+	if !hasYAMLContent(data) {
+		return Default(), nil
 	}
 
 	cfg := Default()
@@ -67,6 +79,23 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("validating %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// hasYAMLContent reports whether data contains anything that would parse to a
+// non-empty YAML document. Whitespace and full-line comments (`# …`) are
+// stripped; if nothing remains, the file is treated as empty.
+func hasYAMLContent(data []byte) bool {
+	for line := range bytes.SplitSeq(data, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		if trimmed[0] == '#' {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (c *Config) validate() error {

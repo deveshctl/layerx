@@ -132,3 +132,27 @@ func TestLoadFrom_RejectsUnknownTopLevelKey(t *testing.T) {
 	_, err := LoadFrom(path)
 	require.Error(t, err)
 }
+
+// M12 contract: a present-but-content-less .layerx.yaml is identical to an
+// absent one — fall back to defaults rather than aborting startup. goccy
+// returns io.EOF on zero-document input, which without the EOF guard would
+// have surfaced as a misleading "parsing" error.
+func TestLoadFrom_EmptyFile_UsesDefaults(t *testing.T) {
+	cases := map[string]string{
+		"empty":             "",
+		"whitespace_only":   "   \n\n\t\n",
+		"comments_only":     "# just a comment\n# another\n",
+		"comments_and_ws":   "\n# placeholder\n\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".layerx.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+			cfg, err := LoadFrom(path)
+			require.NoError(t, err, "content-less config must not error")
+			assert.Equal(t, Default(), cfg, "content-less config must equal defaults")
+		})
+	}
+}

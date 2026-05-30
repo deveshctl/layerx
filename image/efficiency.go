@@ -96,7 +96,15 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		var pathWaste int64
 		var occurrenceCount int
 		for _, run := range runs {
-			occurrenceCount += len(run)
+			for _, occ := range run {
+				// LayerCount documents "how many layers contributed bytes".
+				// Zero-size occurrences (hardlink replacements that extend a
+				// run only to keep the earlier real-file bytes chargeable)
+				// are not byte-contributors and must not inflate the count.
+				if occ.size > 0 {
+					occurrenceCount++
+				}
+			}
 			if len(run) < 2 {
 				continue
 			}
@@ -154,19 +162,23 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	}
 }
 
-// indexTree populates idx with every non-whiteout, non-hardlink leaf or
-// directory reachable from root, keyed by FileNode.Path. The map is consumed
-// by pathRuns for O(1) per-path lookups across stacked snapshots. Hardlinks
-// and whiteouts are skipped to match walkFiles' notion of "real files" —
-// pathRuns only ever asks for paths walkFiles produced, and including
-// hardlink nodes here would charge their (always-zero) size against
-// efficiency if a future caller ever fed a hardlink path in.
+// indexTree populates idx with every non-whiteout leaf or directory reachable
+// from root, keyed by FileNode.Path. The map is consumed by pathRuns for O(1)
+// per-path lookups across stacked snapshots.
+//
+// Hardlinks are admitted at every DiffType. They carry size 0 in the tar, so
+// they contribute nothing to byte-accounting on their own — but a hardlink
+// snapshot at the same path as a prior real-file occurrence keeps the run
+// going so the prior bytes are charged as waste. pathRuns flushes only on
+// Removed or absence, so a Modified or Added hardlink (which is what Stack
+// emits when a hardlink replaces or reintroduces a real file at the same
+// path) extends the run past the prior real occurrence; computeEfficiency
+// then charges run[:len-1] as waste. The previous behaviour — skipping all
+// hardlinks unconditionally — caused regular-file → hardlink replacements
+// to silently vanish from the waste total.
 func indexTree(node *FileNode, idx map[string]*FileNode) {
 	for _, child := range node.Children {
 		if isWhiteoutName(child.Name) {
-			continue
-		}
-		if !child.IsDir && child.IsHardlink {
 			continue
 		}
 		if child.Path != "" {
