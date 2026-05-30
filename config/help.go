@@ -1,15 +1,26 @@
 package config
 
-// SectionHelp returns a short reference excerpt for section, or "" when the
-// section is unknown. Add new top-level config keys here as they ship so the
-// CLI can surface section-specific guidance without calling cobra.Usage().
+// SectionHelp returns a short reference excerpt for section. When section is
+// empty or unknown, a general .layerx.yaml hint is returned so every config
+// failure surfaces actionable next steps.
 func SectionHelp(section string) string {
-	return sectionHelp[section]
+	if h, ok := sectionHelp[section]; ok && h != "" {
+		return h
+	}
+	return sectionHelp[SectionGeneral]
 }
 
 // sectionHelp maps config sections to concise examples. Keep excerpts short —
 // full reference lives in docs/configuration.md.
 var sectionHelp = map[string]string{
+	SectionGeneral: `.layerx.yaml — configuration file (read from the working directory):
+
+  rules:           CI efficiency thresholds (layerx ci, CI=true)
+  path-rules:      path-scoped CI rules (block, deny-waste, max-layer-count)
+  version:         schema version (currently 1)
+
+See docs/configuration.md for the full reference.
+Run "layerx init --flavour generic" to write a starter file.`,
 	SectionRules: `rules — global CI efficiency thresholds (used by "layerx ci" and CI=true):
 
   rules:

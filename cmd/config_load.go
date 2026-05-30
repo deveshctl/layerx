@@ -34,18 +34,19 @@ func presentConfigLoadFailure(cmd *cobra.Command, err error) {
 	cmd.SilenceErrors = true
 }
 
-// printConfigSectionHint walks the error chain for *config.LoadError and
-// prints SectionHelp when available.
+// printConfigSectionHint prints section-specific guidance when the error
+// chain contains a tagged *config.LoadError; otherwise the general config
+// hint. A hint is always printed so the user has a next step.
 func printConfigSectionHint(w io.Writer, err error) {
+	section := ""
 	for err != nil {
 		var loadErr *config.LoadError
 		if errors.As(err, &loadErr) {
-			if snippet := config.SectionHelp(loadErr.Section); snippet != "" {
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, snippet)
-			}
-			return
+			section = loadErr.Section
+			break
 		}
 		err = errors.Unwrap(err)
 	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, config.SectionHelp(section))
 }

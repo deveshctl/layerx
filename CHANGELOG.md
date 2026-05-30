@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silenced usage on the root command for all error paths, which also
   suppressed help when args were missing.
 - Malformed `.layerx.yaml` errors print a section-specific reference
-  excerpt (rules, path-rules, version) instead of the full command usage
-  block. `rules: null` is now rejected rather than silently zeroing
-  thresholds.
+  excerpt (rules, path-rules, version) when the failing section is known,
+  or a general config hint otherwise — never the full command usage block.
+  `rules: null` is now rejected rather than silently zeroing thresholds.
 
 ## [v1.3.0] - 2026-05-30
 

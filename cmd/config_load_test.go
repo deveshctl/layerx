@@ -45,6 +45,24 @@ func fmtWrapLoadError(msg string) error {
 	})
 }
 
+func TestPrintConfigSectionHint_UnknownSection_StillPrintsGeneral(t *testing.T) {
+	var buf bytes.Buffer
+	err := fmt.Errorf("loading config: %w", &config.LoadError{
+		Path:    ".layerx.yaml",
+		Section: "",
+		Err:     errors.New("unknown field \"ruels\""),
+	})
+	printConfigSectionHint(&buf, err)
+	assert.Contains(t, buf.String(), "docs/configuration.md")
+	assert.Contains(t, buf.String(), "layerx init")
+}
+
+func TestPrintConfigSectionHint_NonLoadError_StillPrintsGeneral(t *testing.T) {
+	var buf bytes.Buffer
+	printConfigSectionHint(&buf, fmt.Errorf("loading config: %w", errors.New("permission denied")))
+	assert.Contains(t, buf.String(), "docs/configuration.md")
+}
+
 func TestLoadConfig_BadRulesNull(t *testing.T) {
 	writeConfig(t, "rules: null\n")
 
