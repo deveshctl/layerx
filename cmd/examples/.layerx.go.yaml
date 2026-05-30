@@ -1,0 +1,15 @@
+# layerx Go starter config
+# Tighter thresholds because Go images are typically FROM scratch or
+# distroless and have very little legitimate slack.
+version: 1
+
+rules:
+  lowest-efficiency: 0.95
+  highest-user-wasted-percent: 0.05
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - /root/.cache/go-build/**
+    - /go/pkg/**                   # GOPATH module cache, build-time only
+    - /tmp/**
