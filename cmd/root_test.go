@@ -223,3 +223,41 @@ func TestRootCmd_UnknownKey_ShowsGeneralHint(t *testing.T) {
 	assert.NotContains(t, errOut, "Usage:")
 }
 
+// End-to-end coverage for path-rules section hints, mirroring
+// TestRootCmd_BadConfig_NoUsageDump but routed through the path-rules
+// validation path so SectionPathRules is the tag carried on the LoadError.
+// An invalid glob is the cheapest trigger that survives the strict YAML
+// decode and reaches normalizePathRules' validateGlobs call.
+func TestRootCmd_BadConfig_PathRules_NoUsageDump(t *testing.T) {
+	writeConfig(t, "path-rules:\n  block:\n    - \"[invalid\"\n")
+	resetRootCmdFlags(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"fake:latest"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err, "bad path-rules config must produce an error")
+	assert.Contains(t, err.Error(), "loading config",
+		"error chain must identify the config-load step")
+
+	errOut := stderr.String()
+	assert.Contains(t, errOut, "Error:",
+		"the user must see what failed")
+	assert.Contains(t, errOut, "invalid glob",
+		"the path-rules-specific failure cause must reach the user")
+	assert.Contains(t, errOut, "path-rules — path-scoped CI rules",
+		"section-specific hint must accompany a path-rules error")
+	assert.NotContains(t, errOut, "rules — global CI efficiency thresholds",
+		"the rules-section hint must NOT appear for a path-rules failure")
+	assert.NotContains(t, errOut, "Inspect a container image",
+		"the root Long description must not be dumped on a config error")
+
+	stdOut := stdout.String()
+	assert.NotContains(t, stdOut, "Usage:",
+		"usage block must be silenced on RunE errors")
+	assert.NotContains(t, errOut, "Usage:",
+		"usage block must not appear on stderr either")
+}
+

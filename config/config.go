@@ -248,6 +248,13 @@ func validationSection(msg string) string {
 
 // inferParseSection maps strict YAML parse errors to a config section when
 // the library surfaces a field path; otherwise returns "".
+//
+// Ordering matters: "path-rules" contains the substring "rules", so the
+// path-rules case must run BEFORE the rules case or every path-rules
+// failure mis-tags as SectionRules. The check is deliberately written as a
+// linear switch (not a map) for that reason — a map would swallow the
+// dependency and tempt a future "tidy up" reorder. Same logic for
+// "keybindings" (contains "key", but no other section conflicts).
 func inferParseSection(err error) string {
 	msg := err.Error()
 	switch {

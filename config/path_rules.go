@@ -47,6 +47,13 @@ func normalizePathRules(node ast.Node) ([]PathRuleSpec, error) {
 	case *ast.SequenceNode:
 		return normalizeList(node)
 	case *ast.NullNode:
+		// `path-rules: null` (and the bare-key / `~` shorthand variants)
+		// are treated as "no path rules" rather than rejected. path-rules
+		// are opt-in, so a user clearing the section should not have to
+		// also delete the key. This is the deliberate asymmetry vs
+		// `rules: null` which IS rejected (see rejectNullSections in
+		// config.go) — rules are always-on with thresholds, so a null
+		// there would silently zero them.
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("path-rules must be a mapping (flat form) or a sequence (list form); got %T", node)

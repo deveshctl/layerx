@@ -240,6 +240,32 @@ rules:
 	assert.Contains(t, err.Error(), "1")
 }
 
+// `path-rules: null` (and the bare-key / `~` shorthand variants) are
+// intentionally treated as "no path rules" rather than rejected — the
+// inverse of `rules: null` which IS an error. path-rules are opt-in;
+// requiring users to delete the key entirely when clearing the section
+// would be a worse UX. Pin all three null spellings so a future
+// "consistency fix" that flips this back to error breaks a test instead
+// of silently changing behaviour.
+func TestLoadFrom_PathRulesNull_TreatedAsAbsent(t *testing.T) {
+	cases := map[string]string{
+		"explicit_null":   "path-rules: null\n",
+		"tilde_shorthand": "path-rules: ~\n",
+		"bare_key":        "path-rules:\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".layerx.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+			cfg, err := LoadFrom(path)
+			require.NoError(t, err, "path-rules: null must not error — path-rules are opt-in")
+			assert.Empty(t, cfg.PathRules, "null path-rules must produce no specs")
+		})
+	}
+}
+
 func TestLoadFrom_PathRules_FlatForm(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".layerx.yaml")
