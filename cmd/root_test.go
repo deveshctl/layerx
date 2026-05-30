@@ -148,15 +148,15 @@ func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 	require.Error(t, err, "missing image argument must produce an error")
 
 	errOut := stderr.String()
+	stdOut := stdout.String()
+	combined := stdOut + errOut
 	assert.Contains(t, errOut, "Error:",
 		"cobra must print the one-line error to stderr so the user sees what failed")
 	assert.Contains(t, errOut, "accepts 1 arg",
 		"the arg-count error must reach the user")
-
-	stdOut := stdout.String()
-	assert.Contains(t, stdOut, "Usage:",
+	assert.Contains(t, combined, "Usage:",
 		"usage block must accompany an arg-validation error — that IS the help the user needs")
-	assert.Contains(t, stdOut, "layerx [flags] IMAGE_OR_ARCHIVE",
+	assert.Contains(t, combined, "layerx [flags] IMAGE_OR_ARCHIVE",
 		"the usage line must include the rootCmd Use string")
 }
 
@@ -167,7 +167,10 @@ func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 // This test never reaches the Docker daemon: config load fails well before
 // resolver selection. Safe to run in CI.
 func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
-	writeConfig(t, "rules:\n  lowest-efficiency: not-a-number\n")
+	// rules: null is rejected deterministically by decodeRules on every platform.
+	// Avoid "not-a-number" scalars — goccy's coercion varies and can skip the
+	// config-load path this test is meant to exercise.
+	writeConfig(t, "rules: null\n")
 	resetRootCmdFlags(t)
 
 	var stdout, stderr bytes.Buffer
@@ -183,8 +186,10 @@ func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
 	errOut := stderr.String()
 	assert.Contains(t, errOut, "Error:",
 		"the user must see what failed")
+	assert.Contains(t, errOut, "must be a mapping, not null",
+		"rules:null must be rejected with a clear message")
 	assert.Contains(t, errOut, "rules — global CI efficiency thresholds",
-		"section-specific hint must accompany a rules parse error")
+		"section-specific hint must accompany a rules error")
 	assert.NotContains(t, errOut, "Inspect a container image",
 		"the root Long description must not be dumped on a config error")
 
@@ -194,3 +199,24 @@ func TestRootCmd_BadConfig_NoUsageDump(t *testing.T) {
 	assert.NotContains(t, errOut, "Usage:",
 		"usage block must not appear on stderr either")
 }
+
+func TestRootCmd_UnknownKey_ShowsGeneralHint(t *testing.T) {
+	writeConfig(t, "ruels:\n  lowest-efficiency: 0.9\n")
+	resetRootCmdFlags(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"fake:latest"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err)
+
+	errOut := stderr.String()
+	assert.Contains(t, errOut, "Error:")
+	assert.Contains(t, errOut, "docs/configuration.md",
+		"unknown-section config errors must still print the general hint")
+	assert.NotContains(t, stdout.String(), "Usage:")
+	assert.NotContains(t, errOut, "Usage:")
+}
+
