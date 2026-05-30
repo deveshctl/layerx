@@ -89,22 +89,17 @@ func LoadFrom(path string) (*Config, error) {
 
 	// Two-pass decode: first into rawConfig (captures path-rules as a raw
 	// AST node), then normalize to the canonical Config shape. The raw
-	// pass uses the same Default() seed for Rules so an absent `rules:`
-	// block keeps default thresholds.
-	raw := rawConfig{
-		Version: Default().Version,
-		Rules:   Default().Rules,
-	}
+	// pass is seeded from Default() via configToRaw so any default-bearing
+	// field on Config flows through without LoadFrom needing to enumerate
+	// each one. New defaultable fields added later need only land in
+	// Default() and the configToRaw / rawToConfig pair.
+	raw := configToRaw(Default())
 	dec := yaml.NewDecoder(bytes.NewReader(data), yaml.Strict())
 	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
 
-	cfg := &Config{
-		Version:     raw.Version,
-		Rules:       raw.Rules,
-		Keybindings: raw.Keybindings,
-	}
+	cfg := rawToConfig(raw)
 	specs, err := normalizePathRules(raw.PathRules)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
@@ -115,6 +110,28 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("validating %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// configToRaw projects a Config onto its rawConfig mirror, used by LoadFrom
+// to seed the YAML decoder with default values. PathRules is intentionally
+// not copied — the caller is interested in the raw AST node, which the
+// decoder fills in directly.
+func configToRaw(c *Config) rawConfig {
+	return rawConfig{
+		Version:     c.Version,
+		Rules:       c.Rules,
+		Keybindings: c.Keybindings,
+	}
+}
+
+// rawToConfig is the inverse projection. Caller is responsible for setting
+// PathRules from the normalized AST node afterward.
+func rawToConfig(r rawConfig) *Config {
+	return &Config{
+		Version:     r.Version,
+		Rules:       r.Rules,
+		Keybindings: r.Keybindings,
+	}
 }
 
 // hasYAMLContent reports whether data contains anything that would parse to a
