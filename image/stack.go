@@ -286,5 +286,15 @@ func hasChangedChildren(node *FileNode) bool {
 }
 
 func isWhiteoutName(name string) bool {
+	return IsWhiteoutName(name)
+}
+
+// IsWhiteoutName reports whether name is an overlay whiteout marker:
+// either an opaque-directory marker (`.wh..wh..opq`) or a per-file
+// tombstone (`.wh.<name>`). Exported so consumers outside image/ — such
+// as ci/path-rules — can identify these markers in raw per-layer trees,
+// where tar entries land as regular FileNodes (DiffType=Unchanged) until
+// stack.go interprets them.
+func IsWhiteoutName(name string) bool {
 	return name == ".wh..wh..opq" || strings.HasPrefix(name, ".wh.")
 }

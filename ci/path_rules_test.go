@@ -35,6 +35,30 @@ func makeLayerTree(index int, id string, addedPaths, removedPaths []string) imag
 	}
 }
 
+// makeRawLayerTree mirrors what `image.ParseLayerTar` produces in
+// production: every entry — including overlay whiteout markers like
+// `.wh.<name>` and `.wh..wh..opq` — lands as a regular FileNode with the
+// default `DiffType=Unchanged`. `Removed` status is only assigned later
+// in stack.go / compare.go against stacked or comparison trees, neither
+// of which BlockPathRule consumes. Tests that need to verify the rule's
+// whiteout-skip contract against production-shaped trees must use this.
+func makeRawLayerTree(index int, id string, paths []string) image.Layer {
+	tree := image.NewFileTree()
+	for _, p := range paths {
+		// Use the basename as Name so the whiteout predicate (which
+		// matches on Name, not Path) sees the marker correctly.
+		name := p
+		if i := strings.LastIndex(p, "/"); i >= 0 {
+			name = p[i+1:]
+		}
+		tree.Root.AddChild(&image.FileNode{
+			Name: name,
+			Path: p,
+		})
+	}
+	return image.Layer{Index: index, ID: id, Tree: tree}
+}
+
 func TestBlockPathRule_Match(t *testing.T) {
 	r := BlockPathRule{ID: "block", Patterns: []string{"/tmp/**"}}
 	ctx := EvalContext{
@@ -81,19 +105,44 @@ func TestBlockPathRule_WhiteoutBypass(t *testing.T) {
 	assert.Contains(t, results[0].Detail, "layer 0", "must report the layer that wrote the secret, not the whiteout layer")
 }
 
-// .wh..wh..opq is the opaque-whiteout marker; it must not match user
-// patterns like "**/.git/**" by accident. The node is present in the
-// per-layer tree as a regular file node, but its name is unique.
+// .wh..wh..opq is the opaque-whiteout marker. It must not appear in
+// findings even when the user pattern would otherwise match it (e.g.
+// `**` matches everything). Uses a production-shape tree: `ParseLayerTar`
+// inserts the marker as a regular FileNode (DiffType=Unchanged), so the
+// rule must filter by name, not by DiffType.
 func TestBlockPathRule_OpaqueWhiteoutNotMatched(t *testing.T) {
-	r := BlockPathRule{ID: "block", Patterns: []string{"**/.git/**"}}
+	r := BlockPathRule{ID: "block", Patterns: []string{"/some/**"}}
 	ctx := EvalContext{
 		Layers: []image.Layer{
-			makeLayerTree(0, "lay0", []string{"/some/.wh..wh..opq"}, nil),
+			makeRawLayerTree(0, "lay0", []string{"/some/.wh..wh..opq"}),
 		},
 	}
 	results := r.Evaluate(ctx)
 	require.Len(t, results, 1)
-	assert.True(t, results[0].Passed, "opaque whiteout filename should not trip user patterns")
+	assert.True(t, results[0].Passed,
+		"opaque whiteout marker must be skipped even when the user pattern matches its path")
+}
+
+// `.wh.<name>` per-file tombstones produced by `apt-get clean` and
+// similar must not surface as user-visible findings — the underlying
+// blob lives in whichever lower layer first wrote it, and that layer's
+// node (named `<name>`, no `.wh.` prefix) is what the rule should report.
+//
+// Production shape: ParseLayerTar inserts the tombstone as a regular
+// FileNode with DiffType=Unchanged. Pre-fix, BlockPathRule's
+// DiffType==Removed skip never fired and a pattern like `/var/cache/**`
+// would surface `/var/cache/.wh.foo` as a "blocked path".
+func TestBlockPathRule_PerFileWhiteoutNotMatched(t *testing.T) {
+	r := BlockPathRule{ID: "block", Patterns: []string{"/var/cache/**"}}
+	ctx := EvalContext{
+		Layers: []image.Layer{
+			makeRawLayerTree(0, "lay0", []string{"/var/cache/.wh.foo"}),
+		},
+	}
+	results := r.Evaluate(ctx)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Passed,
+		"per-file whiteout tombstone must be skipped; the actual blob's layer surfaces it instead")
 }
 
 // Spec §6.2: tar-relative paths (no leading slash) must match the same

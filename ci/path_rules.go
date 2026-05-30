@@ -19,9 +19,18 @@ func normalizePath(p string) string {
 }
 
 // BlockPathRule fails for any path written by any layer that matches one
-// of Patterns. Whiteouts (DiffType == Removed) are skipped — they represent
+// of Patterns. Whiteout markers (`.wh.<name>` per-file tombstones and
+// `.wh..wh..opq` opaque-directory markers) are skipped — they represent
 // deletion events, not writes; the actual blob is in whichever earlier
 // layer added the file, which this rule will surface there.
+//
+// Whiteout detection is name-based, not DiffType-based, because per-layer
+// trees (`Layer.Tree`) come straight from `image.ParseLayerTar` which
+// leaves every node at the default `DiffType=Unchanged`. Removed status
+// is only assigned downstream in stack.go / compare.go, against stacked
+// or comparison trees this rule does not consume. The DiffType==Removed
+// skip remains as defensive symmetry for callers that hand-construct
+// trees with explicit deletion markers.
 type BlockPathRule struct {
 	ID       string
 	Patterns []string
@@ -41,7 +50,7 @@ func (r BlockPathRule) Evaluate(ctx EvalContext) []RuleResult {
 			if node == nil || node.IsDir {
 				return
 			}
-			if node.DiffType == image.Removed {
+			if image.IsWhiteoutName(node.Name) || node.DiffType == image.Removed {
 				return
 			}
 			normalized := normalizePath(node.Path)
