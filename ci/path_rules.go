@@ -115,8 +115,9 @@ func (r DenyWastePathRule) Evaluate(ctx EvalContext) []RuleResult {
 					Name:      r.Name(),
 					Kind:      RuleKindPath,
 					Passed:    false,
-					Actual:    fmt.Sprintf("%s (%d layers, %s)", wf.Path, wf.LayerCount, image.FormatBytes(wf.TotalWasted)),
+					Actual:    wf.Path,
 					Threshold: pat,
+					Detail:    fmt.Sprintf("(%d layers, %s)", wf.LayerCount, image.FormatBytes(wf.TotalWasted)),
 				})
 				break
 			}
@@ -166,8 +167,9 @@ func (r MaxLayerCountRule) Evaluate(ctx EvalContext) []RuleResult {
 					Name:      r.Name(),
 					Kind:      RuleKindPath,
 					Passed:    false,
-					Actual:    fmt.Sprintf("%s (%d layers)", wf.Path, wf.LayerCount),
+					Actual:    wf.Path,
 					Threshold: fmt.Sprintf("%d layers", r.MaxCount),
+					Detail:    fmt.Sprintf("(%d layers)", wf.LayerCount),
 				})
 			}
 		}

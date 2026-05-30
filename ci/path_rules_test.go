@@ -219,8 +219,9 @@ func TestDenyWastePathRule_Match(t *testing.T) {
 	for _, r := range results {
 		if !r.Passed {
 			failures++
-			assert.Contains(t, r.Actual, "/usr/lib/python/foo.pyc")
-			assert.Contains(t, r.Actual, "2 layers")
+			assert.Equal(t, "/usr/lib/python/foo.pyc", r.Actual,
+				"Actual must hold the bare path; layer/byte context lives in Detail")
+			assert.Contains(t, r.Detail, "2 layers")
 		}
 	}
 	assert.Equal(t, 1, failures, "only the .pyc should match")
@@ -252,11 +253,12 @@ func TestDenyWastePathRule_LayerCountInDetail(t *testing.T) {
 	results := r.Evaluate(ctx)
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Passed)
-	// Actual should mention layer count and the byte size in human form.
-	assert.Contains(t, results[0].Actual, "4 layers")
+	// Actual is the bare path; layer count and byte size live in Detail.
+	assert.Equal(t, "/var/log/big.log", results[0].Actual)
+	assert.Contains(t, results[0].Detail, "4 layers")
 	assert.True(t,
-		strings.Contains(results[0].Actual, "10.0 MB") || strings.Contains(results[0].Actual, "10 MB"),
-		"actual %q should contain the human-readable size", results[0].Actual)
+		strings.Contains(results[0].Detail, "10.0 MB") || strings.Contains(results[0].Detail, "10 MB"),
+		"detail %q should contain the human-readable size", results[0].Detail)
 }
 
 func TestMaxLayerCountRule_Boundary(t *testing.T) {
