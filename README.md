@@ -51,6 +51,12 @@ Other platforms: see [Install](#install).
 
 `IMAGE_OR_ARCHIVE` is auto-detected: an existing file is read directly without contacting any container runtime, anything else is resolved through the Docker daemon. All three modes accept either form.
 
+Deeper guides live in [`docs/`](docs/):
+
+- [Configuration reference](docs/configuration.md) — every `.layerx.yaml` field, both path-rules forms, starter flavours
+- [CI integration](docs/ci-integration.md) — GitHub Actions and GitLab CI recipes, threshold recommendations, exit codes
+- [JSON export](docs/json-export.md) — full schema, `jq` one-liners, scripting use cases
+
 ### Interactive explorer
 
 - Browse layers with vim keys; see Dockerfile command, size, short digest
@@ -90,7 +96,7 @@ layerx compare --mode full myapp:old myapp:new
 
 ### JSON export
 
-Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks.
+Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks. See [docs/json-export.md](docs/json-export.md) for the full schema, jq one-liners, and scripting recipes.
 
 ---
 
@@ -240,6 +246,8 @@ path-rules:
 See `layerx init` (below) for ready-made configs by language.
 
 CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
+
+For the full field reference, path-rule semantics, and worked examples, see [docs/configuration.md](docs/configuration.md). For end-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit-code reference), see [docs/ci-integration.md](docs/ci-integration.md).
 
 ### Starter configs
 
