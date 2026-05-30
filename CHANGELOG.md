@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-05-30
+
+Compare two builds, declare path rules, and pin the config and JSON schemas.
+Two breaking changes — see Changed.
+
 ### Added
 - `layerx compare OLD NEW` reports size, efficiency, layer, file, and waste
   deltas between two images side-by-side. Both arguments accept the same

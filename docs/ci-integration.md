@@ -103,16 +103,16 @@ cache APT downloads, pin a version and cache the unpacked binary directly:
         uses: actions/cache@v4
         with:
           path: /usr/local/bin/layerx
-          key: layerx-${{ runner.os }}-v1.2.2
+          key: layerx-${{ runner.os }}-v1.3.0
 
       - name: Install layerx
         if: steps.cache-layerx.outputs.cache-hit != 'true'
         run: |
-          curl -LO https://github.com/deveshctl/layerx/releases/download/v1.2.2/layerx_linux_amd64.deb
+          curl -LO https://github.com/deveshctl/layerx/releases/download/v1.3.0/layerx_linux_amd64.deb
           sudo dpkg -i layerx_linux_amd64.deb
 ```
 
-Pin to a specific version (`v1.2.2` here) so a tagged release upgrade is a
+Pin to a specific version (`v1.3.0` here) so a tagged release upgrade is a
 deliberate change, not an accidental green-to-red regression.
 
 ---
@@ -127,7 +127,7 @@ stages:
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
-  LAYERX_VERSION: "v1.2.2"
+  LAYERX_VERSION: "v1.3.0"
 
 build:
   stage: build
@@ -244,7 +244,7 @@ silently let bad images through if you only watch for `1`.
 ## Tips
 
 - **Pin the version.** `releases/latest/download` is convenient for
-  exploration; pin a tag (`v1.2.2` or whatever your latest release is)
+  exploration; pin a tag (`v1.3.0` or whatever your latest release is)
   before you put it on a protected branch. Tooling that gates merges
   should never auto-upgrade.
 - **Cache the binary.** A few hundred KB to download, but every PR pays
