@@ -385,6 +385,29 @@ func TestLoadFrom_PathRules_MaxLayerCount_ZeroDisabled(t *testing.T) {
 	assert.Empty(t, cfg.PathRules, "max-layer-count: 0 must produce no rule (treated as disabled)")
 }
 
+// List-form symmetry with the flat-form ZeroDisabled test above. A list-form
+// entry of type max-layer-count with threshold:0 must also be dropped, not
+// emit a useless spec the evaluator would have to special-case at runtime.
+// Other rules in the same list (e.g. a block rule alongside) must still load.
+func TestLoadFrom_PathRules_MaxLayerCount_ListFormZeroDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`path-rules:
+  - id: dedupe-cap
+    type: max-layer-count
+    threshold: 0
+  - id: secrets
+    type: block
+    paths: [/etc/shadow]
+`), 0644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.PathRules, 1, "max-layer-count threshold:0 must be dropped, leaving only the block rule")
+	assert.Equal(t, "secrets", cfg.PathRules[0].ID)
+	assert.Equal(t, PathRuleBlock, cfg.PathRules[0].Type)
+}
+
 // Mixing forms is impossible at the YAML AST level — a node is either a
 // mapping or a sequence, not both. This test pins that goccy gives a clean
 // error rather than silently picking one.

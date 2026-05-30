@@ -130,6 +130,13 @@ func normalizeList(node ast.Node) ([]PathRuleSpec, error) {
 				Paths: entry.Paths,
 			})
 		case PathRuleMaxLayerCount:
+			// Threshold of 0 means "disabled" (matches flat form's
+			// `if flat.MaxLayerCount != 0` guard). Drop the entry
+			// rather than emit a no-op spec the evaluator would have
+			// to special-case.
+			if entry.Threshold == 0 {
+				continue
+			}
 			if err := validateMaxLayerCount(entry.Threshold); err != nil {
 				return nil, fmt.Errorf("path-rules[id=%s]: %w", entry.ID, err)
 			}
