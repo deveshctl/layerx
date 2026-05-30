@@ -10,6 +10,6 @@ rules:
 path-rules:
   block:
     - "**/.git/**"
-    - /root/.cache/go-build/**
-    - /go/pkg/**                   # GOPATH module cache, build-time only
-    - /tmp/**
+    - "/root/.cache/go-build/**"
+    - "/go/pkg/**"                 # GOPATH module cache, build-time only
+    - "/tmp/**"

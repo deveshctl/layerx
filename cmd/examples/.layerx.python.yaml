@@ -9,9 +9,9 @@ rules:
 path-rules:
   block:
     - "**/.git/**"
-    - /root/.cache/pip/**         # pip download cache
+    - "/root/.cache/pip/**"       # pip download cache
     - "**/__pycache__/**"
-    - /tmp/**
+    - "/tmp/**"
 
   deny-waste:
     - "**/*.pyc"

@@ -13,8 +13,8 @@ path-rules:
     - "**/.npm/_cacache/**"      # npm cache, never needed at runtime
     - "**/.yarn/cache/**"
     - "**/.pnpm-store/**"
-    - /root/.npm/**
-    - /tmp/**
+    - "/root/.npm/**"
+    - "/tmp/**"
 
   deny-waste:
     - "**/node_modules/**"        # reinstalled across layers = wasted

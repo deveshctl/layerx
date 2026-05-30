@@ -10,9 +10,9 @@ rules:
 path-rules:
   block:
     - "**/.git/**"
-    - /root/.m2/repository/**     # Maven local repo, build-time only
-    - /root/.gradle/caches/**
-    - /tmp/**
+    - "/root/.m2/repository/**"   # Maven local repo, build-time only
+    - "/root/.gradle/caches/**"
+    - "/tmp/**"
 
   deny-waste:
     - "**/*.jar.original"          # spring-boot rebuild artifact

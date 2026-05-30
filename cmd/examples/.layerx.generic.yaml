@@ -12,8 +12,8 @@ path-rules:
     - "**/.git/**"           # git metadata never belongs in a runtime image
     - "**/.svn/**"
     - "**/.hg/**"
-    - /tmp/**                # build-time temp files
-    - /var/tmp/**
+    - "/tmp/**"              # build-time temp files
+    - "/var/tmp/**"
     - "**/.DS_Store"         # macOS finder droppings
     - "**/Thumbs.db"         # Windows explorer droppings
     - "**/*.swp"             # vim swap files
