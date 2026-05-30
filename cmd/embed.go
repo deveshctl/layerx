@@ -3,6 +3,7 @@ package cmd
 import (
 	"embed"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -29,12 +30,7 @@ func StarterConfig(flavour string) ([]byte, bool) {
 }
 
 func isValidFlavour(s string) bool {
-	for _, f := range validFlavours {
-		if s == f {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(validFlavours, s)
 }
 
 // flavourList renders the supported flavours as a human-readable list:
