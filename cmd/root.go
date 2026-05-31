@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
@@ -81,13 +80,12 @@ Environment:
   layerx ci nginx:latest`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInspect,
-	// Errors returned from runInspect (bad config, daemon down, image not
-	// found) are user-facing one-liners — cobra dumping the full usage block
-	// after them buries the actual message in 60+ lines of help text. Keep
-	// the "Error: ..." line cobra prints, drop the usage afterthought. The
-	// ci and compare subcommands set this on their own command declarations
-	// for the same reason.
-	SilenceUsage: true,
+	// SilenceUsage is intentionally left at its zero value (false) here —
+	// runInspect flips it to true on entry. This keeps the usage block
+	// visible for arg-validation failures (bare `layerx` with no image
+	// argument) where the help text IS the right response, while still
+	// silencing the 60-line dump for runtime errors (config parse, daemon
+	// down, image not found) once we've reached RunE.
 }
 
 func init() {
@@ -139,11 +137,19 @@ func ExecuteContext(ctx context.Context) error {
 }
 
 func runInspect(cmd *cobra.Command, args []string) error {
+	// Args validation has passed by the time RunE runs — from here on, any
+	// error is a runtime failure (bad config, daemon down, image not found)
+	// where cobra's default usage dump only buries the actual message. The
+	// rootCmd declaration deliberately leaves SilenceUsage at false so
+	// missing-argument errors still print usage; flip it now that we're
+	// past that gate.
+	cmd.SilenceUsage = true
+
 	imageRef := args[0]
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig(cmd)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
 
 	noCache := noCacheRequested()
@@ -155,7 +161,8 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		// The CI report is already printed by executeCICheck; suppress
 		// cobra's default error output so an ErrCIFailed return doesn't
 		// tack a redundant "Error: ..." line onto the report. Usage is
-		// already silenced at the rootCmd declaration.
+		// silenced at the start of runInspect; config failures print via
+		// loadConfig before we reach this branch.
 		cmd.SilenceErrors = true
 		// Forward the root cobra command's signal-cancellable context to
 		// runCICheckInner so image.AnalyzeWithOptions sees Ctrl+C. We pass

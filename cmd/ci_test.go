@@ -237,3 +237,62 @@ path-rules:
 	require.Greater(t, gIdx, -1, "Global Rules: header must be present")
 	require.Greater(t, pIdx, gIdx, "Path Rules: header must follow Global Rules:")
 }
+
+// Bare `layerx ci` (no image arg) and `layerx ci a b` (too many args) must
+// print a synopsis + Usage line + at least one example to stderr — not
+// cobra's terse "accepts 1 arg(s)" alone. ciCmd has SilenceErrors+SilenceUsage
+// set, so without ciArgs the user would see no actionable help. Mirrors the
+// rootCmd no-args contract pinned in TestRootCmd_NoArgs_ShowsUsage and the
+// compareCmd one in cmd/compare_test.go.
+func TestCICmd_NoArgs_ShowsUsage(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantSynopsis string // first line on stderr
+	}{
+		{
+			name:        "zero_args",
+			args:        []string{"ci"},
+			wantSynopsis: "layerx ci: run efficiency checks",
+		},
+		{
+			name:        "too_many_args",
+			args:        []string{"ci", "a", "b"},
+			wantSynopsis: "needs exactly 1 image argument, got 2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			rootCmd.SetOut(&stdout)
+			rootCmd.SetErr(&stderr)
+			rootCmd.SetArgs(tc.args)
+			t.Cleanup(func() {
+				rootCmd.SetOut(nil)
+				rootCmd.SetErr(nil)
+				rootCmd.SetArgs(nil)
+			})
+
+			err := rootCmd.Execute()
+			require.Error(t, err, "wrong arg count must produce an error")
+
+			var ciUsage *ErrCIUsage
+			require.ErrorAs(t, err, &ciUsage,
+				"the returned error must carry the ErrCIUsage sentinel so main.go exits 2 cleanly")
+
+			errOut := stderr.String()
+			assert.Contains(t, errOut, tc.wantSynopsis,
+				"the user must see a one-line synopsis explaining what went wrong")
+			assert.Contains(t, errOut, "Usage:",
+				"a Usage: header must accompany the hint")
+			assert.Contains(t, errOut, "layerx ci [flags] IMAGE_OR_ARCHIVE",
+				"the synopsis line must reflect ciCmd.Use")
+			assert.Contains(t, errOut, "layerx ci nginx:latest",
+				"at least one concrete example must reach the user")
+			// ciCmd has SilenceErrors=true, so cobra's own "Error: ..."
+			// prefix must NOT appear — ciArgs is the only output source.
+			assert.NotContains(t, errOut, "Error: usage",
+				"the ErrCIUsage sentinel body must not be printed verbatim")
+		})
+	}
+}

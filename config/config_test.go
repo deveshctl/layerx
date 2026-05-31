@@ -100,6 +100,50 @@ func TestLoadFrom_RejectsNegativeWastedBytes(t *testing.T) {
 	assert.Contains(t, err.Error(), "highest-wasted-bytes")
 }
 
+// rules: null silently zeroing CI thresholds is the primary regression this
+// rejection guards against. Pin every YAML spelling of null — explicit
+// `null`, the `~` shorthand, and a bare `rules:` key (implicit null) — so
+// goccy or our pre-decode walk regressing on any one of them surfaces
+// immediately.
+func TestLoadFrom_RejectsRulesNull(t *testing.T) {
+	cases := map[string]string{
+		"explicit_null":   "rules: null\n",
+		"tilde_shorthand": "rules: ~\n",
+		"bare_key":        "rules:\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".layerx.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+			_, err := LoadFrom(path)
+			require.Error(t, err, "rules-null variant must be rejected")
+			assert.Contains(t, err.Error(), "must be a mapping, not null")
+
+			var loadErr *LoadError
+			require.ErrorAs(t, err, &loadErr)
+			assert.Equal(t, SectionRules, loadErr.Section,
+				"the LoadError must be tagged with SectionRules so the CLI prints the rules-section hint")
+		})
+	}
+}
+
+func TestLoadFrom_ValidationError_HasSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`rules:
+  lowest-efficiency: 1.5
+`), 0644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+
+	var loadErr *LoadError
+	require.ErrorAs(t, err, &loadErr)
+	assert.Equal(t, SectionRules, loadErr.Section)
+}
+
 // keybindings is a documented (M12) top-level key. Strict YAML must accept it
 // so users following CLAUDE.md examples don't get their whole config rejected
 // when they include a keybindings block alongside rules.
@@ -194,6 +238,32 @@ rules:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "version")
 	assert.Contains(t, err.Error(), "1")
+}
+
+// `path-rules: null` (and the bare-key / `~` shorthand variants) are
+// intentionally treated as "no path rules" rather than rejected — the
+// inverse of `rules: null` which IS an error. path-rules are opt-in;
+// requiring users to delete the key entirely when clearing the section
+// would be a worse UX. Pin all three null spellings so a future
+// "consistency fix" that flips this back to error breaks a test instead
+// of silently changing behaviour.
+func TestLoadFrom_PathRulesNull_TreatedAsAbsent(t *testing.T) {
+	cases := map[string]string{
+		"explicit_null":   "path-rules: null\n",
+		"tilde_shorthand": "path-rules: ~\n",
+		"bare_key":        "path-rules:\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".layerx.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+			cfg, err := LoadFrom(path)
+			require.NoError(t, err, "path-rules: null must not error — path-rules are opt-in")
+			assert.Empty(t, cfg.PathRules, "null path-rules must produce no specs")
+		})
+	}
 }
 
 func TestLoadFrom_PathRules_FlatForm(t *testing.T) {
