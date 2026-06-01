@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `layerx ci` and `layerx --json` now stream analyze progress to stderr
+  (phase transitions plus a throttled byte/layer heartbeat) and cancel
+  cleanly on Ctrl+C with a friendly `Error: interrupted`. `parseLayers`
+  now honours `ctx.Done()` between layer iterations. (B-05, D-03)
 - `layerx ci` and `layerx --json` now classify "image not found", "Docker
   daemon not reachable", and "pull failed" as distinct, friendly one-line
   messages on stderr. Previously these all surfaced as raw daemon text.

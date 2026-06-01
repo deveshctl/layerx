@@ -113,7 +113,7 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
-	return parseLayers(rc)
+	return parseLayers(ctx, rc)
 }
 
 // ensureImageWithProgress checks if the image exists locally; if not, pulls it with progress.
@@ -265,7 +265,7 @@ func (r *DockerResolver) streamPullProgress(ctx context.Context, rc client.Image
 // streams each layer through decompress + ParseLayerTar, dropping the buffer
 // before the next layer. Peak heap is bounded by the largest single layer
 // rather than the sum of all blobs in the archive.
-func parseLayers(r io.Reader) ([]Layer, error) {
+func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	spool, err := os.CreateTemp("", "layerx-resolve-*.tar")
 	if err != nil {
 		return nil, &ErrArchiveInfra{Op: "creating temp spool", Cause: err}
@@ -353,6 +353,9 @@ func parseLayers(r io.Reader) ([]Layer, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		idx, want := keep[hdr.Name]
 		if !want {
