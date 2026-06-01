@@ -176,7 +176,7 @@ func executeCICheck(ctx context.Context, imageRef string, cfg *config.Config, cm
 	// stays silent because executeCICheck has already printed the report.
 	if err != nil {
 		if _, ok := errors.AsType[*ErrCIFailed](err); !ok {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			_ = presentCLIError(os.Stderr, err)
 		}
 	}
 	return analysis, err

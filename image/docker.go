@@ -53,9 +53,17 @@ func NewDockerResolver(opts ...Option) (Resolver, error) {
 func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMeta, error) {
 	inspect, err := r.cli.ImageInspect(ctx, imageRef)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		if isImageInspectNotFound(err) {
+			return nil, &ErrImageNotFound{Ref: imageRef, Cause: err}
+		}
+		if isDaemonUnreachable(err) {
+			return nil, &ErrDaemonNotRunning{Cause: err}
+		}
 		return nil, fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
-
 	return &ImageMeta{Size: inspect.Size}, nil
 }
 
@@ -65,6 +73,15 @@ func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMe
 func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, error) {
 	inspect, err := r.cli.ImageInspect(ctx, imageRef)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		if isImageInspectNotFound(err) {
+			return "", &ErrImageNotFound{Ref: imageRef, Cause: err}
+		}
+		if isDaemonUnreachable(err) {
+			return "", &ErrDaemonNotRunning{Cause: err}
+		}
 		return "", fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
 	return inspect.ID, nil
@@ -121,6 +138,9 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
+		if isImageNotFoundMessage(err.Error()) {
+			return &ErrImageNotFound{Ref: imageRef, Cause: err}
+		}
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
 	defer rc.Close()
@@ -128,6 +148,9 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	if err := r.streamPullProgress(ctx, rc, progress); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
+		}
+		if isImageNotFoundMessage(err.Error()) {
+			return &ErrImageNotFound{Ref: imageRef, Cause: err}
 		}
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
@@ -480,5 +503,53 @@ func extractShortID(layerPath string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// isImageNotFoundMessage classifies a registry pull error as "ref does not
+// exist" (vs network / auth / 5xx). Conservative substring match against the
+// phrases emitted by Docker Hub, GHCR, ECR, and GCR pull paths.
+func isImageNotFoundMessage(s string) bool {
+	s = strings.ToLower(s)
+	for _, needle := range []string{
+		"manifest unknown",
+		"manifest for ",
+		"not found",
+		"repository does not exist",
+		"pull access denied",
+	} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDaemonUnreachable substring-matches moby connection-failure messages.
+// Substring match works on every supported transport (unix socket, Windows
+// named pipe, TCP) without depending on internal SDK types.
+func isDaemonUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"cannot connect to the docker daemon",
+		"is the docker daemon running",
+		"docker daemon is not running",
+	} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// isImageInspectNotFound matches the daemon's canonical "no such image"
+// phrase. moby/moby/client v0.4.1 does not export an IsErrNotFound helper.
+func isImageInspectNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no such image")
 }
 

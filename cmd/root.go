@@ -186,6 +186,9 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	if flagJSON != "" {
+		// runJSONExport prints its own friendly stderr line; suppress
+		// cobra's default error printer to avoid double-printing.
+		cmd.SilenceErrors = true
 		return runJSONExport(cmd.Context(), imageRef, flagJSON, noCache)
 	}
 

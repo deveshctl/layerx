@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `layerx ci` and `layerx --json` now classify "image not found", "Docker
+  daemon not reachable", and "pull failed" as distinct, friendly one-line
+  messages on stderr. Previously these all surfaced as raw daemon text.
+  TUI behaviour is unchanged.
 - TUI now shows a clear "Could not <op>: <cause>. Free up disk space or set
   TMPDIR to a writable location and try again." message for archive infra
   failures (temp spool create, disk full while spooling) instead of a raw
