@@ -57,13 +57,13 @@ type jsonFile struct {
 func runJSONExport(ctx context.Context, imageRef, outputPath string, noCache bool) error {
 	resolver, err := selectResolver(imageRef)
 	if err != nil {
-		return err
+		return presentCLIError(os.Stderr, err)
 	}
 
 	analysis, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
 		image.AnalyzeOptions{NoCache: noCache})
 	if err != nil {
-		return err
+		return presentCLIError(os.Stderr, err)
 	}
 
 	return runJSONExportFromAnalysis(analysis, outputPath)

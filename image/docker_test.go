@@ -4,9 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -468,4 +471,136 @@ func TestParseLayers_BadGzipHeaderSurfacesError(t *testing.T) {
 	_, err = parseLayers(tarBuf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "layer0/layer.tar")
+}
+
+func TestIsImageNotFoundMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"docker hub manifest unknown", "manifest unknown", true},
+		{"manifest for ref not found", "manifest for nginx:bogus not found", true},
+		{"plain not found", "Error response from daemon: not found", true},
+		{"repository does not exist", "repository does not exist or may require 'docker login'", true},
+		{"pull access denied", "pull access denied for private/foo", true},
+		{"mixed case", "Manifest Unknown", true},
+		{"network error", "dial tcp: lookup registry: no such host", false},
+		{"5xx", "received unexpected HTTP status: 500 Internal Server Error", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isImageNotFoundMessage(tc.in))
+		})
+	}
+}
+
+func TestIsDaemonUnreachable(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"connection refused", errors.New("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"), true},
+		{"named pipe", errors.New("error during connect: this error may indicate that the docker daemon is not running"), true},
+		{"timeout", errors.New("context deadline exceeded"), false},
+		{"random api error", errors.New("400 Bad Request"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isDaemonUnreachable(tc.err))
+		})
+	}
+}
+
+// fakeAPIClient embeds client.APIClient so unspecified methods compile but
+// panic at runtime; only ImageList, ImagePull, and ImageInspect are wired.
+type fakeAPIClient struct {
+	client.APIClient
+	imageList    func(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
+	imagePull    func(ctx context.Context, ref string, options client.ImagePullOptions) (client.ImagePullResponse, error)
+	imageInspect func(ctx context.Context, ref string) (client.ImageInspectResult, error)
+}
+
+func (f *fakeAPIClient) ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error) {
+	return f.imageList(ctx, options)
+}
+
+func (f *fakeAPIClient) ImagePull(ctx context.Context, ref string, options client.ImagePullOptions) (client.ImagePullResponse, error) {
+	return f.imagePull(ctx, ref, options)
+}
+
+func (f *fakeAPIClient) ImageInspect(ctx context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	return f.imageInspect(ctx, ref)
+}
+
+func TestEnsureImage_PullNotFound_ReturnsErrImageNotFound(t *testing.T) {
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			return nil, errors.New("Error response from daemon: manifest for nginx:bogus not found")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:bogus", nil)
+	var notFound *ErrImageNotFound
+	require.ErrorAs(t, err, &notFound)
+	assert.Equal(t, "nginx:bogus", notFound.Ref)
+}
+
+func TestEnsureImage_PullGeneric_ReturnsErrPullFailed(t *testing.T) {
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			return nil, errors.New("dial tcp: i/o timeout")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "registry.example/foo:latest", nil)
+	var pullFailed *ErrPullFailed
+	require.ErrorAs(t, err, &pullFailed)
+	assert.Equal(t, "registry.example/foo:latest", pullFailed.Ref)
+}
+
+func TestImageID_DaemonDown_ReturnsErrDaemonNotRunning(t *testing.T) {
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			return client.ImageInspectResult{}, errors.New("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	_, err = dr.ImageID(context.Background(), "anything:latest")
+	var daemonDown *ErrDaemonNotRunning
+	require.ErrorAs(t, err, &daemonDown)
+}
+
+func TestImageID_NotFound_ReturnsErrImageNotFound(t *testing.T) {
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			return client.ImageInspectResult{}, errors.New("Error response from daemon: No such image: ghost:latest")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	_, err = dr.ImageID(context.Background(), "ghost:latest")
+	var notFound *ErrImageNotFound
+	require.ErrorAs(t, err, &notFound)
+	assert.Equal(t, "ghost:latest", notFound.Ref)
 }
