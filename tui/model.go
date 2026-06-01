@@ -1734,6 +1734,9 @@ func friendlyError(err error) string {
 	if invalidErr, ok := errors.AsType[*image.ErrInvalidArchive](err); ok {
 		return fmt.Sprintf("Not a valid image archive: %q. Expected a docker-save or OCI layout tarball.", invalidErr.Path)
 	}
+	if infraErr, ok := errors.AsType[*image.ErrArchiveInfra](err); ok {
+		return fmt.Sprintf("Could not %s: %v. Free up disk space or set TMPDIR to a writable location and try again.", infraErr.Op, infraErr.Cause)
+	}
 	return err.Error()
 }
 

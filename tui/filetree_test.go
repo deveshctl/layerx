@@ -94,3 +94,53 @@ func TestPadRight_TruncatesOverWidth(t *testing.T) {
 		t.Fatalf("expected width 5, got %d (%q)", w, got)
 	}
 }
+
+func TestNodeEffectiveSize_RemovedFileReturnsZero(t *testing.T) {
+	n := &image.FileNode{
+		Name: "gone", Path: "/gone", Size: 1024,
+		DiffType: image.Removed,
+	}
+	if got := nodeEffectiveSize(n); got != 0 {
+		t.Fatalf("Removed leaf: got %d, want 0", got)
+	}
+}
+
+func TestNodeEffectiveSize_DirExcludesRemovedChildren(t *testing.T) {
+	kept := &image.FileNode{Name: "kept", Path: "/etc/kept", Size: 100}
+	removed := &image.FileNode{
+		Name: "gone", Path: "/etc/gone", Size: 900,
+		DiffType: image.Removed,
+	}
+	dir := &image.FileNode{
+		Name: "etc", Path: "/etc", IsDir: true,
+		Children: []*image.FileNode{kept, removed},
+	}
+	if got := nodeEffectiveSize(dir); got != 100 {
+		t.Fatalf("dir with Removed child: got %d, want 100", got)
+	}
+}
+
+func TestNodeEffectiveSize_RemovedDirShortCircuits(t *testing.T) {
+	child := &image.FileNode{Name: "passwd", Path: "/etc/passwd", Size: 500}
+	dir := &image.FileNode{
+		Name: "etc", Path: "/etc", IsDir: true,
+		DiffType: image.Removed,
+		Children: []*image.FileNode{child},
+	}
+	if got := nodeEffectiveSize(dir); got != 0 {
+		t.Fatalf("Removed dir: got %d, want 0 (subtree must not be summed)", got)
+	}
+}
+
+func TestNodeEffectiveSize_LiveDiffTypesStillCounted(t *testing.T) {
+	added := &image.FileNode{Name: "a", Path: "/d/a", Size: 10, DiffType: image.Added}
+	modified := &image.FileNode{Name: "m", Path: "/d/m", Size: 20, DiffType: image.Modified}
+	unchanged := &image.FileNode{Name: "u", Path: "/d/u", Size: 30, DiffType: image.Unchanged}
+	dir := &image.FileNode{
+		Name: "d", Path: "/d", IsDir: true,
+		Children: []*image.FileNode{added, modified, unchanged},
+	}
+	if got := nodeEffectiveSize(dir); got != 60 {
+		t.Fatalf("live-diff dir: got %d, want 60", got)
+	}
+}
