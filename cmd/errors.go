@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,12 @@ import (
 // friendlyCLIError converts an analyze/resolve error into a one-line
 // stderr message. Mirrors tui/friendlyError with terser tone.
 func friendlyCLIError(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "interrupted"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timed out"
+	}
 	if _, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
 		return "Docker daemon is not reachable. Is Docker running?"
 	}
