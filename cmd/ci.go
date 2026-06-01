@@ -70,7 +70,7 @@ Cache:
   Analysis results are cached on disk and reused across runs. Pass
   --no-cache to force a fresh analysis (useful for pipelines that must
   re-parse the image after a rebuild within the same digest).`,
-	Example: `  # Run with default thresholds (lowest-efficiency: 0.9)
+	Example: `  # Run with default thresholds (lowest-efficiency: 0.9, highest-user-wasted-percent: 0.1)
   layerx ci nginx:latest
 
   # Inspect a local archive in CI (no daemon required)

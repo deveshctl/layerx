@@ -203,6 +203,8 @@ source <(layerx completion bash)
 | `Y`         | Copy file content (viewer) or layer command (layers)         |
 | `d`         | Toggle diff-only mode (hide unchanged files)                 |
 | `s`         | Cycle sort: default → largest → smallest                     |
+| `S`         | Cycle layer size column: change → stored → stored+change     |
+| `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
 | `x`         | Extract focused file to disk                                 |
 | `?`         | Toggle help overlay                                          |
 | `q`         | Quit                                                         |
@@ -249,6 +251,16 @@ CLI flags override config-file values. Setting a threshold to `0` or negative di
 
 For the full field reference, path-rule semantics, and worked examples, see [docs/configuration.md](docs/configuration.md). For end-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit-code reference), see [docs/ci-integration.md](docs/ci-integration.md).
 
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | All rules passed (or, for non-CI commands, the run completed). |
+| `1`  | A CI rule failed (`layerx ci`), or `layerx compare` detected a regression. |
+| `2`  | Operational error — Docker daemon down, archive missing, malformed config, write failure, etc. Don't gate on this; surface it. |
+
+Pipelines should treat `1` as the gate signal and fail loudly on `2`. Full breakdown in [docs/ci-integration.md](docs/ci-integration.md#exit-codes).
+
 ### Starter configs
 
 Run `layerx init` to drop a ready-made `.layerx.yaml` in your repo:
@@ -294,7 +306,9 @@ Repeat runs against an unchanged image digest reuse the cache and skip the tar e
 
 ## Contributing
 
-Issues and PRs welcome. For larger changes, please open an issue first to discuss the approach. See [CHANGELOG](CHANGELOG.md) for release notes.
+Issues and PRs welcome. For larger changes, please open an issue first to discuss the approach. See [CONTRIBUTING.md](CONTRIBUTING.md) for the build, test, and branching workflow, and [CHANGELOG](CHANGELOG.md) for release notes.
+
+Security issues: please follow [SECURITY.md](SECURITY.md) — don't open public issues for vulnerabilities.
 
 ---
 

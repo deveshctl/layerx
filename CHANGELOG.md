@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- TUI now shows a clear "Could not <op>: <cause>. Free up disk space or set
+  TMPDIR to a writable location and try again." message for archive infra
+  failures (temp spool create, disk full while spooling) instead of a raw
+  OS error string.
+- `layerx ci --help` Example header listed only `lowest-efficiency: 0.9`
+  as the default; it now also names `highest-user-wasted-percent: 0.1`,
+  matching `config.Default()` and what an unconfigured `layerx ci` actually
+  enforces.
 - File tree size column and `s` size-sort no longer count Removed
   (whiteout) bytes. On layers that mostly delete files, directories full
   of deletions used to appear large and float to the top of the sort,
