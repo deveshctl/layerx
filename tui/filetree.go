@@ -390,12 +390,18 @@ func applySortBySize(files []*image.FileNode, mode sortMode) []*image.FileNode {
 }
 
 func nodeEffectiveSize(n *image.FileNode) int64 {
+	if n.DiffType == image.Removed {
+		return 0
+	}
 	if !n.IsDir {
 		return n.Size
 	}
 	var total int64
 	var walk func(*image.FileNode)
 	walk = func(node *image.FileNode) {
+		if node.DiffType == image.Removed {
+			return
+		}
 		if !node.IsDir {
 			total += node.Size
 		}

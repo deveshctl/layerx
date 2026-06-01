@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- File tree size column and `s` size-sort no longer count Removed
+  (whiteout) bytes. On layers that mostly delete files, directories full
+  of deletions used to appear large and float to the top of the sort,
+  pushing real live-byte hotspots down. The sort now reflects what is
+  actually in the image at the selected layer.
 - Bare `layerx` (no image argument) shows the usage block again. v1.3.0
   silenced usage on the root command for all error paths, which also
   suppressed help when args were missing.
