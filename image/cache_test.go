@@ -140,7 +140,7 @@ func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 
 	cacheRoot := t.TempDir()
 	digest := "sha256:driftguard"
-	require.NoError(t, saveCache(cacheRoot, digest, layers))
+	require.NoError(t, saveCache(cacheRoot, digest, layers, nil))
 	rehydrated, ok, err := loadCache(cacheRoot, digest)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -245,7 +245,7 @@ func TestSaveLoadCache_RoundTrip(t *testing.T) {
 			Tree: makeTree(makeFile("a", "/a", 50)),
 		},
 	}
-	require.NoError(t, saveCache(root, digest, layers))
+	require.NoError(t, saveCache(root, digest, layers, nil))
 
 	got, ok, err := loadCache(root, digest)
 	require.NoError(t, err)
@@ -336,7 +336,7 @@ func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 func TestSaveCache_NoTempFileLingers(t *testing.T) {
 	root := t.TempDir()
 	digest := "sha256:keep"
-	require.NoError(t, saveCache(root, digest, nil))
+	require.NoError(t, saveCache(root, digest, nil, nil))
 
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
@@ -380,9 +380,9 @@ func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
 
 func TestSaveCache_RejectsBadDigest(t *testing.T) {
 	root := t.TempDir()
-	err := saveCache(root, "", nil)
+	err := saveCache(root, "", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
-	err = saveCache(root, "../escape", nil)
+	err = saveCache(root, "../escape", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
 }
 
@@ -730,4 +730,33 @@ func TestPruneCache_ForeignFilesAtRoot_Untouched(t *testing.T) {
 	assert.True(t, os.IsNotExist(errStale))
 	_, errReadme := os.Stat(readme)
 	assert.NoError(t, errReadme, "foreign files must not be touched")
+}
+
+func TestSaveCache_TriggersPrune(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	// Pre-seed a stale digest that should be evicted by the cap.
+	stale := strings.Repeat("a", 64)
+	writeFakeCache(t, root, stale, 5*1024*1024, now.Add(-31*24*time.Hour))
+
+	// Now write a fresh entry via saveCache. With a tight cap the
+	// stale one must go; the fresh one must survive.
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "1048576") // 1 MB
+
+	freshDigest := strings.Repeat("c", 64)
+	layers := []Layer{{
+		Index: 0, ID: freshDigest, Size: 1, Command: "FROM scratch",
+		Tree: makeTree(makeFile("/x", "/x", 1)),
+	}}
+	require.NoError(t, saveCache(root, freshDigest, layers, nil))
+
+	// Stale evicted by TTL (also would by size cap).
+	_, errStale := os.Stat(filepath.Join(root, stale))
+	assert.True(t, os.IsNotExist(errStale), "stale digest should have been pruned")
+
+	// Fresh kept.
+	_, errFresh := os.Stat(filepath.Join(root, freshDigest, "layers.gob"))
+	assert.NoError(t, errFresh, "fresh digest must survive its own write")
 }

@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pruning runs opportunistically at the end of every successful cache
   write. Failures are best-effort and surface as `cache prune ...`
   warnings on stderr. (I-03)
+- `saveCache` now invokes the prune helper at the tail of every
+  successful write, threading the analyze run's progress channel for
+  warnings. The signature gained a trailing `progress` parameter
+  (unexported; no API change). (I-03)
 
 ### Fixed
 - `layerx ci` and `layerx --json` now classify "image not found", "Docker

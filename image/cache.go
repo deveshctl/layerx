@@ -382,7 +382,7 @@ func isTransientIOError(err error) bool {
 // saveCache writes layers to {root}/{digest}/layers.gob using a temp file +
 // fsync + atomic rename. Errors are returned but should be treated as
 // non-fatal by callers (the user already has the live result).
-func saveCache(root, digest string, layers []Layer) error {
+func saveCache(root, digest string, layers []Layer, progress chan<- ProgressEvent) error {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return err
@@ -435,6 +435,10 @@ func saveCache(root, digest string, layers []Layer) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
 	}
+	// Opportunistic prune at the tail of every successful write.
+	// pruneCache never panics and never returns an error; its result
+	// is on disk and on the progress channel only.
+	pruneCache(root, norm, progress)
 	return nil
 }
 
