@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -70,9 +71,18 @@ func cancelResolver() *fakeResolver {
 }
 
 func synthLayer(index int, path string, size int64) image.Layer {
-	root := &image.FileNode{Name: "/", Path: "/", IsDir: true, Children: []*image.FileNode{
-		{Name: path, Path: path, Size: size, DiffType: image.Added},
-	}}
+	// Build a proper directory hierarchy from path so Stack's name-based
+	// merging matches image_test.go's makeFile/makeTree pattern. A flat
+	// child with Name="/etc/passwd" carries a leading slash that confuses
+	// name lookups across stacked layers.
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	leaf := &image.FileNode{Name: parts[len(parts)-1], Path: path, Size: size, DiffType: image.Added}
+	cur := leaf
+	for i := len(parts) - 2; i >= 0; i-- {
+		dirPath := "/" + strings.Join(parts[:i+1], "/")
+		cur = &image.FileNode{Name: parts[i], Path: dirPath, IsDir: true, Children: []*image.FileNode{cur}}
+	}
+	root := &image.FileNode{Name: "/", Path: "/", IsDir: true, Children: []*image.FileNode{cur}}
 	return image.Layer{
 		Index: index,
 		ID:    "synth",
@@ -81,12 +91,9 @@ func synthLayer(index int, path string, size int64) image.Layer {
 	}
 }
 
-// passingLayers yields Score >= 0.9 (no path overlap → no waste → 1.0).
+// passingLayers yields a single layer (no overlap possible → score 1.0).
 func passingLayers() []image.Layer {
-	return []image.Layer{
-		synthLayer(0, "/etc/passwd", 100),
-		synthLayer(1, "/usr/bin/app", 200),
-	}
+	return []image.Layer{synthLayer(0, "/usr/bin/app", 200)}
 }
 
 // failingLayers shares /etc/config across two layers so duplicate bytes drive

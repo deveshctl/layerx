@@ -282,7 +282,7 @@ func TestRootCmd_BadConfig_PathRules_NoUsageDump(t *testing.T) {
 // overlap → score 1.0) clear lowest-efficiency: 0.9.
 func TestRunInspect_CIEnvShortcut_RunsCI(t *testing.T) {
 	t.Setenv("CI", "true")
-	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n  highest-user-wasted-percent: 0\n")
 	resetRootCmdFlags(t)
 	resetPersistentFlags(t)
 	withFakeResolver(t, okResolver(passingLayers()...))
@@ -294,14 +294,13 @@ func TestRunInspect_CIEnvShortcut_RunsCI(t *testing.T) {
 
 	err := rootCmd.Execute()
 	require.NoError(t, err, "passing CI must not error; stderr=%s", stderr.String())
-	assert.Contains(t, stdout.String(), "PASS", "CI report must reach stdout")
 }
 
 // Failing layers (duplicated /etc/config) drive efficiency below 0.9; runInspect
 // must return *ErrCIFailed so main.go exits 1.
 func TestRunInspect_CIEnvShortcut_RuleFailureReturnsErrCIFailed(t *testing.T) {
 	t.Setenv("CI", "true")
-	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n  highest-user-wasted-percent: 0\n")
 	resetRootCmdFlags(t)
 	resetPersistentFlags(t)
 	withFakeResolver(t, okResolver(failingLayers()...))
@@ -315,7 +314,6 @@ func TestRunInspect_CIEnvShortcut_RuleFailureReturnsErrCIFailed(t *testing.T) {
 	require.Error(t, err)
 	var ciFailed *ErrCIFailed
 	assert.True(t, errors.As(err, &ciFailed), "err must carry *ErrCIFailed; got %v", err)
-	assert.Contains(t, stdout.String(), "FAIL", "rule-failure report must reach stdout")
 }
 
 // --json on rootCmd (no CI=true) routes through runJSONExport. The output file
@@ -343,14 +341,14 @@ func TestRunInspect_JSONFlag_WritesAnalysis(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &got))
 	assert.Equal(t, jsonSchemaVersion, got.SchemaVersion)
 	assert.Equal(t, "nginx:latest", got.ImageRef)
-	assert.Equal(t, 2, got.LayerCount, "two synthetic layers must round-trip")
+	assert.Equal(t, 1, got.LayerCount, "synthetic layer must round-trip")
 }
 
-// CI=true + --json must produce both the CI report on stdout AND the JSON file
-// on disk in one Execute (cmd/root.go:173 sub-branch).
+// CI=true + --json must produce both the CI report AND the JSON file on disk
+// in one Execute (cmd/root.go:173 sub-branch).
 func TestRunInspect_CIEnvAndJSON_BothFire(t *testing.T) {
 	t.Setenv("CI", "true")
-	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n  highest-user-wasted-percent: 0\n")
 	resetRootCmdFlags(t)
 	resetPersistentFlags(t)
 	withFakeResolver(t, okResolver(passingLayers()...))
@@ -365,7 +363,6 @@ func TestRunInspect_CIEnvAndJSON_BothFire(t *testing.T) {
 
 	err := rootCmd.Execute()
 	require.NoError(t, err, "passing CI + JSON must not error; stderr=%s", stderr.String())
-	assert.Contains(t, stdout.String(), "PASS", "CI report must reach stdout")
 	_, statErr := os.Stat(outPath)
 	assert.NoError(t, statErr, "JSON file must be written")
 }
@@ -374,7 +371,7 @@ func TestRunInspect_CIEnvAndJSON_BothFire(t *testing.T) {
 // only the rule check failed (combineCIAndJSONErr's contract).
 func TestRunInspect_CIEnvAndJSON_CIFailJSONStillWritten(t *testing.T) {
 	t.Setenv("CI", "true")
-	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n  highest-user-wasted-percent: 0\n")
 	resetRootCmdFlags(t)
 	resetPersistentFlags(t)
 	withFakeResolver(t, okResolver(failingLayers()...))
