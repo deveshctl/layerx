@@ -144,6 +144,14 @@ func TestStderrProgress_ExitsOnCtxCancel(t *testing.T) {
 	}
 }
 
+func TestStderrProgress_StopIsIdempotent(t *testing.T) {
+	// Calling stop twice must not panic on close-of-closed-channel; a
+	// future refactor or test that double-defers would otherwise crash.
+	_, stop := stderrProgress(context.Background(), &bytes.Buffer{})
+	stop()
+	stop()
+}
+
 func TestHumanBytes(t *testing.T) {
 	cases := []struct {
 		in   int64

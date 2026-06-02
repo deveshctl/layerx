@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `stderrProgress` `stop()` is now idempotent. The first call closes the
+  channel and waits for the drain goroutine; subsequent calls are no-ops.
+  Latent — all current callers defer `stop` exactly once; this guards
+  against a panic if a future refactor or test ever double-calls it. (B-08)
 - `layerx ci` and `layerx --json` now cancel within a single 32 KiB chunk
   during the image-spool stage on Ctrl+C, instead of waiting for the full
   Docker export to land on temp disk. Closes the gap left by B-05 where

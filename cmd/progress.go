@@ -44,11 +44,15 @@ func stderrProgress(ctx context.Context, w io.Writer) (chan image.ProgressEvent,
 		runProgressLoop(ctx, w, ch, ticker.C)
 	}()
 
+	// sync.Once guards against a double-close panic if a future caller (or
+	// test) accidentally invokes stop twice. Callers should still defer it
+	// exactly once; this is belt-and-braces for refactor safety.
+	var stopOnce sync.Once
 	stop := func() {
-		// Close once. A second call would panic on the channel close;
-		// callers should defer this exactly once per stderrProgress.
-		close(ch)
-		wg.Wait()
+		stopOnce.Do(func() {
+			close(ch)
+			wg.Wait()
+		})
 	}
 	return ch, stop
 }
