@@ -36,10 +36,11 @@ func NewDockerResolver(opts ...Option) (Resolver, error) {
 		opt(r)
 	}
 	if r.cli == nil {
-		cli, err := client.New(
-			client.FromEnv,
-			client.WithAPIVersionNegotiation(),
-		)
+		// API-version negotiation is on by default in moby/moby/client;
+		// previously this used client.WithAPIVersionNegotiation, now a
+		// deprecated no-op. Do NOT pin a version with WithVersion — that
+		// disables negotiation and breaks on Docker Engine upgrades.
+		cli, err := client.New(client.FromEnv)
 		if err != nil {
 			return nil, fmt.Errorf("cannot connect to Docker daemon: %w", err)
 		}
