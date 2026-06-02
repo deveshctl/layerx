@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `layerx ci` and `layerx --json` now cancel within a single 32 KiB chunk
+  during the image-spool stage on Ctrl+C, instead of waiting for the full
+  Docker export to land on temp disk. Closes the gap left by B-05 where
+  pass 2 honoured `ctx.Done()` but the initial spool copy didn't. (B-06)
 - `layerx ci` and `layerx --json` now stream analyze progress to stderr
   (phase transitions plus a throttled byte/layer heartbeat) and cancel
   cleanly on Ctrl+C with a friendly `Error: interrupted`. `parseLayers`

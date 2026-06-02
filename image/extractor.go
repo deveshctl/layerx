@@ -339,8 +339,11 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		_ = os.Remove(spoolPath)
 	}
 
-	if _, err := io.Copy(spool, rc); err != nil {
+	if _, err := copyCtx(ctx, spool, rc); err != nil {
 		cleanup()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, nil, err
+		}
 		return nil, nil, nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 

@@ -274,7 +274,10 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	defer os.Remove(spoolPath)
 	defer spool.Close()
 
-	if _, err := io.Copy(spool, r); err != nil {
+	if _, err := copyCtx(ctx, spool, r); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
 		return nil, &ErrArchiveInfra{Op: "spooling image archive", Cause: err}
 	}
 
