@@ -475,6 +475,21 @@ func TestFindFileInLayer_OpaqueWhiteoutAncestorRegression(t *testing.T) {
 	require.ErrorIs(t, err, errWhiteoutStop)
 }
 
+func TestFindFileInLayer_OpaqueWhiteoutDoesNotRemoveDirectoryItself(t *testing.T) {
+	// Per overlayfs convention, "dir/.wh..wh..opq" clears the contents of
+	// dir from lower layers but does NOT delete dir itself. A query for the
+	// directory must therefore return (nil, false, nil) — not errWhiteoutStop.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "tmp/.wh..wh..opq", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp")
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
 func TestFindFileInLayer_EmbeddedDotSegmentNormalized(t *testing.T) {
 	// Layer tar can produce entries like "usr/./bin/sh" (busybox tar, BuildKit
 	// edge cases). cleanTarPath collapses that to "usr/bin/sh"; findFileInLayer
