@@ -96,6 +96,11 @@ var errBadDigest = errors.New("invalid cache digest")
 const (
 	defaultCacheTTLDays  = 30
 	defaultCacheMaxBytes = 1 << 30 // 1 GiB
+	// maxCacheTTLDays caps LAYERX_CACHE_TTL_DAYS. time.Duration is int64
+	// nanoseconds; ttlDays * 24h overflows around 10^7 days. 100000 days
+	// (~273 years) is safely below that and well past any practical cache
+	// retention. Larger user values fall back to the default with a warn.
+	maxCacheTTLDays = 100000
 )
 
 // nowFn lets prune tests freeze time without plumbing a clock interface
@@ -116,6 +121,8 @@ func loadPruneLimits(progress chan<- ProgressEvent) (ttl time.Duration, maxBytes
 			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_TTL_DAYS=%q: %v", v, err))
 		case n < 0:
 			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_TTL_DAYS=%q: negative", v))
+		case n > maxCacheTTLDays:
+			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_TTL_DAYS=%q: exceeds max %d days", v, maxCacheTTLDays))
 		default:
 			ttlDays = n
 		}
@@ -194,21 +201,24 @@ func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
 	}
 
 	warned := false
-	tryRemove := func(p string) {
-		if err := os.RemoveAll(p); err != nil && !warned {
-			// One-shot warn: a misconfigured cache dir with N broken
-			// evictees should not produce N stderr lines.
-			emitCacheWarn(progress, fmt.Sprintf("cache prune partial: %v", err))
-			warned = true
+	tryRemove := func(p string) bool {
+		if err := os.RemoveAll(p); err != nil {
+			if !warned {
+				// One-shot warn: a misconfigured cache dir with N broken
+				// evictees should not produce N stderr lines.
+				emitCacheWarn(progress, fmt.Sprintf("cache prune partial: %v", err))
+				warned = true
+			}
+			return false
 		}
+		return true
 	}
 
 	// TTL pass.
 	if ttl > 0 {
 		survivors := records[:0]
 		for _, r := range records {
-			if r.name != keepDigest && now.Sub(r.mtime) > ttl {
-				tryRemove(r.path)
+			if r.name != keepDigest && now.Sub(r.mtime) > ttl && tryRemove(r.path) {
 				continue
 			}
 			survivors = append(survivors, r)
@@ -235,13 +245,20 @@ func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
 				if r.name == keepDigest {
 					continue
 				}
-				tryRemove(r.path)
-				total -= r.size
+				// Only credit the bytes back to `total` when the eviction
+				// actually succeeded. A failed RemoveAll (e.g. Windows
+				// handle still open) leaves the bytes on disk; assuming
+				// otherwise would silently overshoot the cap.
+				if tryRemove(r.path) {
+					total -= r.size
+				}
 			}
 			if total > maxBytes {
-				// Only reachable when keepDigest alone exceeds the cap.
-				// We deliberately keep it: the user just paid for that
-				// resolve, evicting it would be perverse.
+				// Reachable when keepDigest alone exceeds the cap, OR
+				// when one or more evictions failed and the survivors
+				// still total over the cap. We deliberately keep
+				// keepDigest: the user just paid for that resolve,
+				// evicting it would be perverse.
 				emitCacheWarn(progress, "cache size cap exceeded by single entry; kept")
 			}
 		}

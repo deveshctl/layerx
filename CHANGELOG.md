@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Analysis cache now self-prunes by age (default 30 days) and total size
   (default 1 GiB). Configurable via `LAYERX_CACHE_TTL_DAYS` and
   `LAYERX_CACHE_MAX_BYTES`; set either to `0` to disable that limit.
+  TTL values above 100000 days are rejected with a warn (overflow guard).
   Pruning runs opportunistically at the end of every successful cache
   write. Failures are best-effort and surface as `cache prune ...`
   warnings on stderr. (I-03)

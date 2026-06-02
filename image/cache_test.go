@@ -415,6 +415,12 @@ func TestLoadCache_TransientIOError_KeepsFile(t *testing.T) {
 // writeFakeCache creates {root}/{digest}/layers.gob with the given size
 // and mtime. Used to seed prune fixtures without invoking saveCache.
 // The digest must be a valid normalized form (no "sha256:" prefix).
+//
+// The file is truncated/padded to exactly `size` bytes after the gob
+// header is written, so the resulting blob will NOT decode cleanly with
+// gob.Decoder when size differs from the natural envelope length.
+// pruneCache only stats the file, so this is fine — but a future test
+// that wants loadCache compatibility must seed via saveCache instead.
 func writeFakeCache(t *testing.T, root, digest string, size int64, mtime time.Time) {
 	t.Helper()
 	dir := filepath.Join(root, digest)
@@ -457,6 +463,9 @@ func drainProgress(ch chan ProgressEvent) []ProgressEvent {
 
 // withFrozenNow overwrites nowFn for the duration of the test and
 // restores it on cleanup. Returns the frozen instant for caller use.
+//
+// Do NOT call from a t.Parallel() test: nowFn is package-level state,
+// and concurrent overwrites race. All current prune tests are serial.
 func withFrozenNow(t *testing.T) time.Time {
 	t.Helper()
 	frozen := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -618,6 +627,13 @@ func TestLoadPruneLimits_EnvVarParsing(t *testing.T) {
 			wantMax:     1 << 30,
 			wantWarnSub: "negative",
 		},
+		{
+			name:        "ttl exceeds max falls back, warns",
+			ttlEnv:      "999999999",
+			wantTTL:     30 * 24 * time.Hour,
+			wantMax:     1 << 30,
+			wantWarnSub: "exceeds max",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -633,9 +649,9 @@ func TestLoadPruneLimits_EnvVarParsing(t *testing.T) {
 			}
 
 			progress := make(chan ProgressEvent, 16)
-			ttl, max := loadPruneLimits(progress)
+			ttl, gotMax := loadPruneLimits(progress)
 			assert.Equal(t, tc.wantTTL, ttl)
-			assert.Equal(t, tc.wantMax, max)
+			assert.Equal(t, tc.wantMax, gotMax)
 
 			events := drainProgress(progress)
 			if tc.wantWarnSub == "" {
