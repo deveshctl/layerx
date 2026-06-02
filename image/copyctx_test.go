@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"sync"
 	"testing"
 )
@@ -45,12 +44,13 @@ func TestCopyCtx_PreCancelled(t *testing.T) {
 	}
 }
 
-// blockingReader yields one chunk, then blocks on release until the test
-// signals it. Used to deterministically interleave a cancel with the copy.
+// blockingReader yields one chunk, then on the second call blocks until
+// ctx is done and returns ctx.Err(). This avoids the race where copyCtx
+// could see io.EOF before its next ctx.Err() check and return nil.
 type blockingReader struct {
+	ctx     context.Context
 	first   []byte
 	yielded bool
-	release chan struct{}
 }
 
 func (b *blockingReader) Read(p []byte) (int, error) {
@@ -59,15 +59,14 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 		n := copy(p, b.first)
 		return n, nil
 	}
-	<-b.release
-	return 0, io.EOF
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
 }
 
 func TestCopyCtx_MidStreamCancel(t *testing.T) {
 	first := bytes.Repeat([]byte("a"), 32*1024) // exactly one chunk
-	br := &blockingReader{first: first, release: make(chan struct{})}
-
 	ctx, cancel := context.WithCancel(context.Background())
+	br := &blockingReader{ctx: ctx, first: first}
 	var dst bytes.Buffer
 
 	var (
@@ -81,19 +80,15 @@ func TestCopyCtx_MidStreamCancel(t *testing.T) {
 		n, cerr = copyCtx(ctx, &dst, br)
 	}()
 
-	// Wait until the first chunk has been written, then cancel. closing
-	// br.release after cancel unblocks the goroutine deterministically:
-	// if it had already entered the second (blocking) Read, the close
-	// returns it (0, io.EOF) and the next ctx.Err() check returns the
-	// cancel; otherwise the cancel was observed first and the close is
-	// a no-op for an already-returned goroutine.
-	for {
-		if dst.Len() == len(first) {
-			break
-		}
+	// Wait until the first chunk has been written, then cancel.
+	// Whichever side observes the cancel first wins deterministically:
+	// copyCtx's top-of-loop ctx.Err() check returns context.Canceled,
+	// or the reader's <-ctx.Done() unblocks and returns ctx.Err() which
+	// copyCtx propagates via the rerr branch. Either way, cerr ==
+	// context.Canceled.
+	for dst.Len() != len(first) {
 	}
 	cancel()
-	close(br.release)
 	wg.Wait()
 
 	if !errors.Is(cerr, context.Canceled) {

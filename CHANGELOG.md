@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (unexported; no API change). (I-03)
 
 ### Fixed
+- `TestCopyCtx_MidStreamCancel` was racy and failed intermittently on
+  `main` once #39 and #40 landed together: the test's blocking reader
+  returned `io.EOF` after `close(br.release)`, but `copyCtx` returns
+  `nil` on EOF before its next `ctx.Err()` check, so the cancel could
+  be missed. The reader now blocks on `<-ctx.Done()` and returns
+  `ctx.Err()` instead, making the test deterministic without changing
+  production code. Test-only.
 - `stderrProgress` `stop()` is now idempotent. The first call closes the
   channel and waits for the drain goroutine; subsequent calls are no-ops.
   Latent — all current callers defer `stop` exactly once; this guards
