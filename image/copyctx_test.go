@@ -66,7 +66,6 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 func TestCopyCtx_MidStreamCancel(t *testing.T) {
 	first := bytes.Repeat([]byte("a"), 32*1024) // exactly one chunk
 	br := &blockingReader{first: first, release: make(chan struct{})}
-	defer close(br.release) // unblock the goroutine if the test fails early
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var dst bytes.Buffer
@@ -82,15 +81,19 @@ func TestCopyCtx_MidStreamCancel(t *testing.T) {
 		n, cerr = copyCtx(ctx, &dst, br)
 	}()
 
-	// Wait until the first chunk has been written, then cancel. The next
-	// loop iteration in copyCtx must observe ctx.Err() before the second
-	// (blocking) Read.
+	// Wait until the first chunk has been written, then cancel. closing
+	// br.release after cancel unblocks the goroutine deterministically:
+	// if it had already entered the second (blocking) Read, the close
+	// returns it (0, io.EOF) and the next ctx.Err() check returns the
+	// cancel; otherwise the cancel was observed first and the close is
+	// a no-op for an already-returned goroutine.
 	for {
 		if dst.Len() == len(first) {
 			break
 		}
 	}
 	cancel()
+	close(br.release)
 	wg.Wait()
 
 	if !errors.Is(cerr, context.Canceled) {
