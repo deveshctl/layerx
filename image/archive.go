@@ -66,7 +66,7 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
-	layers, err := parseLayers(f)
+	layers, err := parseLayers(ctx, f)
 	if err != nil {
 		// Infrastructure failures (temp file, disk full) keep their original
 		// shape so the user sees the real cause; only content-class errors

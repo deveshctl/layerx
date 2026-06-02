@@ -282,3 +282,11 @@ func TestJSON_SchemaVersionFirstField(t *testing.T) {
 	require.Greater(t, svIdx, -1, "schemaVersion must be present")
 	require.Greater(t, irIdx, svIdx, "schemaVersion must appear before imageRef")
 }
+
+// TestRunJSONExport_ContextCancelled is a placeholder. Same caveat as
+// TestRunCICheckInner_ContextCancelled — the production path uses
+// selectResolver, which has no injection seam. The cancellation contract
+// for the analyze pipeline itself is pinned by image/docker_test.go.
+func TestRunJSONExport_ContextCancelled(t *testing.T) {
+	t.Skip("resolver-injection seam not yet present in cmd/")
+}

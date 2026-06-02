@@ -463,7 +463,9 @@ func TestFindFileInLayer_FakeWhWhPrefixDoesNotMatch(t *testing.T) {
 }
 
 func TestFindFileInLayer_OpaqueWhiteoutAncestorRegression(t *testing.T) {
-	// Existing opaque-whiteout behavior must remain intact.
+	// Descendant case still whiteout-stops; pairs with
+	// TestFindFileInLayer_OpaqueWhiteoutDoesNotRemoveDirectoryItself below
+	// (B-07: same tar, query for the directory itself instead of a child).
 	layer := buildRawTar(t, []struct {
 		name string
 		body string
@@ -473,6 +475,21 @@ func TestFindFileInLayer_OpaqueWhiteoutAncestorRegression(t *testing.T) {
 	_, found, err := findFileInLayer(layer, "tmp/sub/a.txt")
 	assert.False(t, found)
 	require.ErrorIs(t, err, errWhiteoutStop)
+}
+
+func TestFindFileInLayer_OpaqueWhiteoutDoesNotRemoveDirectoryItself(t *testing.T) {
+	// Per overlayfs convention, "dir/.wh..wh..opq" clears the contents of
+	// dir from lower layers but does NOT delete dir itself. A query for the
+	// directory must therefore return (nil, false, nil) — not errWhiteoutStop.
+	layer := buildRawTar(t, []struct {
+		name string
+		body string
+	}{
+		{name: "tmp/.wh..wh..opq", body: ""},
+	})
+	_, found, err := findFileInLayer(layer, "tmp")
+	require.NoError(t, err)
+	assert.False(t, found)
 }
 
 func TestFindFileInLayer_EmbeddedDotSegmentNormalized(t *testing.T) {

@@ -68,7 +68,7 @@ func TestRunCICheckInner_RejectsAllRulesDisabled(t *testing.T) {
 	cmd.Flags().Int64Var(&hwb, "highest-wasted-bytes", 0, "")
 	cmd.Flags().Float64Var(&huwp, "highest-user-wasted-percent", 0, "")
 
-	analysis, err := runCICheckInner(context.Background(), "nginx:latest", cfg, cmd, false, false)
+	analysis, err := runCICheckInner(context.Background(), "nginx:latest", cfg, cmd, false, false, nil)
 	require.Error(t, err)
 	assert.Nil(t, analysis)
 	assert.Contains(t, err.Error(), "no CI rules enabled")
@@ -295,4 +295,15 @@ func TestCICmd_NoArgs_ShowsUsage(t *testing.T) {
 				"the ErrCIUsage sentinel body must not be printed verbatim")
 		})
 	}
+}
+
+// TestRunCICheckInner_ContextCancelled is a placeholder. The production
+// path uses selectResolver, which is keyed on the imageRef, so injecting
+// a context-blocking fake resolver requires either a new test seam in
+// cmd/ or building the test against a real resolver. Neither is in
+// scope for this change. The cancellation contract for the analyze
+// pipeline itself is pinned by image/docker_test.go's
+// TestParseLayers_HonoursContextCancel.
+func TestRunCICheckInner_ContextCancelled(t *testing.T) {
+	t.Skip("resolver-injection seam not yet present in cmd/")
 }

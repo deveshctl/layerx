@@ -78,7 +78,7 @@ func TestParseLayers_ValidManifest(t *testing.T) {
 		"deadbeefcafe000011112222/layer.tar": make([]byte, 46080),
 	})
 
-	layers, err := parseLayers(tarBuf)
+	layers, err := parseLayers(context.Background(), tarBuf)
 	require.NoError(t, err)
 	assert.Len(t, layers, 3)
 
@@ -114,7 +114,7 @@ func TestParseLayers_SingleLayer(t *testing.T) {
 		"abcdef123456789/layer.tar": make([]byte, 1024),
 	})
 
-	layers, err := parseLayers(tarBuf)
+	layers, err := parseLayers(context.Background(), tarBuf)
 	require.NoError(t, err)
 	assert.Len(t, layers, 1)
 	assert.Equal(t, 0, layers[0].Index)
@@ -128,7 +128,7 @@ func TestParseLayers_MissingManifest(t *testing.T) {
 		"some-other-file.json": []byte("{}"),
 	})
 
-	_, err := parseLayers(tarBuf)
+	_, err := parseLayers(context.Background(), tarBuf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "manifest.json not found")
 }
@@ -138,7 +138,7 @@ func TestParseLayers_MalformedManifest(t *testing.T) {
 		"manifest.json": []byte("not valid json{{{"),
 	})
 
-	_, err := parseLayers(tarBuf)
+	_, err := parseLayers(context.Background(), tarBuf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot parse manifest")
 }
@@ -151,7 +151,7 @@ func TestParseLayers_EmptyManifestArray(t *testing.T) {
 		"manifest.json": data,
 	})
 
-	_, err = parseLayers(tarBuf)
+	_, err = parseLayers(context.Background(), tarBuf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty manifest")
 }
@@ -181,7 +181,7 @@ func TestParseLayers_EmptyLayerSkipped(t *testing.T) {
 		"bbbb00000000000000000000/layer.tar": make([]byte, 4096),
 	})
 
-	layers, err := parseLayers(tarBuf)
+	layers, err := parseLayers(context.Background(), tarBuf)
 	require.NoError(t, err)
 	assert.Len(t, layers, 2)
 
@@ -221,7 +221,7 @@ func TestParseLayers_HistoryMismatch(t *testing.T) {
 		"cccc00000000000000000000/layer.tar": make([]byte, 1024),
 	})
 
-	layers, err := parseLayers(tarBuf)
+	layers, err := parseLayers(context.Background(), tarBuf)
 	require.NoError(t, err)
 	assert.Len(t, layers, 3)
 
@@ -247,7 +247,7 @@ func TestParseLayers_MissingConfig(t *testing.T) {
 		"aaa000000000000000000000/layer.tar": make([]byte, 100),
 	})
 
-	_, err = parseLayers(tarBuf)
+	_, err = parseLayers(context.Background(), tarBuf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "config")
 	assert.Contains(t, err.Error(), "not found")
@@ -300,7 +300,7 @@ func TestParseLayers_OCIFormat(t *testing.T) {
 		"blobs/sha256/" + layerDigest2:     make([]byte, 2048),
 	})
 
-	layers, err := parseLayers(tarBuf)
+	layers, err := parseLayers(context.Background(), tarBuf)
 	require.NoError(t, err)
 	assert.Len(t, layers, 2)
 
@@ -381,7 +381,7 @@ func TestParseLayers_OCIGzipCompressedLayers(t *testing.T) {
 		"blobs/sha256/" + layerDigest:  layerData,
 	})
 
-	layers, err := parseLayers(tarBuf)
+	layers, err := parseLayers(context.Background(), tarBuf)
 	require.NoError(t, err)
 	require.Len(t, layers, 1)
 
@@ -442,7 +442,7 @@ func TestParseLayers_CorruptLayerSurfacesError(t *testing.T) {
 		"layer0/layer.tar": corrupt,
 	})
 
-	_, err = parseLayers(tarBuf)
+	_, err = parseLayers(context.Background(), tarBuf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "layer0/layer.tar")
 }
@@ -468,7 +468,7 @@ func TestParseLayers_BadGzipHeaderSurfacesError(t *testing.T) {
 		"layer0/layer.tar": badGzip,
 	})
 
-	_, err = parseLayers(tarBuf)
+	_, err = parseLayers(context.Background(), tarBuf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "layer0/layer.tar")
 }
@@ -603,4 +603,38 @@ func TestImageID_NotFound_ReturnsErrImageNotFound(t *testing.T) {
 	var notFound *ErrImageNotFound
 	require.ErrorAs(t, err, &notFound)
 	assert.Equal(t, "ghost:latest", notFound.Ref)
+}
+
+func TestParseLayers_HonoursContextCancel(t *testing.T) {
+	// Build a minimal 2-layer archive so the Pass-2 loop iterates at least
+	// once before the ctx check fires. The bodies don't matter — we cancel
+	// before the second iteration.
+	manifest := []dockerManifest{{
+		Config: "sha256abc123.json",
+		Layers: []string{
+			"aabbccddee11223344556677/layer.tar",
+			"ff00112233445566778899aa/layer.tar",
+		},
+	}}
+	manifestBytes, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	configBytes := buildConfig(t, []string{"RUN a", "RUN b"})
+
+	// Two empty layer tarballs; bytes are arbitrary, just need valid tar.
+	emptyLayer := buildTar(t, map[string][]byte{}).Bytes()
+
+	archive := buildTar(t, map[string][]byte{
+		"manifest.json":                      manifestBytes,
+		"sha256abc123.json":                  configBytes,
+		"aabbccddee11223344556677/layer.tar": emptyLayer,
+		"ff00112233445566778899aa/layer.tar": emptyLayer,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before we even call
+
+	_, err = parseLayers(ctx, archive)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

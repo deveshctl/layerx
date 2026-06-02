@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -80,4 +82,17 @@ func TestPresentCLIError_NilIsNoop(t *testing.T) {
 	out := presentCLIError(&buf, nil)
 	assert.Nil(t, out)
 	assert.Empty(t, buf.String())
+}
+
+func TestFriendlyCLIError_ContextCanceled(t *testing.T) {
+	assert.Equal(t, "interrupted", friendlyCLIError(context.Canceled))
+}
+
+func TestFriendlyCLIError_ContextDeadlineExceeded(t *testing.T) {
+	assert.Equal(t, "timed out", friendlyCLIError(context.DeadlineExceeded))
+}
+
+func TestFriendlyCLIError_WrappedContextCanceled(t *testing.T) {
+	wrapped := fmt.Errorf("resolve: %w", context.Canceled)
+	assert.Equal(t, "interrupted", friendlyCLIError(wrapped))
 }

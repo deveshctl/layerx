@@ -339,8 +339,11 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		_ = os.Remove(spoolPath)
 	}
 
-	if _, err := io.Copy(spool, rc); err != nil {
+	if _, err := copyCtx(ctx, spool, rc); err != nil {
 		cleanup()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, nil, err
+		}
 		return nil, nil, nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 
@@ -553,11 +556,15 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			continue
 		}
 
-		// Opaque whiteout in any ancestor of the path
+		// Opaque whiteout in any ancestor of the path. Per overlayfs
+		// convention "<dir>/.wh..wh..opq" clears the *contents* of <dir>,
+		// not <dir> itself — so a query for <dir> exactly must NOT be
+		// reported as removed. The regular-whiteout branch above handles
+		// the "delete the directory entry" case via .wh.<seg>.
 		if strings.HasSuffix(name, "/.wh..wh..opq") || name == ".wh..wh..opq" {
 			ancestor := strings.TrimSuffix(name, ".wh..wh..opq")
 			ancestor = strings.TrimSuffix(ancestor, "/")
-			if ancestor == "" || strings.HasPrefix(filePath, ancestor+"/") || filePath == ancestor {
+			if ancestor == "" || strings.HasPrefix(filePath, ancestor+"/") {
 				whiteoutHit = true
 			}
 			continue

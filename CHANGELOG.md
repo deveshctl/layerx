@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `stderrProgress` `stop()` is now idempotent. The first call closes the
+  channel and waits for the drain goroutine; subsequent calls are no-ops.
+  Latent — all current callers defer `stop` exactly once; this guards
+  against a panic if a future refactor or test ever double-calls it. (B-08)
+- `layerx ci` and `layerx --json` now cancel within a single 32 KiB chunk
+  during the image-spool stage on Ctrl+C, instead of waiting for the full
+  Docker export to land on temp disk. Closes the gap left by B-05 where
+  pass 2 honoured `ctx.Done()` but the initial spool copy didn't. (B-06)
+- `layerx ci` and `layerx --json` now stream analyze progress to stderr
+  (phase transitions plus a throttled byte/layer heartbeat) and cancel
+  cleanly on Ctrl+C with a friendly `Error: interrupted`. `parseLayers`
+  now honours `ctx.Done()` between layer iterations. (B-05, D-03)
 - `layerx ci` and `layerx --json` now classify "image not found", "Docker
   daemon not reachable", and "pull failed" as distinct, friendly one-line
   messages on stderr. Previously these all surfaced as raw daemon text.
@@ -36,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excerpt (rules, path-rules, version) when the failing section is known,
   or a general config hint otherwise — never the full command usage block.
   `rules: null` is now rejected rather than silently zeroing thresholds.
+- `findFileInLayer` no longer reports a directory as removed by its own
+  opaque-whiteout marker (`dir/.wh..wh..opq` clears contents only, not the
+  directory itself). Latent — no current user impact; tightens the
+  contract for future API consumers.
 
 ## [v1.3.0] - 2026-05-30
 
