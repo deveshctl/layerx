@@ -463,7 +463,9 @@ func TestFindFileInLayer_FakeWhWhPrefixDoesNotMatch(t *testing.T) {
 }
 
 func TestFindFileInLayer_OpaqueWhiteoutAncestorRegression(t *testing.T) {
-	// Existing opaque-whiteout behavior must remain intact.
+	// Descendant case still whiteout-stops; pairs with
+	// TestFindFileInLayer_OpaqueWhiteoutDoesNotRemoveDirectoryItself below
+	// (B-07: same tar, query for the directory itself instead of a child).
 	layer := buildRawTar(t, []struct {
 		name string
 		body string
