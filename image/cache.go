@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -85,6 +87,183 @@ func dirIsUsable(path string) (bool, error) {
 // passes a digest that would escape the cache root (path separators, "..",
 // or empty). It is treated by callers as "do not cache" rather than fatal.
 var errBadDigest = errors.New("invalid cache digest")
+
+// Prune defaults — cache directory hygiene. Both can be overridden by
+// LAYERX_CACHE_TTL_DAYS and LAYERX_CACHE_MAX_BYTES respectively; setting
+// either env var to "0" disables that limit. Picked so a typical user
+// running layerx against a handful of images per week never sees prune
+// touch their cache; heavy users get a 1 GiB ceiling without surprise.
+const (
+	defaultCacheTTLDays  = 30
+	defaultCacheMaxBytes = 1 << 30 // 1 GiB
+	// maxCacheTTLDays caps LAYERX_CACHE_TTL_DAYS. time.Duration is int64
+	// nanoseconds; ttlDays * 24h overflows around 10^7 days. 100000 days
+	// (~273 years) is safely below that and well past any practical cache
+	// retention. Larger user values fall back to the default with a warn.
+	maxCacheTTLDays = 100000
+)
+
+// nowFn lets prune tests freeze time without plumbing a clock interface
+// through every helper. Stdlib precedent: net/http/cookiejar uses the
+// same shape. Production code never overwrites it.
+var nowFn = time.Now
+
+// loadPruneLimits returns the active TTL and size cap, applying env-var
+// overrides on top of defaults. Unparseable or negative values fall back
+// to the default with a single PhaseCacheWarn so the user knows their
+// override was ignored. progress may be nil.
+func loadPruneLimits(progress chan<- ProgressEvent) (ttl time.Duration, maxBytes int64) {
+	ttlDays := defaultCacheTTLDays
+	if v := os.Getenv("LAYERX_CACHE_TTL_DAYS"); v != "" {
+		n, err := strconv.Atoi(v)
+		switch {
+		case err != nil:
+			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_TTL_DAYS=%q: %v", v, err))
+		case n < 0:
+			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_TTL_DAYS=%q: negative", v))
+		case n > maxCacheTTLDays:
+			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_TTL_DAYS=%q: exceeds max %d days", v, maxCacheTTLDays))
+		default:
+			ttlDays = n
+		}
+	}
+
+	maxBytes = defaultCacheMaxBytes
+	if v := os.Getenv("LAYERX_CACHE_MAX_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		switch {
+		case err != nil:
+			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_MAX_BYTES=%q: %v", v, err))
+		case n < 0:
+			emitCacheWarn(progress, fmt.Sprintf("ignoring LAYERX_CACHE_MAX_BYTES=%q: negative", v))
+		default:
+			maxBytes = n
+		}
+	}
+
+	return time.Duration(ttlDays) * 24 * time.Hour, maxBytes
+}
+
+// pruneEntry is one candidate during prune. mtime is the layers.gob's
+// modtime — used as a CachedAt proxy because it is fixed by os.Rename
+// at the same instant the envelope's CachedAt is, and avoids decoding
+// every gob in the cache root just to choose evictees.
+type pruneEntry struct {
+	name  string // digest directory name (no path separators)
+	path  string // {root}/{name}
+	mtime time.Time
+	size  int64
+}
+
+// pruneCache enforces TTL and size-cap limits on the cache root.
+// Best-effort: errors emit at most one PhaseCacheWarn per call (via
+// progress) and the function returns. keepDigest is the just-written,
+// already-normalized digest; it is never evicted, even if its own size
+// exceeds maxBytes. progress may be nil.
+//
+// Foreign files at the root level (e.g. a stray README) are left alone.
+// Directories whose names fail normalizeDigest are likewise ignored.
+func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
+	ttl, maxBytes := loadPruneLimits(progress)
+	if ttl == 0 && maxBytes == 0 {
+		return
+	}
+
+	dirs, err := os.ReadDir(root)
+	if err != nil {
+		emitCacheWarn(progress, fmt.Sprintf("cache prune skipped: %v", err))
+		return
+	}
+
+	now := nowFn()
+	records := make([]pruneEntry, 0, len(dirs))
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		if _, err := normalizeDigest(d.Name()); err != nil {
+			continue
+		}
+		gobPath := filepath.Join(root, d.Name(), "layers.gob")
+		info, statErr := os.Stat(gobPath)
+		if statErr != nil {
+			// Silent skip: the dir may be mid-write by another layerx
+			// process, or an orphan from a SIGKILL. A fresh save will
+			// repopulate or a future prune call will catch it.
+			continue
+		}
+		records = append(records, pruneEntry{
+			name:  d.Name(),
+			path:  filepath.Join(root, d.Name()),
+			mtime: info.ModTime(),
+			size:  info.Size(),
+		})
+	}
+
+	warned := false
+	tryRemove := func(p string) bool {
+		if err := os.RemoveAll(p); err != nil {
+			if !warned {
+				// One-shot warn: a misconfigured cache dir with N broken
+				// evictees should not produce N stderr lines.
+				emitCacheWarn(progress, fmt.Sprintf("cache prune partial: %v", err))
+				warned = true
+			}
+			return false
+		}
+		return true
+	}
+
+	// TTL pass.
+	if ttl > 0 {
+		survivors := records[:0]
+		for _, r := range records {
+			if r.name != keepDigest && now.Sub(r.mtime) > ttl && tryRemove(r.path) {
+				continue
+			}
+			survivors = append(survivors, r)
+		}
+		records = survivors
+	}
+
+	// Size-cap pass.
+	if maxBytes > 0 {
+		var total int64
+		for _, r := range records {
+			total += r.size
+		}
+		if total > maxBytes {
+			// Sort survivors oldest-first so we evict in increasing
+			// freshness order. keepDigest is filtered when scanning.
+			sort.Slice(records, func(i, j int) bool {
+				return records[i].mtime.Before(records[j].mtime)
+			})
+			for _, r := range records {
+				if total <= maxBytes {
+					break
+				}
+				if r.name == keepDigest {
+					continue
+				}
+				// Only credit the bytes back to `total` when the eviction
+				// actually succeeded. A failed RemoveAll (e.g. Windows
+				// handle still open) leaves the bytes on disk; assuming
+				// otherwise would silently overshoot the cap.
+				if tryRemove(r.path) {
+					total -= r.size
+				}
+			}
+			if total > maxBytes {
+				// Reachable when keepDigest alone exceeds the cap, OR
+				// when one or more evictions failed and the survivors
+				// still total over the cap. We deliberately keep
+				// keepDigest: the user just paid for that resolve,
+				// evicting it would be perverse.
+				emitCacheWarn(progress, "cache size cap exceeded by single entry; kept")
+			}
+		}
+	}
+}
 
 // cachePath returns the absolute path to the gob file for a given digest
 // under root. The digest is normalized (sha256: prefix stripped) and
@@ -220,7 +399,7 @@ func isTransientIOError(err error) bool {
 // saveCache writes layers to {root}/{digest}/layers.gob using a temp file +
 // fsync + atomic rename. Errors are returned but should be treated as
 // non-fatal by callers (the user already has the live result).
-func saveCache(root, digest string, layers []Layer) error {
+func saveCache(root, digest string, layers []Layer, progress chan<- ProgressEvent) error {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return err
@@ -273,6 +452,10 @@ func saveCache(root, digest string, layers []Layer) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
 	}
+	// Opportunistic prune at the tail of every successful write.
+	// pruneCache never panics and never returns an error; its result
+	// is on disk and on the progress channel only.
+	pruneCache(root, norm, progress)
 	return nil
 }
 

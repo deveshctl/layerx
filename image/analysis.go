@@ -116,7 +116,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 				// Pre-resolve digest was unknown (image was not local); the
 				// post-resolve digest is now authoritative.
 				digest = postDigest
-				if err := saveCache(cacheRoot, digest, layers); err != nil {
+				if err := saveCache(cacheRoot, digest, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
 			case postDigest != digest:
@@ -124,7 +124,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 				emitCacheWarn(opts.Progress,
 					"cache write skipped: image digest changed during analysis (concurrent pull?)")
 			default:
-				if err := saveCache(cacheRoot, digest, layers); err != nil {
+				if err := saveCache(cacheRoot, digest, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
 			}

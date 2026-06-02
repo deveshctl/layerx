@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Analysis cache now self-prunes by age (default 30 days) and total size
+  (default 1 GiB). Configurable via `LAYERX_CACHE_TTL_DAYS` and
+  `LAYERX_CACHE_MAX_BYTES`; set either to `0` to disable that limit.
+  TTL values above 100000 days are rejected with a warn (overflow guard).
+  Pruning runs opportunistically at the end of every successful cache
+  write. Failures are best-effort and surface as `cache prune ...`
+  warnings on stderr. (I-03)
+- `saveCache` now invokes the prune helper at the tail of every
+  successful write, threading the analyze run's progress channel for
+  warnings. The signature gained a trailing `progress` parameter
+  (unexported; no API change). (I-03)
+
 ### Fixed
 - `stderrProgress` `stop()` is now idempotent. The first call closes the
   channel and waits for the drain goroutine; subsequent calls are no-ops.

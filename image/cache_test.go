@@ -140,7 +140,7 @@ func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 
 	cacheRoot := t.TempDir()
 	digest := "sha256:driftguard"
-	require.NoError(t, saveCache(cacheRoot, digest, layers))
+	require.NoError(t, saveCache(cacheRoot, digest, layers, nil))
 	rehydrated, ok, err := loadCache(cacheRoot, digest)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -245,7 +245,7 @@ func TestSaveLoadCache_RoundTrip(t *testing.T) {
 			Tree: makeTree(makeFile("a", "/a", 50)),
 		},
 	}
-	require.NoError(t, saveCache(root, digest, layers))
+	require.NoError(t, saveCache(root, digest, layers, nil))
 
 	got, ok, err := loadCache(root, digest)
 	require.NoError(t, err)
@@ -336,7 +336,7 @@ func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 func TestSaveCache_NoTempFileLingers(t *testing.T) {
 	root := t.TempDir()
 	digest := "sha256:keep"
-	require.NoError(t, saveCache(root, digest, nil))
+	require.NoError(t, saveCache(root, digest, nil, nil))
 
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
@@ -380,9 +380,9 @@ func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
 
 func TestSaveCache_RejectsBadDigest(t *testing.T) {
 	root := t.TempDir()
-	err := saveCache(root, "", nil)
+	err := saveCache(root, "", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
-	err = saveCache(root, "../escape", nil)
+	err = saveCache(root, "../escape", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
 }
 
@@ -410,4 +410,369 @@ func TestLoadCache_TransientIOError_KeepsFile(t *testing.T) {
 	require.NoError(t, os.Chmod(path, 0o600))
 	_, statErr := os.Stat(path)
 	assert.NoError(t, statErr, "transient I/O failure must NOT evict cache")
+}
+
+// writeFakeCache creates {root}/{digest}/layers.gob with the given size
+// and mtime. Used to seed prune fixtures without invoking saveCache.
+// The digest must be a valid normalized form (no "sha256:" prefix).
+//
+// The file is truncated/padded to exactly `size` bytes after the gob
+// header is written, so the resulting blob will NOT decode cleanly with
+// gob.Decoder when size differs from the natural envelope length.
+// pruneCache only stats the file, so this is fine — but a future test
+// that wants loadCache compatibility must seed via saveCache instead.
+func writeFakeCache(t *testing.T, root, digest string, size int64, mtime time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, digest)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "layers.gob")
+	// Content must decode as a non-empty cacheEnvelope to satisfy any
+	// future loadCache call against the fixture; for prune tests we
+	// only care about file size + mtime, but writing a valid envelope
+	// keeps the fixture realistic.
+	env := cacheEnvelope{
+		Digest:        digest,
+		SchemaVersion: SchemaVersion,
+		CachedAt:      mtime,
+		Layers:        []cachedLayer{{Index: 0, ID: digest, Size: size}},
+	}
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+	// Pad or truncate to exactly `size` bytes so the size-cap tests can
+	// reason about totals deterministically.
+	require.NoError(t, os.Truncate(path, size))
+	require.NoError(t, os.Chtimes(path, mtime, mtime))
+}
+
+// drainProgress collects all events from ch without blocking the
+// caller. Returns when no event is available. Must be called after
+// the producing call has returned.
+func drainProgress(ch chan ProgressEvent) []ProgressEvent {
+	var out []ProgressEvent
+	for {
+		select {
+		case ev := <-ch:
+			out = append(out, ev)
+		default:
+			return out
+		}
+	}
+}
+
+// withFrozenNow overwrites nowFn for the duration of the test and
+// restores it on cleanup. Returns the frozen instant for caller use.
+//
+// Do NOT call from a t.Parallel() test: nowFn is package-level state,
+// and concurrent overwrites race. All current prune tests are serial.
+func withFrozenNow(t *testing.T) time.Time {
+	t.Helper()
+	frozen := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	prev := nowFn
+	nowFn = func() time.Time { return frozen }
+	t.Cleanup(func() { nowFn = prev })
+	return frozen
+}
+
+func TestPruneCache_TTL_EvictsOldKeepsFresh(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	old := strings.Repeat("a", 64)
+	fresh := strings.Repeat("b", 64)
+	writeFakeCache(t, root, old, 1024, now.Add(-31*24*time.Hour))
+	writeFakeCache(t, root, fresh, 1024, now.Add(-1*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	pruneCache(root, "", nil)
+
+	_, errOld := os.Stat(filepath.Join(root, old))
+	assert.True(t, os.IsNotExist(errOld), "stale digest should have been evicted")
+	_, errFresh := os.Stat(filepath.Join(root, fresh))
+	assert.NoError(t, errFresh, "fresh digest should survive")
+}
+
+func TestPruneCache_TTL_RespectsKeepDigest(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	keep := strings.Repeat("a", 64)
+	other := strings.Repeat("b", 64)
+	writeFakeCache(t, root, keep, 1024, now.Add(-31*24*time.Hour))
+	writeFakeCache(t, root, other, 1024, now.Add(-31*24*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	pruneCache(root, keep, nil)
+
+	_, errKeep := os.Stat(filepath.Join(root, keep))
+	assert.NoError(t, errKeep, "keepDigest must survive even when TTL-stale")
+	_, errOther := os.Stat(filepath.Join(root, other))
+	assert.True(t, os.IsNotExist(errOther), "other stale entry should be evicted")
+}
+
+func TestPruneCache_SizeCap_EvictsOldestFirst(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	a := strings.Repeat("a", 64)
+	b := strings.Repeat("b", 64)
+	c := strings.Repeat("c", 64)
+	const sz = 40 * 1024 * 1024
+	writeFakeCache(t, root, a, sz, now.Add(-3*time.Hour))
+	writeFakeCache(t, root, b, sz, now.Add(-2*time.Hour))
+	writeFakeCache(t, root, c, sz, now.Add(-1*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "0")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "62914560") // 60 MB
+
+	pruneCache(root, "", nil)
+
+	_, errA := os.Stat(filepath.Join(root, a))
+	_, errB := os.Stat(filepath.Join(root, b))
+	_, errC := os.Stat(filepath.Join(root, c))
+	assert.True(t, os.IsNotExist(errA), "oldest should be evicted")
+	assert.True(t, os.IsNotExist(errB), "second-oldest should be evicted")
+	assert.NoError(t, errC, "freshest should survive")
+}
+
+func TestPruneCache_SizeCap_RespectsKeepDigest_WarnsOnOversizedKeep(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	keep := strings.Repeat("a", 64)
+	other := strings.Repeat("b", 64)
+	writeFakeCache(t, root, keep, 100*1024*1024, now.Add(-1*time.Hour))
+	writeFakeCache(t, root, other, 10*1024*1024, now.Add(-2*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "0")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "52428800") // 50 MB
+
+	progress := make(chan ProgressEvent, 16)
+	pruneCache(root, keep, progress)
+
+	_, errKeep := os.Stat(filepath.Join(root, keep))
+	_, errOther := os.Stat(filepath.Join(root, other))
+	assert.NoError(t, errKeep, "keepDigest must survive")
+	assert.True(t, os.IsNotExist(errOther), "other must be evicted to make room")
+
+	events := drainProgress(progress)
+	var found bool
+	for _, ev := range events {
+		if ev.Phase == PhaseCacheWarn && strings.Contains(ev.Message, "exceeded by single entry") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected one PhaseCacheWarn about single-entry overflow; got: %+v", events)
+}
+
+func TestPruneCache_BothLimitsZero_IsNoop(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	d := strings.Repeat("a", 64)
+	writeFakeCache(t, root, d, 10*1024*1024*1024, now.Add(-365*24*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "0")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	pruneCache(root, "", nil)
+
+	_, err := os.Stat(filepath.Join(root, d))
+	assert.NoError(t, err, "with both limits disabled, nothing should be evicted")
+}
+
+func TestLoadPruneLimits_EnvVarParsing(t *testing.T) {
+	cases := []struct {
+		name        string
+		ttlEnv      string
+		maxEnv      string
+		wantTTL     time.Duration
+		wantMax     int64
+		wantWarnSub string
+	}{
+		{
+			name:    "defaults when unset",
+			wantTTL: 30 * 24 * time.Hour,
+			wantMax: 1 << 30,
+		},
+		{
+			name:    "ttl override 7 days",
+			ttlEnv:  "7",
+			wantTTL: 7 * 24 * time.Hour,
+			wantMax: 1 << 30,
+		},
+		{
+			name:    "max override zero disables cap",
+			maxEnv:  "0",
+			wantTTL: 30 * 24 * time.Hour,
+			wantMax: 0,
+		},
+		{
+			name:        "ttl unparseable falls back, warns",
+			ttlEnv:      "foo",
+			wantTTL:     30 * 24 * time.Hour,
+			wantMax:     1 << 30,
+			wantWarnSub: "ignoring LAYERX_CACHE_TTL_DAYS",
+		},
+		{
+			name:        "ttl negative falls back, warns",
+			ttlEnv:      "-3",
+			wantTTL:     30 * 24 * time.Hour,
+			wantMax:     1 << 30,
+			wantWarnSub: "negative",
+		},
+		{
+			name:        "ttl exceeds max falls back, warns",
+			ttlEnv:      "999999999",
+			wantTTL:     30 * 24 * time.Hour,
+			wantMax:     1 << 30,
+			wantWarnSub: "exceeds max",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.ttlEnv == "" {
+				t.Setenv("LAYERX_CACHE_TTL_DAYS", "")
+			} else {
+				t.Setenv("LAYERX_CACHE_TTL_DAYS", tc.ttlEnv)
+			}
+			if tc.maxEnv == "" {
+				t.Setenv("LAYERX_CACHE_MAX_BYTES", "")
+			} else {
+				t.Setenv("LAYERX_CACHE_MAX_BYTES", tc.maxEnv)
+			}
+
+			progress := make(chan ProgressEvent, 16)
+			ttl, gotMax := loadPruneLimits(progress)
+			assert.Equal(t, tc.wantTTL, ttl)
+			assert.Equal(t, tc.wantMax, gotMax)
+
+			events := drainProgress(progress)
+			if tc.wantWarnSub == "" {
+				assert.Empty(t, events, "expected no warnings")
+			} else {
+				var matched bool
+				for _, ev := range events {
+					if ev.Phase == PhaseCacheWarn && strings.Contains(ev.Message, tc.wantWarnSub) {
+						matched = true
+						break
+					}
+				}
+				assert.True(t, matched, "expected warn containing %q; got %+v", tc.wantWarnSub, events)
+			}
+		})
+	}
+}
+
+func TestPruneCache_ReadDirFailure_WarnsAndReturns(t *testing.T) {
+	withFrozenNow(t)
+
+	tmp, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	progress := make(chan ProgressEvent, 16)
+	require.NotPanics(t, func() {
+		pruneCache(tmp.Name(), "", progress)
+	})
+
+	events := drainProgress(progress)
+	var found bool
+	for _, ev := range events {
+		if ev.Phase == PhaseCacheWarn && strings.Contains(ev.Message, "cache prune skipped") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected 'cache prune skipped' warn; got %+v", events)
+}
+
+func TestPruneCache_BrokenDigestDir_SilentlySkipped(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	stale := strings.Repeat("a", 64)
+	writeFakeCache(t, root, stale, 1024, now.Add(-31*24*time.Hour))
+
+	broken := strings.Repeat("b", 64)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, broken), 0o700))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "not-a-digest"), 0o700))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	progress := make(chan ProgressEvent, 16)
+	pruneCache(root, "", progress)
+
+	_, errStale := os.Stat(filepath.Join(root, stale))
+	assert.True(t, os.IsNotExist(errStale))
+	_, errBroken := os.Stat(filepath.Join(root, broken))
+	assert.NoError(t, errBroken, "broken digest dir should be untouched")
+	_, errForeign := os.Stat(filepath.Join(root, "not-a-digest"))
+	assert.NoError(t, errForeign, "non-digest dir should be untouched")
+
+	for _, ev := range drainProgress(progress) {
+		assert.NotEqual(t, PhaseCacheWarn, ev.Phase,
+			"per-entry skips must not warn; saw: %+v", ev)
+	}
+}
+
+func TestPruneCache_ForeignFilesAtRoot_Untouched(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	stale := strings.Repeat("a", 64)
+	writeFakeCache(t, root, stale, 1024, now.Add(-31*24*time.Hour))
+
+	readme := filepath.Join(root, "README.md")
+	require.NoError(t, os.WriteFile(readme, []byte("hands off"), 0o644))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	pruneCache(root, "", nil)
+
+	_, errStale := os.Stat(filepath.Join(root, stale))
+	assert.True(t, os.IsNotExist(errStale))
+	_, errReadme := os.Stat(readme)
+	assert.NoError(t, errReadme, "foreign files must not be touched")
+}
+
+func TestSaveCache_TriggersPrune(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	// Pre-seed a stale digest that should be evicted by the cap.
+	stale := strings.Repeat("a", 64)
+	writeFakeCache(t, root, stale, 5*1024*1024, now.Add(-31*24*time.Hour))
+
+	// Now write a fresh entry via saveCache. With a tight cap the
+	// stale one must go; the fresh one must survive.
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "1048576") // 1 MB
+
+	freshDigest := strings.Repeat("c", 64)
+	layers := []Layer{{
+		Index: 0, ID: freshDigest, Size: 1, Command: "FROM scratch",
+		Tree: makeTree(makeFile("/x", "/x", 1)),
+	}}
+	require.NoError(t, saveCache(root, freshDigest, layers, nil))
+
+	// Stale evicted by TTL (also would by size cap).
+	_, errStale := os.Stat(filepath.Join(root, stale))
+	assert.True(t, os.IsNotExist(errStale), "stale digest should have been pruned")
+
+	// Fresh kept.
+	_, errFresh := os.Stat(filepath.Join(root, freshDigest, "layers.gob"))
+	assert.NoError(t, errFresh, "fresh digest must survive its own write")
 }
