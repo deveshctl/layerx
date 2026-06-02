@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excerpt (rules, path-rules, version) when the failing section is known,
   or a general config hint otherwise — never the full command usage block.
   `rules: null` is now rejected rather than silently zeroing thresholds.
+- `findFileInLayer` no longer reports a directory as removed by its own
+  opaque-whiteout marker (`dir/.wh..wh..opq` clears contents only, not the
+  directory itself). Latent — no current user impact; tightens the
+  contract for future API consumers.
 
 ## [v1.3.0] - 2026-05-30
 
