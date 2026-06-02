@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Analysis cache now self-prunes by age (default 30 days) and total size
+  (default 1 GiB). Configurable via `LAYERX_CACHE_TTL_DAYS` and
+  `LAYERX_CACHE_MAX_BYTES`; set either to `0` to disable that limit.
+  Pruning runs opportunistically at the end of every successful cache
+  write. Failures are best-effort and surface as `cache prune ...`
+  warnings on stderr. (I-03)
+
 ### Fixed
 - `layerx ci` and `layerx --json` now classify "image not found", "Docker
   daemon not reachable", and "pull failed" as distinct, friendly one-line
