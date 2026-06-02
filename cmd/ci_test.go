@@ -297,13 +297,37 @@ func TestCICmd_NoArgs_ShowsUsage(t *testing.T) {
 	}
 }
 
-// TestRunCICheckInner_ContextCancelled is a placeholder. The production
-// path uses selectResolver, which is keyed on the imageRef, so injecting
-// a context-blocking fake resolver requires either a new test seam in
-// cmd/ or building the test against a real resolver. Neither is in
-// scope for this change. The cancellation contract for the analyze
-// pipeline itself is pinned by image/docker_test.go's
-// TestParseLayers_HonoursContextCancel.
+// TestRunCICheckInner_ContextCancelled verifies cancelling ctx mid-resolve
+// propagates as context.Canceled. Uses cancelResolver which blocks on
+// ctx.Done() in ResolveWithProgress so the cancel deterministically wins.
 func TestRunCICheckInner_ContextCancelled(t *testing.T) {
-	t.Skip("resolver-injection seam not yet present in cmd/")
+	withFakeResolver(t, cancelResolver())
+
+	cfg := &config.Config{Rules: config.RulesConfig{
+		LowestEfficiency: 0.9,
+	}}
+	cmd := &cobra.Command{}
+	var le, huwp float64
+	var hwb int64
+	cmd.Flags().Float64Var(&le, "lowest-efficiency", 0, "")
+	cmd.Flags().Int64Var(&hwb, "highest-wasted-bytes", 0, "")
+	cmd.Flags().Float64Var(&huwp, "highest-user-wasted-percent", 0, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		analysis *image.Analysis
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		analysis, err := runCICheckInner(ctx, "fake:img", cfg, cmd, false, false, nil)
+		done <- result{analysis, err}
+	}()
+
+	cancel()
+	res := <-done
+
+	require.Error(t, res.err)
+	assert.True(t, errors.Is(res.err, context.Canceled), "err = %v, want chain containing context.Canceled", res.err)
+	assert.Nil(t, res.analysis, "no analysis must be returned when resolve was cancelled")
 }

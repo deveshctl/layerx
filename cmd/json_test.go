@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,10 +285,26 @@ func TestJSON_SchemaVersionFirstField(t *testing.T) {
 	require.Greater(t, irIdx, svIdx, "schemaVersion must appear before imageRef")
 }
 
-// TestRunJSONExport_ContextCancelled is a placeholder. Same caveat as
-// TestRunCICheckInner_ContextCancelled — the production path uses
-// selectResolver, which has no injection seam. The cancellation contract
-// for the analyze pipeline itself is pinned by image/docker_test.go.
+// TestRunJSONExport_ContextCancelled verifies cancellation propagates out of
+// runJSONExport AND that no partial output file is written.
 func TestRunJSONExport_ContextCancelled(t *testing.T) {
-	t.Skip("resolver-injection seam not yet present in cmd/")
+	withFakeResolver(t, cancelResolver())
+
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "out.json")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runJSONExport(ctx, "fake:img", outPath, false)
+	}()
+
+	cancel()
+	err := <-done
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.Canceled), "err = %v, want chain containing context.Canceled", err)
+
+	_, statErr := os.Stat(outPath)
+	assert.True(t, os.IsNotExist(statErr), "no output file must exist when resolve was cancelled (statErr = %v)", statErr)
 }

@@ -3,7 +3,10 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -122,6 +125,20 @@ func resetRootCmdFlags(t *testing.T) {
 		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
 		rootCmd.SetArgs(nil)
+	})
+}
+
+// resetPersistentFlags snapshots and restores the package-level flag vars
+// rootCmd.PersistentFlags writes into. Pair with resetRootCmdFlags.
+func resetPersistentFlags(t *testing.T) {
+	t.Helper()
+	prevJSON := flagJSON
+	prevNoCache := flagNoCacheFl
+	prevRefresh := flagRefresh
+	t.Cleanup(func() {
+		flagJSON = prevJSON
+		flagNoCacheFl = prevNoCache
+		flagRefresh = prevRefresh
 	})
 }
 
@@ -259,5 +276,122 @@ func TestRootCmd_BadConfig_PathRules_NoUsageDump(t *testing.T) {
 		"usage block must be silenced on RunE errors")
 	assert.NotContains(t, errOut, "Usage:",
 		"usage block must not appear on stderr either")
+}
+
+// CI=true on rootCmd routes through executeCICheck; passing layers (no path
+// overlap → score 1.0) clear lowest-efficiency: 0.9.
+func TestRunInspect_CIEnvShortcut_RunsCI(t *testing.T) {
+	t.Setenv("CI", "true")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	resetRootCmdFlags(t)
+	resetPersistentFlags(t)
+	withFakeResolver(t, okResolver(passingLayers()...))
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"nginx:latest"})
+
+	err := rootCmd.Execute()
+	require.NoError(t, err, "passing CI must not error; stderr=%s", stderr.String())
+	assert.Contains(t, stdout.String(), "PASS", "CI report must reach stdout")
+}
+
+// Failing layers (duplicated /etc/config) drive efficiency below 0.9; runInspect
+// must return *ErrCIFailed so main.go exits 1.
+func TestRunInspect_CIEnvShortcut_RuleFailureReturnsErrCIFailed(t *testing.T) {
+	t.Setenv("CI", "true")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	resetRootCmdFlags(t)
+	resetPersistentFlags(t)
+	withFakeResolver(t, okResolver(failingLayers()...))
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"nginx:latest"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	var ciFailed *ErrCIFailed
+	assert.True(t, errors.As(err, &ciFailed), "err must carry *ErrCIFailed; got %v", err)
+	assert.Contains(t, stdout.String(), "FAIL", "rule-failure report must reach stdout")
+}
+
+// --json on rootCmd (no CI=true) routes through runJSONExport. The output file
+// must round-trip through json.Unmarshal with the expected schema.
+func TestRunInspect_JSONFlag_WritesAnalysis(t *testing.T) {
+	resetRootCmdFlags(t)
+	resetPersistentFlags(t)
+	withFakeResolver(t, okResolver(passingLayers()...))
+
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "out.json")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"--json", outPath, "nginx:latest"})
+
+	err := rootCmd.Execute()
+	require.NoError(t, err, "json export must succeed; stderr=%s", stderr.String())
+
+	data, readErr := os.ReadFile(outPath)
+	require.NoError(t, readErr, "output file must exist")
+
+	var got jsonExport
+	require.NoError(t, json.Unmarshal(data, &got))
+	assert.Equal(t, jsonSchemaVersion, got.SchemaVersion)
+	assert.Equal(t, "nginx:latest", got.ImageRef)
+	assert.Equal(t, 2, got.LayerCount, "two synthetic layers must round-trip")
+}
+
+// CI=true + --json must produce both the CI report on stdout AND the JSON file
+// on disk in one Execute (cmd/root.go:173 sub-branch).
+func TestRunInspect_CIEnvAndJSON_BothFire(t *testing.T) {
+	t.Setenv("CI", "true")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	resetRootCmdFlags(t)
+	resetPersistentFlags(t)
+	withFakeResolver(t, okResolver(passingLayers()...))
+
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "out.json")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"--json", outPath, "nginx:latest"})
+
+	err := rootCmd.Execute()
+	require.NoError(t, err, "passing CI + JSON must not error; stderr=%s", stderr.String())
+	assert.Contains(t, stdout.String(), "PASS", "CI report must reach stdout")
+	_, statErr := os.Stat(outPath)
+	assert.NoError(t, statErr, "JSON file must be written")
+}
+
+// When CI fails, the JSON must STILL be written — the analysis was produced;
+// only the rule check failed (combineCIAndJSONErr's contract).
+func TestRunInspect_CIEnvAndJSON_CIFailJSONStillWritten(t *testing.T) {
+	t.Setenv("CI", "true")
+	writeConfig(t, "rules:\n  lowest-efficiency: 0.9\n")
+	resetRootCmdFlags(t)
+	resetPersistentFlags(t)
+	withFakeResolver(t, okResolver(failingLayers()...))
+
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "out.json")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"--json", outPath, "nginx:latest"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	var ciFailed *ErrCIFailed
+	assert.True(t, errors.As(err, &ciFailed), "err must carry *ErrCIFailed; got %v", err)
+	_, statErr := os.Stat(outPath)
+	assert.NoError(t, statErr, "JSON must be written even when CI fails — analysis was produced")
 }
 

@@ -520,26 +520,26 @@ func TestRenderCompareReport_NoOpHelperDirectly(t *testing.T) {
 		"final line must be machine-parseable verdict; got %q", last)
 }
 
-// fakeResolver is a minimal Resolver for testing analyzeForCompare's wiring.
+// compareFakeResolver is a minimal Resolver for testing analyzeForCompare's wiring.
 // All methods return defaults; tests substitute hooks via the function fields.
-type fakeResolver struct {
+type compareFakeResolver struct {
 	resolveFn func(ctx context.Context, ref string, progress chan<- image.ProgressEvent) ([]image.Layer, error)
 	imageIDFn func(ctx context.Context, ref string) (string, error)
 }
 
-func (f *fakeResolver) Resolve(ctx context.Context, ref string) ([]image.Layer, error) {
+func (f *compareFakeResolver) Resolve(ctx context.Context, ref string) ([]image.Layer, error) {
 	return f.ResolveWithProgress(ctx, ref, nil)
 }
-func (f *fakeResolver) ResolveWithProgress(ctx context.Context, ref string, p chan<- image.ProgressEvent) ([]image.Layer, error) {
+func (f *compareFakeResolver) ResolveWithProgress(ctx context.Context, ref string, p chan<- image.ProgressEvent) ([]image.Layer, error) {
 	if f.resolveFn != nil {
 		return f.resolveFn(ctx, ref, p)
 	}
 	return nil, nil
 }
-func (f *fakeResolver) Inspect(ctx context.Context, ref string) (*image.ImageMeta, error) {
+func (f *compareFakeResolver) Inspect(ctx context.Context, ref string) (*image.ImageMeta, error) {
 	return &image.ImageMeta{}, nil
 }
-func (f *fakeResolver) ImageID(ctx context.Context, ref string) (string, error) {
+func (f *compareFakeResolver) ImageID(ctx context.Context, ref string) (string, error) {
 	if f.imageIDFn != nil {
 		return f.imageIDFn(ctx, ref)
 	}
@@ -550,7 +550,7 @@ func (f *fakeResolver) ImageID(ctx context.Context, ref string) (string, error) 
 // goroutine isn't leaked. Use a panicking resolver to exercise the
 // defer-close behavior.
 func TestAnalyzeForCompare_PanicInResolverUnwindsCleanly(t *testing.T) {
-	res := &fakeResolver{
+	res := &compareFakeResolver{
 		resolveFn: func(ctx context.Context, ref string, p chan<- image.ProgressEvent) ([]image.Layer, error) {
 			panic("simulated resolver crash")
 		},
