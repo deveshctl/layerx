@@ -328,6 +328,46 @@ or copy-paste.
 
 ---
 
+## Themes
+
+layerx ships six curated color themes. Resolution precedence:
+
+    --theme flag  >  $LAYERX_THEME  >  theme: in .layerx.yaml  >  default
+
+List available themes:
+
+```bash
+layerx themes
+layerx themes --json
+```
+
+Set the theme:
+
+```bash
+layerx --theme nord nginx:latest          # one-off
+LAYERX_THEME=latte layerx nginx:latest    # shell-scoped
+echo "theme: nord" >> .layerx.yaml        # project-scoped
+```
+
+Bundled themes:
+
+| Name        | Description                                                      |
+|-------------|------------------------------------------------------------------|
+| `default`   | Catppuccin Mocha (dark) — built-in default                       |
+| `latte`     | Catppuccin Latte (light)                                         |
+| `frappe`    | Catppuccin Frappé (dark)                                         |
+| `macchiato` | Catppuccin Macchiato (dark)                                      |
+| `nord`      | Nord (dark, blue-leaning)                                        |
+| `minimal`   | Terminal ANSI-16 colors (respects your shell theme)              |
+
+`minimal` uses your terminal's ANSI palette, which is the right choice
+for SSH sessions, tmux, or CI log viewers where a fixed-hex theme
+might clash with your color scheme.
+
+Upstream attribution lives in [THEMES.md](THEMES.md).
+
+---
+
 ## Caching & environment
 
 | Variable                 | Purpose                                                                  |
@@ -336,6 +376,7 @@ or copy-paste.
 | `LAYERX_CACHE_DIR`       | Override the default analysis cache directory                            |
 | `LAYERX_CACHE_TTL_DAYS`  | Evict cache entries older than this many days. Default `30`. `0` disables. |
 | `LAYERX_CACHE_MAX_BYTES` | Evict oldest entries until total cache size is at or below this. Default `1073741824` (1 GiB). `0` disables. |
+| `LAYERX_THEME`           | Default color theme (overridable per-invocation with `--theme`). See [Themes](#themes). |
 
 Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` bypasses the cache for a single run; the run still refreshes the cache on success. The cache directory self-prunes by age and total size at the end of every successful write; failures are best-effort and surface as `cache prune ...` warnings on stderr.
 
