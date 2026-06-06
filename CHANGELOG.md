@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surface lands in subsequent commits.
 - Internal: .layerx.yaml accepts a `theme:` key (validated against the
   theme/ registry once cmd/ wires the validator hook).
+- Internal: TUI styling refactored to flow through a Styles struct on
+  the bubbletea Model, built once per session from the active theme's
+  palette. No user-visible change with the default theme.
 
 ## [v1.4.0] - 2026-06-06
 

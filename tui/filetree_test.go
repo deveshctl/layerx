@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/theme"
 )
 
 // fakeFiles builds a flat slice of n FileNodes, all matching the substring "f"
@@ -27,7 +28,7 @@ func TestRenderFileTree_FilterActiveSuppressesBelowIndicator(t *testing.T) {
 	// (the bar persists until the query is cleared). The filter bar
 	// occupies the panel's last row, where renderPanel would otherwise
 	// paint the ▾ scroll indicator.
-	out := renderFileTree(files, 0, 0, 60, 10, true, false, "f", false, nil, 0)
+	out := renderFileTree(BuildStyles(theme.Default().Palette), files, 0, 0, 60, 10, true, false, "f", false, nil, 0)
 	if strings.Contains(out, "▾") {
 		t.Fatalf("expected no ▾ when filter bar occupies last row; got panel:\n%s", out)
 	}
@@ -35,7 +36,7 @@ func TestRenderFileTree_FilterActiveSuppressesBelowIndicator(t *testing.T) {
 
 func TestRenderFileTree_NoFilterRetainsBelowIndicator(t *testing.T) {
 	files := fakeFiles(50)
-	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, nil, 0)
+	out := renderFileTree(BuildStyles(theme.Default().Palette), files, 0, 0, 60, 10, true, false, "", false, nil, 0)
 	if !strings.Contains(out, "▾") {
 		t.Fatalf("expected ▾ when overflow exists and filter is not active; got panel:\n%s", out)
 	}

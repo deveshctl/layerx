@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/theme"
 )
 
 // Config holds the parameters needed to start the TUI.
@@ -21,6 +22,7 @@ type Config struct {
 	ImageRef string
 	Resolver image.Resolver
 	NoCache  bool
+	Theme    theme.Theme
 }
 
 type focus int
@@ -211,6 +213,8 @@ type model struct {
 	sizeMode      sizeColMode
 	noCache       bool
 
+	styles Styles
+
 	fetchCtx    context.Context
 	fetchCancel context.CancelFunc
 }
@@ -219,6 +223,9 @@ type model struct {
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
+	if cfg.Theme.Name == "" {
+		cfg.Theme = theme.Default()
+	}
 	return model{
 		state:       stateLoading,
 		imageRef:    cfg.ImageRef,
@@ -228,6 +235,7 @@ func NewModel(cfg Config) model {
 		statFile:    os.Stat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
+		styles:      BuildStyles(cfg.Theme.Palette),
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
@@ -1178,7 +1186,7 @@ func (m model) viewLoading() tea.View {
 
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("◆ layerx"))
+	lines = append(lines, "  "+m.styles.AccentBold.Render("◆ layerx"))
 	lines = append(lines, "")
 
 	switch m.loadPhase {
@@ -1203,8 +1211,8 @@ func (m model) viewLoading() tea.View {
 				}
 				if barWidth >= 4 {
 					filled := barWidth * pct / 100
-					bar := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", filled)) +
-						lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", barWidth-filled))
+					bar := m.styles.BarFilled.Render(strings.Repeat("━", filled)) +
+						m.styles.BarEmpty.Render(strings.Repeat("─", barWidth-filled))
 					detail += fmt.Sprintf("  [%s]%s", bar, bytesText)
 				} else {
 					detail += bytesText
@@ -1237,7 +1245,7 @@ func (m model) viewLoading() tea.View {
 	}
 
 	lines = append(lines, "")
-	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	hintStyle := m.styles.LoadHint
 	lines = append(lines, "  "+hintStyle.Render("Press q or Esc to exit."))
 	lines = append(lines, "")
 
@@ -1259,14 +1267,14 @@ func (m model) viewLoading() tea.View {
 	}
 
 	body := strings.Join(lines, "\n")
-	panel := renderPanel(body, "Loading", true, boxWidth, boxHeight, false, false)
+	panel := renderPanel(m.styles, body, "Loading", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	return finalizeView(tea.NewView(content))
 }
 
 func (m model) viewError() tea.View {
-	errStyle := lipgloss.NewStyle().Foreground(removedColor).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	errStyle := m.styles.LoadError
+	hintStyle := m.styles.LoadHint
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 	return finalizeView(tea.NewView(content))
@@ -1293,13 +1301,14 @@ func (m model) viewReady() tea.View {
 
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
-	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
-	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
+	left := renderLayers(m.styles, m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
+	right := renderFileTree(m.styles, treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
 	if m.viewState != viewNone {
 		viewer := renderFileView(viewerParams{
+			styles:        m.styles,
 			content:       m.viewContent,
 			offset:        m.viewOffset,
 			width:         m.width,
@@ -1323,9 +1332,9 @@ func (m model) viewReady() tea.View {
 	if m.layerCursor < len(layers) {
 		cmd = layers[m.layerCursor].Command
 	}
-	commandBar := renderCommandBar(cmd, m.width)
+	commandBar := renderCommandBar(m.styles, cmd, m.width)
 
-	sep := lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", m.width))
+	sep := m.styles.Separator.Render(strings.Repeat("─", m.width))
 	status := m.renderStatusBar(treeFiles)
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar, sep, status)
@@ -1358,19 +1367,19 @@ func (m model) leftPanelWidth() int {
 }
 
 func (m model) renderHeader() string {
-	glyph := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("◆")
-	brand := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Bold(true).Render(" layerx")
-	sep := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor).Render(" │ ")
-	imageName := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Render(m.imageRef)
+	glyph := m.styles.StatusBrandGlyph.Render("◆")
+	brand := m.styles.StatusBrand.Render(" layerx")
+	sep := m.styles.StatusSep.Render(" │ ")
+	imageName := m.styles.StatusImageName.Render(m.imageRef)
 	left := glyph + brand + sep + imageName
 
 	totalSize := image.FormatBytes(m.analysis.TotalSize)
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
-	right := lipgloss.NewStyle().Foreground(headerDimColor).Background(statusBgColor).Render(layerCount + " · " + totalSize)
+	right := m.styles.HeaderDimOnStatus.Render(layerCount + " · " + totalSize)
 
 	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
 
-	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	bgStyle := m.styles.StatusBg
 	return bgStyle.Render(" " + left + strings.Repeat(" ", gap) + right)
 }
 
@@ -1378,9 +1387,9 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	if m.viewState != viewNone {
 		return m.renderViewerStatusBar()
 	}
-	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Background(statusBgColor).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
-	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
+	keyStyle := m.styles.StatusKey
+	descStyle := m.styles.StatusDim
+	sepStyle := m.styles.StatusSep
 
 	type hint struct{ key, desc string }
 	var hints []hint
@@ -1437,10 +1446,10 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	layers := m.layers()
 	var right string
 	if m.statusMsg != "" {
-		msgStyle := lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Bold(true)
+		msgStyle := m.styles.StatusBadgeWarn.Bold(true)
 		right = msgStyle.Render(m.statusMsg) + " "
 	} else if m.copyConfirm {
-		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
+		copiedStyle := m.styles.StatusCopied
 		right = copiedStyle.Render("Copied!") + " "
 	} else {
 		badges := ""
@@ -1450,16 +1459,16 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			if m.efficiency.WastedBytes > 0 {
 				effStr += " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
 			}
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("["+effStr+"]") + " "
+			badges += m.styles.StatusBadgeAccent.Render("["+effStr+"]") + " "
 		}
 		if m.diffOnly {
-			badges += lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Render("[diff]") + " "
+			badges += m.styles.StatusBadgeWarn.Render("[diff]") + " "
 		}
 		switch m.sortMode {
 		case sortDesc:
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[↓size]") + " "
+			badges += m.styles.StatusBadgeAccent.Render("[↓size]") + " "
 		case sortAsc:
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[↑size]") + " "
+			badges += m.styles.StatusBadgeAccent.Render("[↑size]") + " "
 		}
 
 		layerNum := fmt.Sprintf("%d", m.layerCursor+1)
@@ -1468,7 +1477,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		if m.layerCursor < len(layers) {
 			size = image.FormatBytes(layers[m.layerCursor].Size)
 		}
-		rightHighlight := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Bold(true).Render("Layer " + layerNum)
+		rightHighlight := m.styles.StatusRightHi.Render("Layer " + layerNum)
 		sizeLabel := "stored " + size
 		if m.focus == focusLayers && m.layerCursor < len(layers) {
 			switch m.sizeMode {
@@ -1478,20 +1487,20 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 				sizeLabel = "stored " + size + " · change " + image.FormatSignedBytes(layers[m.layerCursor].NetDelta)
 			}
 		}
-		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor).Render("/" + layerTotal + " · " + sizeLabel)
+		rightDim := m.styles.StatusRightDim.Render("/" + layerTotal + " · " + sizeLabel)
 		right = badges + rightHighlight + rightDim + " "
 	}
 
 	gap := max(m.width-lipgloss.Width(hintStr)-lipgloss.Width(right), 0)
 
-	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	bgStyle := m.styles.StatusBg
 	return bgStyle.Render(hintStr + strings.Repeat(" ", gap) + right)
 }
 
 func (m model) renderViewerStatusBar() string {
-	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Background(statusBgColor).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
-	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
+	keyStyle := m.styles.StatusKey
+	descStyle := m.styles.StatusDim
+	sepStyle := m.styles.StatusSep
 
 	hints := " " +
 		keyStyle.Render("j/k") + " " + descStyle.Render("scroll") + " " +
@@ -1508,10 +1517,10 @@ func (m model) renderViewerStatusBar() string {
 
 	var right string
 	if m.copyConfirm {
-		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
+		copiedStyle := m.styles.StatusCopied
 		right = copiedStyle.Render("Copied!") + " "
 	} else if len(m.viewSearchMatches) > 0 {
-		matchStyle := lipgloss.NewStyle().Foreground(searchCurrentBg).Background(statusBgColor).Bold(true)
+		matchStyle := m.styles.StatusMatch
 		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
 	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
 		total := fileViewLineCount(m.viewContent)
@@ -1520,13 +1529,13 @@ func (m model) renderViewerStatusBar() string {
 		if total > 0 {
 			pct = line * 100 / total
 		}
-		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
+		rightDim := m.styles.StatusRightDim
 		right = rightDim.Render(fmt.Sprintf("Line %d/%d (%d%%) ", line, total, pct))
 	}
 
 	gap := max(m.width-lipgloss.Width(hints)-lipgloss.Width(right), 0)
 
-	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	bgStyle := m.styles.StatusBg
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
 }
 
