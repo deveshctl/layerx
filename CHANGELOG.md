@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (unexported; no API change). (I-03)
 
 ### Changed
+- `layerx cache list` now displays rows newest-first (most recently
+  cached at the top) so a freshly-written entry is visible at a glance
+  without scrolling. The underlying `image.ListCache` order is unchanged
+  (oldest-first, which is what eviction needs); only the renderer walks
+  in reverse.
 - `isDaemonUnreachable` now classifies low-level connection errors
   (`no such file or directory`, `connection refused`, `connect: permission
   denied`, `file does not exist`) as daemon-unreachable. Previously these

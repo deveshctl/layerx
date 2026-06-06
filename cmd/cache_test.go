@@ -74,10 +74,11 @@ func TestRenderListTable_Empty(t *testing.T) {
 func TestRenderListTable_Populated(t *testing.T) {
 	freezeRelativeTime(t)
 
+	// Input matches ListCache's contract: oldest-first.
 	entries := []image.CacheEntry{
-		{Digest: strings.Repeat("a", 64), Size: 12 * 1024 * 1024, CachedAt: nowFn().Add(-2 * time.Hour)},
-		{Digest: strings.Repeat("b", 64), Size: 148 * 1024 * 1024, CachedAt: nowFn().Add(-4 * 24 * time.Hour)},
 		{Digest: strings.Repeat("c", 64), Size: 3 * 1024 * 1024, CachedAt: nowFn().Add(-21 * 24 * time.Hour)},
+		{Digest: strings.Repeat("b", 64), Size: 148 * 1024 * 1024, CachedAt: nowFn().Add(-4 * 24 * time.Hour)},
+		{Digest: strings.Repeat("a", 64), Size: 12 * 1024 * 1024, CachedAt: nowFn().Add(-2 * time.Hour)},
 	}
 	var buf bytes.Buffer
 	renderListTable(&buf, "/cache", entries)
@@ -90,6 +91,15 @@ func TestRenderListTable_Populated(t *testing.T) {
 	assert.Contains(t, out, "4 days ago")
 	assert.Contains(t, out, "3 weeks ago")
 	assert.Contains(t, out, "Total: 3 entries,")
+
+	// Render walks the (oldest-first) input in reverse, so the
+	// newest digest appears above the oldest.
+	aIdx := strings.Index(out, "aaaaaaaaaaaa…")
+	bIdx := strings.Index(out, "bbbbbbbbbbbb…")
+	cIdx := strings.Index(out, "cccccccccccc…")
+	require.True(t, aIdx > 0 && bIdx > 0 && cIdx > 0)
+	assert.True(t, aIdx < bIdx, "newest (a) must come before middle (b)")
+	assert.True(t, bIdx < cIdx, "middle (b) must come before oldest (c)")
 }
 
 func TestRenderPruneResult_RealRun(t *testing.T) {

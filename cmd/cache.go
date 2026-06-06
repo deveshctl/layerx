@@ -242,10 +242,16 @@ func renderListTable(w io.Writer, root string, entries []image.CacheEntry) {
 	// CACHED — column is mtime (write-time), not last-read. I-03
 	// rejected bumping mtime on cache hits because of the read-path
 	// I/O cost; we kept that decision and label honestly.
+	//
+	// ListCache returns oldest-first (the order PruneCache needs for
+	// stale-eviction). For human display, walk in reverse so the most
+	// recently cached entry — usually the one the user just created —
+	// is at the top of the table without scrolling.
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "DIGEST\tSIZE\tCACHED")
 	var total int64
-	for _, e := range entries {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
 		fmt.Fprintf(tw, "%s\t%s\t%s\n",
 			truncateDigest(e.Digest),
 			image.FormatBytes(e.Size),
