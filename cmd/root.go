@@ -52,7 +52,8 @@ paths.
 Cache:
   Analysis results are cached on disk so repeat runs against an unchanged
   image are near-instant. Use --no-cache to bypass the cache for a single
-  run; the run still refreshes the cache on success.
+  run; the run still refreshes the cache on success. Use "layerx cache
+  list" to inspect cached entries and "layerx cache prune" to evict them.
 
 Environment:
   CI=true   When set, "layerx IMAGE_OR_ARCHIVE" runs the ci subcommand with

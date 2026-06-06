@@ -124,6 +124,7 @@ func runCachePrune(cmd *cobra.Command, _ []string) error {
 	cmd.SilenceUsage = true
 
 	opts := image.PruneOptions{}
+	bareDryRun := false
 	switch {
 	case flagCacheOlderThan != "":
 		ttl, err := parseOlderThan(flagCacheOlderThan)
@@ -139,6 +140,7 @@ func runCachePrune(cmd *cobra.Command, _ []string) error {
 		// Bare prune (or only --dry-run): dry run that lists everything.
 		opts.All = true
 		opts.DryRun = true
+		bareDryRun = true
 	}
 
 	root, _ := image.CacheDir()
@@ -150,6 +152,15 @@ func runCachePrune(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.ErrOrStderr(), w)
 	}
 	renderPruneResult(cmd.OutOrStdout(), res, opts.DryRun)
+
+	// On a bare `prune` (no flags), nothing was actually removed. Hint at
+	// the commands that would, so users don't think the dry-run did the job.
+	if bareDryRun && len(res.Removed) > 0 {
+		fmt.Fprintln(cmd.OutOrStdout(),
+			"\nThis was a dry run. Re-run with --all to remove every entry,")
+		fmt.Fprintln(cmd.OutOrStdout(),
+			"or with --older-than DURATION (e.g. 7d, 12h, 2w) to remove a subset.")
+	}
 
 	// Exit 1 only when the prune accomplished nothing AND a partial
 	// failure was reported. If the cache was simply empty, exit 0.

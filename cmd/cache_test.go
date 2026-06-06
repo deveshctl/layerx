@@ -214,12 +214,39 @@ func TestCachePrune_AllDryRun_DoesNotTouchDisk(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "Would remove")
 	assert.Contains(t, out, "freeing")
+	// Bare prune is purely a dry run; the hint must point at the commands
+	// that actually remove entries so users don't think prune ran.
+	assert.Contains(t, out, "--all to remove every entry")
+	assert.Contains(t, out, "--older-than DURATION")
 
 	// Disk untouched.
 	for _, d := range []string{digestA, digestB} {
 		_, statErr := os.Stat(filepath.Join(root, d, "layers.gob"))
 		assert.NoError(t, statErr, "dry run must not remove %s", d)
 	}
+}
+
+func TestCachePrune_ExplicitDryRun_NoHint(t *testing.T) {
+	// `--all --dry-run` is an explicit scope — the user already knows
+	// what they want. The "re-run with --all" hint is only useful for
+	// the bare `prune` case.
+	root := t.TempDir()
+	t.Setenv("LAYERX_CACHE_DIR", root)
+	resetCacheFlags(t)
+
+	seedFakeCache(t, root, strings.Repeat("a", 64), 1024, time.Now().Add(-1*time.Hour))
+
+	rootCmd.SetArgs([]string{"cache", "prune", "--all", "--dry-run"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "Would remove")
+	assert.NotContains(t, out, "Re-run with --all")
+	assert.NotContains(t, out, "--older-than DURATION")
 }
 
 // freezeRelativeTime overrides cmd's nowFn for the test and restores it
