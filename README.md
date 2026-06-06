@@ -337,7 +337,28 @@ or copy-paste.
 | `LAYERX_CACHE_TTL_DAYS`  | Evict cache entries older than this many days. Default `30`. `0` disables. |
 | `LAYERX_CACHE_MAX_BYTES` | Evict oldest entries until total cache size is at or below this. Default `1073741824` (1 GiB). `0` disables. |
 
-Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` (alias `--refresh`) bypasses the cache for a single run; the run still refreshes the cache on success. The cache directory self-prunes by age and total size at the end of every successful write; failures are best-effort and surface as `cache prune ...` warnings on stderr.
+Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` bypasses the cache for a single run; the run still refreshes the cache on success. The cache directory self-prunes by age and total size at the end of every successful write; failures are best-effort and surface as `cache prune ...` warnings on stderr.
+
+### Cache management
+
+Inspect and explicitly evict cache entries with the `layerx cache`
+subcommands:
+
+```bash
+# Show what's in the cache (image, digest, size, cached-at).
+layerx cache list
+
+# Preview eviction without touching disk (bare prune is a dry run).
+layerx cache prune
+
+# Evict entries older than 7 days.
+layerx cache prune --older-than 7d
+
+# Empty the cache.
+layerx cache prune --all
+```
+
+`cache list` shows the original image reference for entries written by layerx v1.4 and later (older entries render as `<unknown>` until they are re-cached). `--older-than` accepts an integer plus a unit suffix (`s`, `m`, `h`, `d`, `w`); examples include `90m`, `12h`, `30d`, `2w`. `mo` and `y` are not accepted. `layerx cache --help` shows the resolved cache directory and references the `LAYERX_CACHE_TTL_DAYS` and `LAYERX_CACHE_MAX_BYTES` overrides documented above.
 
 ---
 

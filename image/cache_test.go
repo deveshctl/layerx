@@ -2,6 +2,7 @@ package image
 
 import (
 	"encoding/gob"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -140,7 +141,7 @@ func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 
 	cacheRoot := t.TempDir()
 	digest := "sha256:driftguard"
-	require.NoError(t, saveCache(cacheRoot, digest, layers, nil))
+	require.NoError(t, saveCache(cacheRoot, digest, "", layers, nil))
 	rehydrated, ok, err := loadCache(cacheRoot, digest)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -245,7 +246,7 @@ func TestSaveLoadCache_RoundTrip(t *testing.T) {
 			Tree: makeTree(makeFile("a", "/a", 50)),
 		},
 	}
-	require.NoError(t, saveCache(root, digest, layers, nil))
+	require.NoError(t, saveCache(root, digest, "", layers, nil))
 
 	got, ok, err := loadCache(root, digest)
 	require.NoError(t, err)
@@ -336,7 +337,7 @@ func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 func TestSaveCache_NoTempFileLingers(t *testing.T) {
 	root := t.TempDir()
 	digest := "sha256:keep"
-	require.NoError(t, saveCache(root, digest, nil, nil))
+	require.NoError(t, saveCache(root, digest, "", nil, nil))
 
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
@@ -380,9 +381,9 @@ func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
 
 func TestSaveCache_RejectsBadDigest(t *testing.T) {
 	root := t.TempDir()
-	err := saveCache(root, "", nil, nil)
+	err := saveCache(root, "", "", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
-	err = saveCache(root, "../escape", nil, nil)
+	err = saveCache(root, "../escape", "", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
 }
 
@@ -766,7 +767,7 @@ func TestSaveCache_TriggersPrune(t *testing.T) {
 		Index: 0, ID: freshDigest, Size: 1, Command: "FROM scratch",
 		Tree: makeTree(makeFile("/x", "/x", 1)),
 	}}
-	require.NoError(t, saveCache(root, freshDigest, layers, nil))
+	require.NoError(t, saveCache(root, freshDigest, "", layers, nil))
 
 	// Stale evicted by TTL (also would by size cap).
 	_, errStale := os.Stat(filepath.Join(root, stale))
@@ -775,4 +776,282 @@ func TestSaveCache_TriggersPrune(t *testing.T) {
 	// Fresh kept.
 	_, errFresh := os.Stat(filepath.Join(root, freshDigest, "layers.gob"))
 	assert.NoError(t, errFresh, "fresh digest must survive its own write")
+}
+
+func TestListCache_HappyPath(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	a := strings.Repeat("a", 64)
+	b := strings.Repeat("b", 64)
+	c := strings.Repeat("c", 64)
+	writeFakeCache(t, root, a, 1024, now.Add(-3*time.Hour))
+	writeFakeCache(t, root, b, 2048, now.Add(-2*time.Hour))
+	writeFakeCache(t, root, c, 4096, now.Add(-1*time.Hour))
+
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	require.Len(t, entries, 3)
+	// Sorted oldest-first.
+	assert.Equal(t, a, entries[0].Digest)
+	assert.Equal(t, b, entries[1].Digest)
+	assert.Equal(t, c, entries[2].Digest)
+	assert.Equal(t, int64(1024), entries[0].Size)
+	// time.Time.Equal compares instants; Equal-via-DeepEqual would
+	// fail on Linux where os.Stat returns Local-zoned mtime even
+	// though writeFakeCache passes a UTC value.
+	assert.True(t, now.Add(-3*time.Hour).Equal(entries[0].CachedAt),
+		"CachedAt mismatch: want %v got %v", now.Add(-3*time.Hour), entries[0].CachedAt)
+}
+
+func TestListCache_SkipsForeignAndIncomplete(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	good := strings.Repeat("a", 64)
+	writeFakeCache(t, root, good, 100, now.Add(-1*time.Hour))
+
+	// Foreign file at root.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("hi"), 0o644))
+
+	// Dir name fails digest validation.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "not-a-digest"), 0o700))
+
+	// Digest-shaped dir without layers.gob.
+	incomplete := strings.Repeat("b", 64)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, incomplete), 0o700))
+
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	require.Len(t, entries, 1)
+	assert.Equal(t, good, entries[0].Digest)
+}
+
+func TestListCache_MissingRoot_ReturnsEmpty(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "does-not-exist")
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	assert.Empty(t, entries)
+}
+
+func TestListCache_UnreadableRoot_ReturnsErr(t *testing.T) {
+	// Point root at a regular file. os.ReadDir returns a path error.
+	tmp, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	_, _, err = ListCache(tmp.Name())
+	require.Error(t, err)
+}
+
+func TestSaveCache_WritesMetaSidecar(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	require.NoError(t, saveCache(root, digest, "nginx:latest", nil, nil))
+
+	dir := filepath.Join(root, strings.Repeat("a", 64))
+	body, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"image_ref":"nginx:latest"}`+"\n", string(body))
+}
+
+func TestSaveCache_EmptyImageRef_NoSidecar(t *testing.T) {
+	// An empty imageRef means the caller had no useful label to record
+	// (older code paths, or a future API consumer that omits it). Don't
+	// litter the cache with `{"image_ref":""}` files.
+	root := t.TempDir()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	require.NoError(t, saveCache(root, digest, "", nil, nil))
+
+	dir := filepath.Join(root, strings.Repeat("a", 64))
+	_, err := os.Stat(filepath.Join(dir, "meta.json"))
+	assert.True(t, os.IsNotExist(err), "no meta.json expected; got err=%v", err)
+}
+
+func TestListCache_PopulatesImageRef(t *testing.T) {
+	root := t.TempDir()
+	digest := strings.Repeat("a", 64)
+	require.NoError(t, saveCache(root, "sha256:"+digest, "alpine:3.19", nil, nil))
+
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "alpine:3.19", entries[0].ImageRef)
+}
+
+func TestListCache_MissingSidecar_EmptyImageRef(t *testing.T) {
+	// Entries from older versions have layers.gob but no meta.json.
+	// ListCache must not error or skip — render layer handles the
+	// "<unknown>" fallback.
+	root := t.TempDir()
+	now := withFrozenNow(t)
+	a := strings.Repeat("a", 64)
+	writeFakeCache(t, root, a, 1024, now.Add(-1*time.Hour))
+
+	entries, _, err := ListCache(root)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "", entries[0].ImageRef)
+}
+
+func TestReadMetaSidecar_Tolerates_Garbage(t *testing.T) {
+	// A hand-edited or truncated meta.json must read as "" rather than
+	// panic or surface a parse error to the user.
+	dir := t.TempDir()
+	for _, body := range []string{
+		"",
+		"not json",
+		`{"image_ref":}`,
+		`{"image_ref":"unterminated`,
+		`{"image_ref":"x"} trailing`,
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o600))
+		got := readMetaSidecar(dir)
+		assert.Equal(t, "", got, "garbage body %q must read as empty", body)
+	}
+}
+
+func TestPruneCache_All_RemovesEverything(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	a := strings.Repeat("a", 64)
+	b := strings.Repeat("b", 64)
+	c := strings.Repeat("c", 64)
+	writeFakeCache(t, root, a, 100, now.Add(-3*time.Hour))
+	writeFakeCache(t, root, b, 200, now.Add(-2*time.Hour))
+	writeFakeCache(t, root, c, 300, now.Add(-1*time.Hour))
+
+	res, err := PruneCache(root, PruneOptions{All: true, Now: nowFn})
+	require.NoError(t, err)
+	assert.Len(t, res.Removed, 3)
+	assert.Empty(t, res.Kept)
+	assert.Empty(t, res.Warnings)
+
+	for _, d := range []string{a, b, c} {
+		_, statErr := os.Stat(filepath.Join(root, d))
+		assert.True(t, os.IsNotExist(statErr), "expected %s gone", d)
+	}
+}
+
+func TestPruneCache_All_RespectsKeep(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	keep := strings.Repeat("a", 64)
+	other := strings.Repeat("b", 64)
+	writeFakeCache(t, root, keep, 100, now.Add(-1*time.Hour))
+	writeFakeCache(t, root, other, 200, now.Add(-1*time.Hour))
+
+	res, err := PruneCache(root, PruneOptions{All: true, Keep: keep, Now: nowFn})
+	require.NoError(t, err)
+	require.Len(t, res.Removed, 1)
+	assert.Equal(t, other, res.Removed[0].Digest)
+	require.Len(t, res.Kept, 1)
+	assert.Equal(t, keep, res.Kept[0].Digest)
+
+	_, errKeep := os.Stat(filepath.Join(root, keep))
+	assert.NoError(t, errKeep)
+	_, errOther := os.Stat(filepath.Join(root, other))
+	assert.True(t, os.IsNotExist(errOther))
+}
+
+func TestPruneCache_DryRun_LeavesDiskUntouched(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	a := strings.Repeat("a", 64)
+	b := strings.Repeat("b", 64)
+	writeFakeCache(t, root, a, 100, now.Add(-31*24*time.Hour))
+	writeFakeCache(t, root, b, 100, now.Add(-1*time.Hour))
+
+	res, err := PruneCache(root, PruneOptions{
+		TTL: 30 * 24 * time.Hour, DryRun: true, Now: nowFn,
+	})
+	require.NoError(t, err)
+	require.Len(t, res.Removed, 1)
+	assert.Equal(t, a, res.Removed[0].Digest)
+
+	// Disk unchanged.
+	_, errA := os.Stat(filepath.Join(root, a))
+	assert.NoError(t, errA, "DryRun must not remove files")
+	_, errB := os.Stat(filepath.Join(root, b))
+	assert.NoError(t, errB)
+}
+
+func TestPruneCache_PartialFailure_WarnsOnce(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	stuck := strings.Repeat("a", 64)
+	ok1 := strings.Repeat("b", 64)
+	ok2 := strings.Repeat("c", 64)
+	writeFakeCache(t, root, stuck, 100, now.Add(-31*24*time.Hour))
+	writeFakeCache(t, root, ok1, 100, now.Add(-31*24*time.Hour))
+	writeFakeCache(t, root, ok2, 100, now.Add(-31*24*time.Hour))
+
+	// chmod-based failure injection is unreliable: os.RemoveAll has
+	// logic to chmod-up unreadable dirs and retry, and the behaviour
+	// drifts across kernels and Go versions. Use the removeAllFn seam
+	// instead — fail RemoveAll only for the `stuck` digest.
+	stuckPath := filepath.Join(root, stuck)
+	prev := removeAllFn
+	removeAllFn = func(p string) error {
+		if p == stuckPath {
+			return errors.New("synthetic remove failure")
+		}
+		return prev(p)
+	}
+	t.Cleanup(func() { removeAllFn = prev })
+
+	res, err := PruneCache(root, PruneOptions{
+		TTL: 30 * 24 * time.Hour, Now: nowFn,
+	})
+	require.NoError(t, err)
+
+	// Exactly one warning despite the failure (one-shot warn contract).
+	require.Len(t, res.Warnings, 1)
+	assert.Contains(t, res.Warnings[0], "cache prune partial:")
+
+	// The two healthy entries should still be in Removed.
+	removedNames := make(map[string]bool)
+	for _, e := range res.Removed {
+		removedNames[e.Digest] = true
+	}
+	assert.True(t, removedNames[ok1], "ok1 should be removed")
+	assert.True(t, removedNames[ok2], "ok2 should be removed")
+}
+
+// TestPruneCache_Wrapper_StillEmitsSingleEntryOverflowWarn checks that
+// the I-03 internal wrapper still surfaces the "cache size cap exceeded
+// by single entry; kept" warning via PhaseCacheWarn after the refactor
+// to PruneCache. Catches accidental signature drift in the wrapper.
+func TestPruneCache_Wrapper_StillEmitsSingleEntryOverflowWarn(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	keep := strings.Repeat("a", 64)
+	other := strings.Repeat("b", 64)
+	writeFakeCache(t, root, keep, 100*1024*1024, now.Add(-1*time.Hour))
+	writeFakeCache(t, root, other, 10*1024*1024, now.Add(-2*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "0")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "52428800") // 50 MB
+
+	progress := make(chan ProgressEvent, 16)
+	pruneCache(root, keep, progress)
+
+	events := drainProgress(progress)
+	var found bool
+	for _, ev := range events {
+		if ev.Phase == PhaseCacheWarn && strings.Contains(ev.Message, "exceeded by single entry") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "wrapper must still surface single-entry overflow warn; got %+v", events)
 }

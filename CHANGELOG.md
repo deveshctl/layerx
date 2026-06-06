@@ -8,11 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `layerx cache list` now shows an IMAGE column with the original image
+  reference each entry was written with (e.g. `nginx:latest`,
+  `./build/app.tar`). Backed by a small `meta.json` sidecar written
+  next to `layers.gob` on every successful cache save; entries from
+  older versions of layerx without a sidecar render as `<unknown>`
+  until they are re-cached. The sidecar is display-only — `loadCache`
+  and `PruneCache` ignore it. Best-effort: a sidecar write failure
+  does not invalidate the cache.
 - `--engine docker|podman|auto` flag selects which container engine to talk
   to. `auto` (the default) uses `DOCKER_HOST` if set, otherwise tries the
   Docker socket then falls back to the Podman rootless socket on Linux.
 - New typed errors `ErrPodmanSocketNotSet` and `ErrNoEngineFound` for the
   `--engine podman` and `--engine auto` failure paths.
+- `layerx cache list` and `layerx cache prune` subcommands. `list` prints
+  every cached digest with its size on disk and cached-at time, plus a
+  totals footer. `prune --older-than DURATION` (e.g. `7d`, `12h`, `2w`)
+  evicts entries older than the cutoff; `prune --all` empties the cache;
+  bare `prune` is a dry run that lists what would be removed without
+  touching disk and prints a hint pointing at `--all` / `--older-than`
+  so it isn't mistaken for an actual eviction. `--dry-run` previews any
+  of the above. `--older-than` and `--all` are mutually exclusive. Cache
+  directory and override env vars (`LAYERX_CACHE_DIR`,
+  `LAYERX_CACHE_TTL_DAYS`, `LAYERX_CACHE_MAX_BYTES`) are documented in
+  `layerx cache --help`. The root command's `--help` `Cache:` section
+  also points at `layerx cache list` / `prune`. (I-04)
 - Analysis cache now self-prunes by age (default 30 days) and total size
   (default 1 GiB). Configurable via `LAYERX_CACHE_TTL_DAYS` and
   `LAYERX_CACHE_MAX_BYTES`; set either to `0` to disable that limit.
@@ -26,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (unexported; no API change). (I-03)
 
 ### Changed
+- `layerx cache list` now displays rows newest-first (most recently
+  cached at the top) so a freshly-written entry is visible at a glance
+  without scrolling. The underlying `image.ListCache` order is unchanged
+  (oldest-first, which is what eviction needs); only the renderer walks
+  in reverse.
 - `isDaemonUnreachable` now classifies low-level connection errors
   (`no such file or directory`, `connection refused`, `connect: permission
   denied`, `file does not exist`) as daemon-unreachable. Previously these
@@ -39,6 +64,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - New "Container Engines" section in README covering Docker, Podman
   (Linux auto, macOS/Windows manual), and archive mode.
+- `layerx --help` reorganised: top-level Long is now ~20 lines (was ~40)
+  with a "Common usage" synopsis listing the three primary commands
+  (`layerx IMAGE`, `layerx ci IMAGE`, `layerx compare A B`) so the bare
+  form's role is obvious. Engines prose collapsed to a one-line pointer
+  at `--engine`; cache prose kept the explicit `cache list` / `cache prune`
+  surfacing from #f742493 in a tighter form.
+- `layerx ci --help`: example `.layerx.yaml` block now has a
+  `Example .layerx.yaml:` header so it isn't misread as flag prose.
+  Threshold flags (`--lowest-efficiency`, `--highest-wasted-bytes`,
+  `--highest-user-wasted-percent`) now render as
+  `(default: from config (built-in 0.9))` etc. instead of the misleading
+  `(default -1)` sentinel.
+- `layerx compare --help`: added an example for `--no-cache` to surface
+  the inherited persistent flag.
+- `layerx ci --help` and `layerx compare --help` now end with a one-line
+  pointer to `layerx --help` for `--engine`, `--json`, and `--no-cache`
+  details (the persistent flags inherited from root).
+
+### Removed
+- The hidden `--refresh` alias for `--no-cache`. `--no-cache` was the
+  documented form everywhere except the alias's own registration; the
+  hidden flag had no discoverability path. Pass `--no-cache` instead.
 
 ### Fixed
 - `TestCopyCtx_MidStreamCancel` was racy and failed intermittently on

@@ -86,7 +86,9 @@ silence them.
 Exit codes:
   0  no regression detected (or noop)
   1  regression detected (efficiency dropped, wasted bytes increased, or both)
-  2  operational error (resolver failure, daemon down, archive missing, etc.)`,
+  2  operational error (resolver failure, daemon down, archive missing, etc.)
+
+See "layerx --help" for details on --engine and --no-cache.`,
 	Example: `  # Compare a release tag against the previous one
   layerx compare myapp:1.4.0 myapp:1.5.0
 
@@ -95,6 +97,9 @@ Exit codes:
 
   # Show every diff entry (no top-N truncation)
   layerx compare --mode full myapp:old myapp:new
+
+  # Force a fresh analysis of both sides, ignoring any cached results
+  layerx compare --no-cache myapp:prev myapp:next
 
   # CI gate: fails non-zero on regression
   layerx compare myapp:prev myapp:next || echo "image regressed"`,

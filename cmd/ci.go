@@ -61,6 +61,7 @@ Thresholds can be set via flags or a .layerx.yaml file in the working
 directory. Flags take precedence over config values. A missing config
 file is silently ignored and built-in defaults apply.
 
+Example .layerx.yaml:
   rules:
     lowest-efficiency: 0.9           # minimum efficiency score (0.0-1.0)
     highest-wasted-bytes: 0          # max wasted bytes (0 = disabled)
@@ -69,7 +70,9 @@ file is silently ignored and built-in defaults apply.
 Cache:
   Analysis results are cached on disk and reused across runs. Pass
   --no-cache to force a fresh analysis (useful for pipelines that must
-  re-parse the image after a rebuild within the same digest).`,
+  re-parse the image after a rebuild within the same digest).
+
+See "layerx --help" for details on --engine, --json, and --no-cache.`,
 	Example: `  # Run with default thresholds (lowest-efficiency: 0.9, highest-user-wasted-percent: 0.1)
   layerx ci nginx:latest
 
@@ -96,7 +99,14 @@ Cache:
 func init() {
 	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (0 disables the rule; config default: 0.9)")
 	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum allowed wasted bytes (0 disables the rule)")
-	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule)")
+	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule; config default: 0.1)")
+
+	// Override the rendered default so `--help` doesn't show "-1" — the
+	// underlying default is "unset, fall back to config or built-in", not
+	// the negative sentinel value buildRules uses to detect Changed().
+	ciCmd.Flags().Lookup("lowest-efficiency").DefValue = "from config (built-in 0.9)"
+	ciCmd.Flags().Lookup("highest-wasted-bytes").DefValue = "from config (built-in disabled)"
+	ciCmd.Flags().Lookup("highest-user-wasted-percent").DefValue = "from config (built-in 0.1)"
 
 	rootCmd.AddCommand(ciCmd)
 }
