@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/deveshctl/layerx/theme"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -388,5 +389,62 @@ func TestRunInspect_CIEnvAndJSON_CIFailJSONStillWritten(t *testing.T) {
 	assert.True(t, errors.As(err, &ciFailed), "err must carry *ErrCIFailed; got %v", err)
 	_, statErr := os.Stat(outPath)
 	assert.NoError(t, statErr, "JSON must be written even when CI fails — analysis was produced")
+}
+
+// TestResolveThemeName covers the precedence chain:
+// flag > env > yaml > "default". Pure function; no cobra harness.
+func TestResolveThemeName(t *testing.T) {
+	cases := []struct {
+		name            string
+		flag, env, yaml string
+		want            string
+	}{
+		{"all empty -> default", "", "", "", "default"},
+		{"yaml only", "", "", "nord", "nord"},
+		{"env beats yaml", "", "latte", "nord", "latte"},
+		{"flag beats env", "frappe", "latte", "nord", "frappe"},
+		{"flag beats all", "macchiato", "latte", "nord", "macchiato"},
+		{"empty flag falls through", "", "latte", "nord", "latte"},
+		{"empty env falls through", "", "", "nord", "nord"},
+		{"all set, flag wins", "minimal", "frappe", "nord", "minimal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveThemeName(tc.flag, tc.env, tc.yaml)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestRoot_BadThemeFlag: an invalid --theme value surfaces *theme.ErrUnknownTheme
+// from runInspect, which main.go maps to exit 2.
+func TestRoot_BadThemeFlag(t *testing.T) {
+	prev := flagTheme
+	t.Cleanup(func() { flagTheme = prev })
+	flagTheme = "definitely-not-a-theme"
+
+	cmd := &cobra.Command{}
+	// runInspect requires args[0]; supply a placeholder. The function
+	// errors out at theme.Get before reaching any resolver/IO, so the
+	// image ref doesn't matter.
+	err := runInspect(cmd, []string{"placeholder:latest"})
+	require.Error(t, err)
+	var typed *theme.ErrUnknownTheme
+	require.ErrorAs(t, err, &typed)
+	require.Equal(t, "definitely-not-a-theme", typed.Name)
+}
+
+// TestRoot_BadThemeEnv: same coverage via $LAYERX_THEME.
+func TestRoot_BadThemeEnv(t *testing.T) {
+	prev := flagTheme
+	t.Cleanup(func() { flagTheme = prev })
+	flagTheme = ""
+	t.Setenv("LAYERX_THEME", "definitely-not-a-theme")
+
+	cmd := &cobra.Command{}
+	err := runInspect(cmd, []string{"placeholder:latest"})
+	require.Error(t, err)
+	var typed *theme.ErrUnknownTheme
+	require.ErrorAs(t, err, &typed)
 }
 

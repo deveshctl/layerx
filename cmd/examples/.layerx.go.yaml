@@ -3,6 +3,9 @@
 # distroless and have very little legitimate slack.
 version: 1
 
+# theme: default       # one of: default, latte, frappe, macchiato, nord, minimal
+                       # run "layerx themes" to list with descriptions.
+
 rules:
   lowest-efficiency: 0.95
   highest-user-wasted-percent: 0.05

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/deveshctl/layerx/config"
+	"github.com/deveshctl/layerx/theme"
 	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +16,7 @@ import (
 var (
 	flagJSON      string
 	flagNoCacheFl bool
+	flagTheme     string
 )
 
 // noCacheRequested returns true when the user passed --no-cache on this
@@ -46,7 +49,11 @@ bare form behave as "layerx ci" with config-file (or default) thresholds.
 Cache: results are cached per image digest. Use --no-cache to bypass for
 a single run; "layerx cache list" inspects entries and "layerx cache prune"
 evicts them (see "layerx cache --help" for full details).
-Engines: layerx auto-detects Docker or Podman; pass --engine to override.`,
+Engines: layerx auto-detects Docker or Podman; pass --engine to override.
+Themes: layerx ships several color themes (default, latte, frappe,
+macchiato, nord, minimal). Override per-invocation with --theme,
+$LAYERX_THEME, or "theme:" in .layerx.yaml; "layerx themes" lists
+them with descriptions.`,
 	Example: `  # Inspect an image interactively (Docker daemon required)
   layerx nginx:latest
 
@@ -66,7 +73,10 @@ Engines: layerx auto-detects Docker or Podman; pass --engine to override.`,
   layerx ci nginx:latest
 
   # Use Podman instead of Docker (Linux: socket auto-detected)
-  layerx --engine podman alpine:3`,
+  layerx --engine podman alpine:3
+
+  # Use a different theme for one invocation
+  layerx --theme nord nginx:latest`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInspect,
 	// SilenceUsage is intentionally left at its zero value (false) here —
@@ -78,10 +88,17 @@ Engines: layerx auto-detects Docker or Podman; pass --engine to override.`,
 }
 
 func init() {
+	config.ThemeValidator = func(name string) error {
+		_, err := theme.Get(name)
+		return err
+	}
 	rootCmd.PersistentFlags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto"`)
+	rootCmd.PersistentFlags().StringVar(&flagTheme, "theme", "",
+		"color theme name (run `layerx themes` for the list); overrides $LAYERX_THEME and theme: in .layerx.yaml")
+	_ = rootCmd.RegisterFlagCompletionFunc("theme", completeThemeNames)
 }
 
 type engineValue struct{ v *string }
@@ -146,6 +163,22 @@ func ExecuteContext(ctx context.Context) error {
 	return rootCmd.ExecuteContext(ctx)
 }
 
+// resolveThemeName returns the active theme name given the precedence
+// chain: --theme flag > $LAYERX_THEME > theme: in .layerx.yaml > "default".
+// Pure function; tested in cmd/root_test.go.
+func resolveThemeName(flagValue, envValue, yamlValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if envValue != "" {
+		return envValue
+	}
+	if yamlValue != "" {
+		return yamlValue
+	}
+	return "default"
+}
+
 func runInspect(cmd *cobra.Command, args []string) error {
 	// Args validation has passed by the time RunE runs — from here on, any
 	// error is a runtime failure (bad config, daemon down, image not found)
@@ -163,6 +196,12 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	noCache := noCacheRequested()
+
+	themeName := resolveThemeName(flagTheme, os.Getenv("LAYERX_THEME"), cfg.Theme)
+	themeObj, err := theme.Get(themeName)
+	if err != nil {
+		return err
+	}
 
 	if os.Getenv("CI") == "true" {
 		if err := validateCLIThresholdFlags(ciCmd); err != nil {
@@ -211,6 +250,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCache,
+		Theme:    themeObj,
 	})
 }
 

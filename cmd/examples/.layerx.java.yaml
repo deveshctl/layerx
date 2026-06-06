@@ -3,6 +3,9 @@
 # runtime image instead of just the fat JAR.
 version: 1
 
+# theme: default       # one of: default, latte, frappe, macchiato, nord, minimal
+                       # run "layerx themes" to list with descriptions.
+
 rules:
   lowest-efficiency: 0.9
   highest-user-wasted-percent: 0.1

@@ -8,13 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Internal: theme/ package with six bundled palettes (Catppuccin
-  Mocha/Latte/Frappé/Macchiato, Nord, ANSI-16 minimal). User-facing
-  surface lands in subsequent commits.
-- Internal: .layerx.yaml accepts a `theme:` key (validated against the
-  theme/ registry once cmd/ wires the validator hook).
-- Internal: TUI styling refactored to flow through a Styles struct on
-  the bubbletea Model, built once per session from the active theme's
+- Color themes: `--theme` flag, `LAYERX_THEME` env var, and `theme:`
+  key in `.layerx.yaml`. Bundled themes: `default` (Catppuccin Mocha),
+  `latte`, `frappe`, `macchiato` (all Catppuccin), `nord`, and
+  `minimal` (terminal ANSI-16 colors). Resolution precedence:
+  flag > env > YAML > default.
+- `layerx themes` subcommand lists available themes with descriptions;
+  `--json` emits a machine-readable array. The active theme is marked
+  with `*` in plain output.
+- Shell completion for the `--theme` flag and the `themes` subcommand.
+
+### Changed
+- TUI styling refactored to flow through a `Styles` struct on the
+  bubbletea Model, built once per session from the active theme's
   palette. No user-visible change with the default theme.
 
 ## [v1.4.0] - 2026-06-06

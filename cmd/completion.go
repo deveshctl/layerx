@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deveshctl/layerx/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -77,4 +78,20 @@ func completeImageRefs(cmd *cobra.Command, args []string, toComplete string) ([]
 		}
 	}
 	return refs, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeThemeNames provides shell completion for --theme. Returns
+// every registered theme name, filtered by the partial input cobra
+// passes in. The directive disables file completion since theme
+// names are a closed set.
+func completeThemeNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	names := theme.Names()
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		s := string(n)
+		if toComplete == "" || strings.HasPrefix(s, toComplete) {
+			out = append(out, s)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
