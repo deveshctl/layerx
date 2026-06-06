@@ -75,17 +75,23 @@ func TestRenderListTable_Populated(t *testing.T) {
 	freezeRelativeTime(t)
 
 	// Input matches ListCache's contract: oldest-first.
+	// Middle entry has no ImageRef — simulates an entry written by an
+	// older layerx version that pre-dates the meta.json sidecar.
 	entries := []image.CacheEntry{
-		{Digest: strings.Repeat("c", 64), Size: 3 * 1024 * 1024, CachedAt: nowFn().Add(-21 * 24 * time.Hour)},
+		{Digest: strings.Repeat("c", 64), Size: 3 * 1024 * 1024, CachedAt: nowFn().Add(-21 * 24 * time.Hour), ImageRef: "alpine:3.19"},
 		{Digest: strings.Repeat("b", 64), Size: 148 * 1024 * 1024, CachedAt: nowFn().Add(-4 * 24 * time.Hour)},
-		{Digest: strings.Repeat("a", 64), Size: 12 * 1024 * 1024, CachedAt: nowFn().Add(-2 * time.Hour)},
+		{Digest: strings.Repeat("a", 64), Size: 12 * 1024 * 1024, CachedAt: nowFn().Add(-2 * time.Hour), ImageRef: "nginx:latest"},
 	}
 	var buf bytes.Buffer
 	renderListTable(&buf, "/cache", entries)
 	out := buf.String()
+	assert.Contains(t, out, "IMAGE")
 	assert.Contains(t, out, "DIGEST")
 	assert.Contains(t, out, "SIZE")
 	assert.Contains(t, out, "CACHED")
+	assert.Contains(t, out, "nginx:latest")
+	assert.Contains(t, out, "alpine:3.19")
+	assert.Contains(t, out, "<unknown>")
 	assert.Contains(t, out, "aaaaaaaaaaaa…")
 	assert.Contains(t, out, "2 hours ago")
 	assert.Contains(t, out, "4 days ago")
@@ -184,11 +190,9 @@ func TestCacheList_EndToEnd(t *testing.T) {
 	t.Setenv("LAYERX_CACHE_DIR", root)
 	resetCacheFlags(t)
 
-	// Seed two digests via saveCache (the public route image-package
-	// callers take). We can't call image.saveCache (unexported), so seed
-	// via image.PruneCache's input shape: write the gob ourselves with
-	// the same writeFakeCache pattern.
-	seedFakeCache(t, root, strings.Repeat("a", 64), 1024, time.Now().Add(-1*time.Hour))
+	// One entry with a meta sidecar (recent saveCache write); one without
+	// (older layerx version, or a hand-deleted sidecar).
+	seedFakeCacheWithRef(t, root, strings.Repeat("a", 64), "nginx:latest", 1024, time.Now().Add(-1*time.Hour))
 	seedFakeCache(t, root, strings.Repeat("b", 64), 2048, time.Now().Add(-2*time.Hour))
 
 	rootCmd.SetArgs([]string{"cache", "list"})
@@ -200,7 +204,10 @@ func TestCacheList_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	out := buf.String()
 	assert.Contains(t, out, "Cache directory: "+root)
+	assert.Contains(t, out, "IMAGE")
 	assert.Contains(t, out, "DIGEST")
+	assert.Contains(t, out, "nginx:latest")
+	assert.Contains(t, out, "<unknown>")
 	assert.Contains(t, out, "Total: 2 entries,")
 }
 
@@ -309,4 +316,16 @@ func seedFakeCache(t *testing.T, root, digest string, size int64, mtime time.Tim
 	path := filepath.Join(dir, "layers.gob")
 	require.NoError(t, os.WriteFile(path, make([]byte, size), 0o600))
 	require.NoError(t, os.Chtimes(path, mtime, mtime))
+}
+
+// seedFakeCacheWithRef is seedFakeCache plus a meta.json sidecar so the
+// IMAGE column has something to render against.
+func seedFakeCacheWithRef(t *testing.T, root, digest, imageRef string, size int64, mtime time.Time) {
+	t.Helper()
+	seedFakeCache(t, root, digest, size, mtime)
+	// Format must match image.writeMetaSidecar's exact output so
+	// readMetaSidecar parses it; otherwise this seed is silently ignored
+	// and the test passes for the wrong reason.
+	body := []byte(`{"image_ref":"` + imageRef + `"}` + "\n")
+	require.NoError(t, os.WriteFile(filepath.Join(root, digest, "meta.json"), body, 0o600))
 }

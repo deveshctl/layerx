@@ -141,7 +141,7 @@ func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 
 	cacheRoot := t.TempDir()
 	digest := "sha256:driftguard"
-	require.NoError(t, saveCache(cacheRoot, digest, layers, nil))
+	require.NoError(t, saveCache(cacheRoot, digest, "", layers, nil))
 	rehydrated, ok, err := loadCache(cacheRoot, digest)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -246,7 +246,7 @@ func TestSaveLoadCache_RoundTrip(t *testing.T) {
 			Tree: makeTree(makeFile("a", "/a", 50)),
 		},
 	}
-	require.NoError(t, saveCache(root, digest, layers, nil))
+	require.NoError(t, saveCache(root, digest, "", layers, nil))
 
 	got, ok, err := loadCache(root, digest)
 	require.NoError(t, err)
@@ -337,7 +337,7 @@ func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 func TestSaveCache_NoTempFileLingers(t *testing.T) {
 	root := t.TempDir()
 	digest := "sha256:keep"
-	require.NoError(t, saveCache(root, digest, nil, nil))
+	require.NoError(t, saveCache(root, digest, "", nil, nil))
 
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
@@ -381,9 +381,9 @@ func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
 
 func TestSaveCache_RejectsBadDigest(t *testing.T) {
 	root := t.TempDir()
-	err := saveCache(root, "", nil, nil)
+	err := saveCache(root, "", "", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
-	err = saveCache(root, "../escape", nil, nil)
+	err = saveCache(root, "../escape", "", nil, nil)
 	assert.ErrorIs(t, err, errBadDigest)
 }
 
@@ -767,7 +767,7 @@ func TestSaveCache_TriggersPrune(t *testing.T) {
 		Index: 0, ID: freshDigest, Size: 1, Command: "FROM scratch",
 		Tree: makeTree(makeFile("/x", "/x", 1)),
 	}}
-	require.NoError(t, saveCache(root, freshDigest, layers, nil))
+	require.NoError(t, saveCache(root, freshDigest, "", layers, nil))
 
 	// Stale evicted by TTL (also would by size cap).
 	_, errStale := os.Stat(filepath.Join(root, stale))
@@ -845,6 +845,74 @@ func TestListCache_UnreadableRoot_ReturnsErr(t *testing.T) {
 
 	_, _, err = ListCache(tmp.Name())
 	require.Error(t, err)
+}
+
+func TestSaveCache_WritesMetaSidecar(t *testing.T) {
+	root := t.TempDir()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	require.NoError(t, saveCache(root, digest, "nginx:latest", nil, nil))
+
+	dir := filepath.Join(root, strings.Repeat("a", 64))
+	body, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"image_ref":"nginx:latest"}`+"\n", string(body))
+}
+
+func TestSaveCache_EmptyImageRef_NoSidecar(t *testing.T) {
+	// An empty imageRef means the caller had no useful label to record
+	// (older code paths, or a future API consumer that omits it). Don't
+	// litter the cache with `{"image_ref":""}` files.
+	root := t.TempDir()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	require.NoError(t, saveCache(root, digest, "", nil, nil))
+
+	dir := filepath.Join(root, strings.Repeat("a", 64))
+	_, err := os.Stat(filepath.Join(dir, "meta.json"))
+	assert.True(t, os.IsNotExist(err), "no meta.json expected; got err=%v", err)
+}
+
+func TestListCache_PopulatesImageRef(t *testing.T) {
+	root := t.TempDir()
+	digest := strings.Repeat("a", 64)
+	require.NoError(t, saveCache(root, "sha256:"+digest, "alpine:3.19", nil, nil))
+
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "alpine:3.19", entries[0].ImageRef)
+}
+
+func TestListCache_MissingSidecar_EmptyImageRef(t *testing.T) {
+	// Entries from older versions have layers.gob but no meta.json.
+	// ListCache must not error or skip — render layer handles the
+	// "<unknown>" fallback.
+	root := t.TempDir()
+	now := withFrozenNow(t)
+	a := strings.Repeat("a", 64)
+	writeFakeCache(t, root, a, 1024, now.Add(-1*time.Hour))
+
+	entries, _, err := ListCache(root)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "", entries[0].ImageRef)
+}
+
+func TestReadMetaSidecar_Tolerates_Garbage(t *testing.T) {
+	// A hand-edited or truncated meta.json must read as "" rather than
+	// panic or surface a parse error to the user.
+	dir := t.TempDir()
+	for _, body := range []string{
+		"",
+		"not json",
+		`{"image_ref":}`,
+		`{"image_ref":"unterminated`,
+		`{"image_ref":"x"} trailing`,
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o600))
+		got := readMetaSidecar(dir)
+		assert.Equal(t, "", got, "garbage body %q must read as empty", body)
+	}
 }
 
 func TestPruneCache_All_RemovesEverything(t *testing.T) {

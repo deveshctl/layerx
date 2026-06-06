@@ -110,6 +110,12 @@ type CacheEntry struct {
 	Digest   string
 	Size     int64     // bytes — size of the layers.gob file on disk
 	CachedAt time.Time // mtime of layers.gob; honestly named (not "LastUsed")
+	// ImageRef is the image reference the cache was originally written with
+	// (e.g. "nginx:latest", "/build/app.tar"). Empty when the sidecar
+	// meta.json is missing — entries written by older versions, or by
+	// PruneCache which doesn't bother reading the sidecar. Display-only;
+	// loadCache and PruneCache do not consult this field.
+	ImageRef string
 }
 
 // PruneOptions controls what PruneCache evicts. Zero value is a no-op.
@@ -366,7 +372,7 @@ func isTransientIOError(err error) bool {
 // saveCache writes layers to {root}/{digest}/layers.gob using a temp file +
 // fsync + atomic rename. Errors are returned but should be treated as
 // non-fatal by callers (the user already has the live result).
-func saveCache(root, digest string, layers []Layer, progress chan<- ProgressEvent) error {
+func saveCache(root, digest string, imageRef string, layers []Layer, progress chan<- ProgressEvent) error {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return err
@@ -419,11 +425,68 @@ func saveCache(root, digest string, layers []Layer, progress chan<- ProgressEven
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
 	}
+
+	// Display-only sidecar: imageRef the cache was first written with, so
+	// `layerx cache list` can show "nginx:latest" alongside the digest.
+	// Best-effort — a write failure here does not invalidate the cache; the
+	// list view will show "<unknown>" for this digest until next save.
+	writeMetaSidecar(dir, imageRef)
+
 	// Opportunistic prune at the tail of every successful write.
 	// pruneCache never panics and never returns an error; its result
 	// is on disk and on the progress channel only.
 	pruneCache(root, norm, progress)
 	return nil
+}
+
+// writeMetaSidecar writes {dir}/meta.json containing the image ref via the
+// same temp-file + rename pattern saveCache uses for layers.gob, so a crash
+// mid-write cannot leave a half-written sidecar that ListCache would parse.
+// Errors are silently ignored: the sidecar is purely cosmetic (used by
+// `layerx cache list`), and a missing sidecar already has a graceful path
+// in ListCache. imageRef is written verbatim — callers must not pass
+// secrets here; layerx never has any in this code path (the ref is the
+// CLI argument the user typed).
+func writeMetaSidecar(dir, imageRef string) {
+	if imageRef == "" {
+		return
+	}
+	tmpName, err := tempFilename("meta.json.tmp-")
+	if err != nil {
+		return
+	}
+	tmpPath := filepath.Join(dir, tmpName)
+	body := []byte(`{"image_ref":` + strconv.Quote(imageRef) + "}\n")
+	if writeErr := os.WriteFile(tmpPath, body, 0o600); writeErr != nil {
+		return
+	}
+	if renameErr := os.Rename(tmpPath, filepath.Join(dir, "meta.json")); renameErr != nil {
+		_ = os.Remove(tmpPath)
+	}
+}
+
+// readMetaSidecar returns the image_ref recorded in {dir}/meta.json, or
+// "" when the file is absent, unreadable, or malformed. Never errors:
+// callers (ListCache) treat empty as "<unknown>".
+func readMetaSidecar(dir string) string {
+	body, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if err != nil {
+		return ""
+	}
+	// Tiny ad-hoc parse instead of pulling encoding/json into the cache
+	// hot-path: the file we wrote is always {"image_ref":"..."}\n.
+	// A hand-edited sidecar that doesn't match falls through to "".
+	const prefix = `{"image_ref":`
+	s := strings.TrimSpace(string(body))
+	if !strings.HasPrefix(s, prefix) || !strings.HasSuffix(s, "}") {
+		return ""
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(s, prefix), "}")
+	ref, err := strconv.Unquote(strings.TrimSpace(inner))
+	if err != nil {
+		return ""
+	}
+	return ref
 }
 
 // tempFilename returns prefix + 16 random hex chars. The caller chooses the
@@ -485,7 +548,8 @@ func ListCache(root string) ([]CacheEntry, []string, error) {
 		if _, err := normalizeDigest(d.Name()); err != nil {
 			continue
 		}
-		gobPath := filepath.Join(root, d.Name(), "layers.gob")
+		entryDir := filepath.Join(root, d.Name())
+		gobPath := filepath.Join(entryDir, "layers.gob")
 		info, statErr := os.Stat(gobPath)
 		if statErr != nil {
 			continue
@@ -494,6 +558,7 @@ func ListCache(root string) ([]CacheEntry, []string, error) {
 			Digest:   d.Name(),
 			Size:     info.Size(),
 			CachedAt: info.ModTime(),
+			ImageRef: readMetaSidecar(entryDir),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

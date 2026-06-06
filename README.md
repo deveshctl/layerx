@@ -345,7 +345,7 @@ Inspect and explicitly evict cache entries with the `layerx cache`
 subcommands:
 
 ```bash
-# Show what's in the cache (digest, size, cached-at).
+# Show what's in the cache (image, digest, size, cached-at).
 layerx cache list
 
 # Preview eviction without touching disk (bare prune is a dry run).
@@ -358,7 +358,7 @@ layerx cache prune --older-than 7d
 layerx cache prune --all
 ```
 
-`--older-than` accepts an integer plus a unit suffix (`s`, `m`, `h`, `d`, `w`); examples include `90m`, `12h`, `30d`, `2w`. `mo` and `y` are not accepted. `layerx cache --help` shows the resolved cache directory and references the `LAYERX_CACHE_TTL_DAYS` and `LAYERX_CACHE_MAX_BYTES` overrides documented above.
+`cache list` shows the original image reference for entries written by layerx v1.4 and later (older entries render as `<unknown>` until they are re-cached). `--older-than` accepts an integer plus a unit suffix (`s`, `m`, `h`, `d`, `w`); examples include `90m`, `12h`, `30d`, `2w`. `mo` and `y` are not accepted. `layerx cache --help` shows the resolved cache directory and references the `LAYERX_CACHE_TTL_DAYS` and `LAYERX_CACHE_MAX_BYTES` overrides documented above.
 
 ---
 

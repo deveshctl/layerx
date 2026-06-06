@@ -44,10 +44,14 @@ var cacheListCmd = &cobra.Command{
 	Short: "List cached image digests with size and timestamp",
 	Long: `List cached image digests with size and timestamp.
 
-Reports the size on disk and the cached-at time of every entry under
-the layerx cache directory, plus a totals footer. The cached-at time
-is the file's modification time, which is fixed when the cache entry
-is written; layerx does not bump it on cache hits.
+Reports the original image reference, size on disk, and the cached-at
+time of every entry under the layerx cache directory, plus a totals
+footer. Rows are ordered newest-first so a freshly-cached entry is at
+the top of the table. The cached-at time is the file's modification
+time, which is fixed when the cache entry is written; layerx does not
+bump it on cache hits. The IMAGE column shows whatever reference was
+passed to layerx when the entry was first written; entries from older
+versions of layerx that pre-date this metadata appear as "<unknown>".
 
 Cache directory: $LAYERX_CACHE_DIR overrides the default location.`,
 	Example: `  # See what's in the cache
@@ -248,11 +252,20 @@ func renderListTable(w io.Writer, root string, entries []image.CacheEntry) {
 	// recently cached entry — usually the one the user just created —
 	// is at the top of the table without scrolling.
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "DIGEST\tSIZE\tCACHED")
+	fmt.Fprintln(tw, "IMAGE\tDIGEST\tSIZE\tCACHED")
 	var total int64
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
-		fmt.Fprintf(tw, "%s\t%s\t%s\n",
+		ref := e.ImageRef
+		if ref == "" {
+			// Entry was written by an older layerx version that didn't
+			// persist the meta sidecar, or the sidecar was hand-deleted.
+			// The digest still uniquely identifies the image — only the
+			// human-readable label is missing.
+			ref = "<unknown>"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			ref,
 			truncateDigest(e.Digest),
 			image.FormatBytes(e.Size),
 			relativeTime(e.CachedAt))

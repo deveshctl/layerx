@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `layerx cache list` now shows an IMAGE column with the original image
+  reference each entry was written with (e.g. `nginx:latest`,
+  `./build/app.tar`). Backed by a small `meta.json` sidecar written
+  next to `layers.gob` on every successful cache save; entries from
+  older versions of layerx without a sidecar render as `<unknown>`
+  until they are re-cached. The sidecar is display-only — `loadCache`
+  and `PruneCache` ignore it. Best-effort: a sidecar write failure
+  does not invalidate the cache.
 - `--engine docker|podman|auto` flag selects which container engine to talk
   to. `auto` (the default) uses `DOCKER_HOST` if set, otherwise tries the
   Docker socket then falls back to the Podman rootless socket on Linux.
