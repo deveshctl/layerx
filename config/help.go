@@ -17,6 +17,7 @@ var sectionHelp = map[string]string{
 
   rules:           CI efficiency thresholds (layerx ci, CI=true)
   path-rules:      path-scoped CI rules (block, deny-waste, max-layer-count)
+  theme:           TUI color theme (run "layerx themes" to list)
   version:         schema version (currently 1)
 
 See docs/configuration.md for the full reference.
@@ -50,4 +51,11 @@ Omit the field to use schema version 1.`,
     quit: q
 
 The key is accepted today but not yet wired; remove it if you do not need it.`,
+	SectionTheme: `theme — TUI color theme name (one of: default, latte, frappe,
+macchiato, nord, minimal):
+
+  theme: nord
+
+Run "layerx themes" to list available themes with descriptions.
+Override per-invocation with --theme or $LAYERX_THEME.`,
 }

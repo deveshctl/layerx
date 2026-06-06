@@ -9,6 +9,7 @@ const (
 	SectionPathRules   = "path-rules"
 	SectionVersion     = "version"
 	SectionKeybindings = "keybindings"
+	SectionTheme       = "theme"
 	// SectionGeneral is used when the loader cannot map a failure to one
 	// section (unknown top-level key, root syntax error, IO failure).
 	SectionGeneral = "config"

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: theme/ package with six bundled palettes (Catppuccin
   Mocha/Latte/Frappé/Macchiato, Nord, ANSI-16 minimal). User-facing
   surface lands in subsequent commits.
+- Internal: .layerx.yaml accepts a `theme:` key (validated against the
+  theme/ registry once cmd/ wires the validator hook).
 
 ## [v1.4.0] - 2026-06-06
 

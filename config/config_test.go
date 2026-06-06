@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -495,4 +496,85 @@ func TestLoadFrom_PathRules_BothForms_Rejected(t *testing.T) {
 
 	_, err := LoadFrom(path)
 	require.Error(t, err)
+}
+
+// TestLoad_Theme_Valid: a recognized theme: value round-trips.
+// ThemeValidator is left nil here — config/ does not validate theme
+// names on its own. Validation lives in cmd/ via the hook (covered
+// in cmd/ tests).
+func TestLoad_Theme_Valid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("theme: nord\n"), 0o644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Equal(t, "nord", cfg.Theme)
+}
+
+// TestLoad_Theme_Missing: omitting the key leaves Theme as "".
+func TestLoad_Theme_Missing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("rules:\n  lowest-efficiency: 0.9\n"), 0o644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Equal(t, "", cfg.Theme)
+}
+
+// TestLoad_Theme_NullValue: bare `theme:` (null scalar) decodes to "".
+// Documented behavior — null is treated as unset, the next precedence
+// tier (env var or default) takes over downstream.
+func TestLoad_Theme_NullValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("theme:\n"), 0o644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Equal(t, "", cfg.Theme)
+}
+
+// TestLoad_Theme_ValidatorRejects: when ThemeValidator is set, an
+// unknown name surfaces as a *LoadError with SectionTheme.
+func TestLoad_Theme_ValidatorRejects(t *testing.T) {
+	prev := ThemeValidator
+	t.Cleanup(func() { ThemeValidator = prev })
+	ThemeValidator = func(name string) error {
+		if name != "ok" {
+			return fmt.Errorf("unknown theme %q", name)
+		}
+		return nil
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("theme: bogus\n"), 0o644))
+
+	_, err := LoadFrom(path)
+	require.Error(t, err)
+	var le *LoadError
+	require.ErrorAs(t, err, &le)
+	require.Equal(t, SectionTheme, le.Section)
+}
+
+// TestLoad_Theme_ValidatorAccepts: a valid name passes through.
+func TestLoad_Theme_ValidatorAccepts(t *testing.T) {
+	prev := ThemeValidator
+	t.Cleanup(func() { ThemeValidator = prev })
+	ThemeValidator = func(name string) error {
+		if name != "ok" {
+			return fmt.Errorf("unknown theme %q", name)
+		}
+		return nil
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("theme: ok\n"), 0o644))
+
+	cfg, err := LoadFrom(path)
+	require.NoError(t, err)
+	require.Equal(t, "ok", cfg.Theme)
 }

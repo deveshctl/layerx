@@ -37,6 +37,13 @@ type Config struct {
 	// documented top-level key without rejecting the whole config; semantics
 	// are wired up in M12.
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+
+	// Theme is the name of the curated TUI color theme. Resolved against
+	// the theme/ package's registry by the ThemeValidator hook at
+	// validate() time. Empty means "unset" — cmd/ falls back to env var,
+	// then "default". A null value (`theme:` with no scalar) decodes to
+	// "" and is treated the same as missing; this is documented behavior.
+	Theme string `yaml:"theme,omitempty"`
 }
 
 // rawConfig mirrors Config but captures rules and path-rules as raw AST nodes
@@ -47,6 +54,7 @@ type rawConfig struct {
 	Rules       ast.Node          `yaml:"rules,omitempty"`
 	PathRules   ast.Node          `yaml:"path-rules,omitempty"`
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+	Theme       string            `yaml:"theme,omitempty"`
 }
 
 // RulesConfig holds CI rule thresholds.
@@ -123,6 +131,7 @@ func LoadFrom(path string) (*Config, error) {
 		Rules:       rules,
 		PathRules:   specs,
 		Keybindings: raw.Keybindings,
+		Theme:       raw.Theme,
 	}
 
 	// Restore the documented "absent version: defaults to 1" contract
@@ -217,6 +226,12 @@ func hasYAMLContent(data []byte) bool {
 	return false
 }
 
+// ThemeValidator is set by cmd/ at init time so config.validate can
+// reject unknown theme names without config/ importing theme/. Left
+// nil during config/ unit tests that don't exercise the theme path —
+// in that case validation is a no-op and the value passes through.
+var ThemeValidator func(name string) error
+
 func (c *Config) validate() error {
 	if c.Version != 0 && c.Version != 1 {
 		return fmt.Errorf("version: only schema version 1 is supported; got %d", c.Version)
@@ -232,6 +247,11 @@ func (c *Config) validate() error {
 	if c.Rules.HighestWastedBytes < 0 {
 		return fmt.Errorf("rules.highest-wasted-bytes must be >= 0; got %d", c.Rules.HighestWastedBytes)
 	}
+	if c.Theme != "" && ThemeValidator != nil {
+		if err := ThemeValidator(c.Theme); err != nil {
+			return fmt.Errorf("theme: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -241,6 +261,8 @@ func validationSection(msg string) string {
 		return SectionVersion
 	case strings.HasPrefix(msg, "rules."):
 		return SectionRules
+	case strings.HasPrefix(msg, "theme:"):
+		return SectionTheme
 	default:
 		return ""
 	}
@@ -266,6 +288,8 @@ func inferParseSection(err error) string {
 		return SectionRules
 	case strings.Contains(msg, "version"):
 		return SectionVersion
+	case strings.Contains(msg, "theme"):
+		return SectionTheme
 	default:
 		return ""
 	}
