@@ -14,15 +14,13 @@ import (
 var (
 	flagJSON      string
 	flagNoCacheFl bool
-	flagRefresh   bool
 )
 
-// noCacheRequested returns true when the user passed --no-cache or its
-// hidden alias --refresh. The two flags have separate underlying vars so
-// command-line ordering can't reverse the bypass intent (e.g.
-// `--refresh --no-cache=false` would otherwise leave the bypass off).
+// noCacheRequested returns true when the user passed --no-cache on this
+// invocation. Wrapped in a helper so rootCmd, ciCmd, and compareCmd
+// share a single read site for the bypass intent.
 func noCacheRequested() bool {
-	return flagNoCacheFl || flagRefresh
+	return flagNoCacheFl
 }
 
 var rootCmd = &cobra.Command{
@@ -30,46 +28,25 @@ var rootCmd = &cobra.Command{
 	Short: "Inspect Docker image layers",
 	Long: `Inspect a container image's layers, filesystem changes, and wasted bytes.
 
-By default launches an interactive TUI for browsing layers, viewing file
-contents, and surfacing duplicated or removed files.
+Common usage:
+  layerx IMAGE              browse layers interactively in a TUI
+  layerx ci IMAGE           gate a build on efficiency thresholds
+  layerx compare A B        diff two images for regressions
 
-Inputs:
-  IMAGE_OR_ARCHIVE may be either a Docker image reference (e.g.
-  "nginx:latest" or "myregistry.io/team/app:1.2") or a path to a local
-  image archive produced by "docker save" or an OCI layout tarball. The
-  argument is auto-detected: an existing regular file is read directly
-  without contacting any container runtime; anything else is resolved via
-  the Docker daemon.
+IMAGE_OR_ARCHIVE accepts a Docker image reference (e.g. "nginx:latest") or
+a path to a local archive produced by "docker save" or an OCI layout
+tarball. The two are auto-detected: an existing regular file is read
+directly without contacting any runtime; anything else is resolved via
+the Docker daemon. Archive mode needs no daemon, no network, and no
+running containers.
 
-  Archive mode requires no Docker daemon, no network, and no running
-  containers — useful in CI runners and air-gapped environments where the
-  image is already on disk.
+Use --json to skip the TUI and export to a file. Set CI=true to make the
+bare form behave as "layerx ci" with config-file (or default) thresholds.
 
-Use --json to skip the TUI and export the analysis, or run "layerx ci" for
-non-interactive efficiency checks. Both work with image refs and archive
-paths.
-
-Cache:
-  Analysis results are cached on disk so repeat runs against an unchanged
-  image are near-instant. Use --no-cache to bypass the cache for a single
-  run; the run still refreshes the cache on success. Use "layerx cache
-  list" to inspect cached entries and "layerx cache prune" to evict them.
-
-Environment:
-  CI=true   When set, "layerx IMAGE_OR_ARCHIVE" runs the ci subcommand with
-            default (or config-file) thresholds instead of launching the
-            TUI. Useful for pipelines that invoke layerx without a
-            subcommand. To override thresholds on the command line, invoke
-            the ci subcommand directly:
-            "layerx ci --lowest-efficiency 0.95 IMG".
-
-Engines:
-  By default layerx auto-detects the container runtime: DOCKER_HOST is
-  honoured if set; otherwise it tries the platform-default Docker socket,
-  then on Linux falls back to the Podman rootless socket. Pass --engine
-  docker or --engine podman to disable auto-detection. On macOS/Windows
-  with --engine podman, set DOCKER_HOST to the Podman Machine connection
-  URI from "podman system connection list".`,
+Cache: results are cached per image digest. Use --no-cache to bypass for
+a single run; "layerx cache list" inspects entries and "layerx cache prune"
+evicts them (see "layerx cache --help" for full details).
+Engines: layerx auto-detects Docker or Podman; pass --engine to override.`,
 	Example: `  # Inspect an image interactively (Docker daemon required)
   layerx nginx:latest
 
@@ -103,10 +80,8 @@ Engines:
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
-	rootCmd.PersistentFlags().BoolVar(&flagRefresh, "refresh", false, "alias for --no-cache")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto"`)
-	_ = rootCmd.PersistentFlags().MarkHidden("refresh")
 }
 
 type engineValue struct{ v *string }

@@ -134,11 +134,9 @@ func resetPersistentFlags(t *testing.T) {
 	t.Helper()
 	prevJSON := flagJSON
 	prevNoCache := flagNoCacheFl
-	prevRefresh := flagRefresh
 	t.Cleanup(func() {
 		flagJSON = prevJSON
 		flagNoCacheFl = prevNoCache
-		flagRefresh = prevRefresh
 	})
 }
 

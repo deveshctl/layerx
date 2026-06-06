@@ -64,6 +64,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - New "Container Engines" section in README covering Docker, Podman
   (Linux auto, macOS/Windows manual), and archive mode.
+- `layerx --help` reorganised: top-level Long is now ~20 lines (was ~40)
+  with a "Common usage" synopsis listing the three primary commands
+  (`layerx IMAGE`, `layerx ci IMAGE`, `layerx compare A B`) so the bare
+  form's role is obvious. Engines prose collapsed to a one-line pointer
+  at `--engine`; cache prose kept the explicit `cache list` / `cache prune`
+  surfacing from #f742493 in a tighter form.
+- `layerx ci --help`: example `.layerx.yaml` block now has a
+  `Example .layerx.yaml:` header so it isn't misread as flag prose.
+  Threshold flags (`--lowest-efficiency`, `--highest-wasted-bytes`,
+  `--highest-user-wasted-percent`) now render as
+  `(default: from config (built-in 0.9))` etc. instead of the misleading
+  `(default -1)` sentinel.
+- `layerx compare --help`: added an example for `--no-cache` to surface
+  the inherited persistent flag.
+- `layerx ci --help` and `layerx compare --help` now end with a one-line
+  pointer to `layerx --help` for `--engine`, `--json`, and `--no-cache`
+  details (the persistent flags inherited from root).
+
+### Removed
+- The hidden `--refresh` alias for `--no-cache`. `--no-cache` was the
+  documented form everywhere except the alias's own registration; the
+  hidden flag had no discoverability path. Pass `--no-cache` instead.
 
 ### Fixed
 - `TestCopyCtx_MidStreamCancel` was racy and failed intermittently on
