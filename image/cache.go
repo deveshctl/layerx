@@ -154,6 +154,12 @@ type PruneResult struct {
 // same shape. Production code never overwrites it.
 var nowFn = time.Now
 
+// removeAllFn lets prune tests inject RemoveAll failures deterministically.
+// chmod-based failure injection is unreliable across kernels and Go
+// versions because os.RemoveAll has grown logic to chmod-up unreadable
+// dirs and retry. Production code never overwrites it.
+var removeAllFn = os.RemoveAll
+
 // loadPruneLimits returns the active TTL and size cap, applying env-var
 // overrides on top of defaults. Unparseable or negative values fall back
 // to the default with a single PhaseCacheWarn so the user knows their
@@ -550,7 +556,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		if opts.DryRun {
 			return true
 		}
-		if rmErr := os.RemoveAll(p); rmErr != nil {
+		if rmErr := removeAllFn(p); rmErr != nil {
 			if !warned {
 				res.Warnings = append(res.Warnings,
 					fmt.Sprintf("cache prune partial: %v", rmErr))

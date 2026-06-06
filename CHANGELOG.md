@@ -14,9 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evicts entries older than the cutoff; `prune --all` empties the cache;
   bare `prune` is a dry run that lists what would be removed without
   touching disk. `--dry-run` previews any of the above. `--older-than`
-  and `--all` are mutually exclusive. `LAYERX_CACHE_DIR`,
-  `LAYERX_CACHE_TTL_DAYS`, and `LAYERX_CACHE_MAX_BYTES` are discoverable
-  from `layerx cache --help`. (I-04)
+  and `--all` are mutually exclusive. Cache directory and override env
+  vars (`LAYERX_CACHE_DIR`, `LAYERX_CACHE_TTL_DAYS`,
+  `LAYERX_CACHE_MAX_BYTES`) are documented in `layerx cache --help`. (I-04)
 - Analysis cache now self-prunes by age (default 30 days) and total size
   (default 1 GiB). Configurable via `LAYERX_CACHE_TTL_DAYS` and
   `LAYERX_CACHE_MAX_BYTES`; set either to `0` to disable that limit.

@@ -158,11 +158,12 @@ func TestCachePrune_FlagsMutuallyExclusive(t *testing.T) {
 	// Reset flags between cobra tests; package-level flag vars are global.
 	resetCacheFlags(t)
 
-	cacheCmd.SetArgs([]string{"prune", "--older-than", "7d", "--all"})
+	rootCmd.SetArgs([]string{"cache", "prune", "--older-than", "7d", "--all"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
 	var buf bytes.Buffer
-	cacheCmd.SetOut(&buf)
-	cacheCmd.SetErr(&buf)
-	err := cacheCmd.Execute()
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	err := rootCmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
@@ -179,11 +180,12 @@ func TestCacheList_EndToEnd(t *testing.T) {
 	seedFakeCache(t, root, strings.Repeat("a", 64), 1024, time.Now().Add(-1*time.Hour))
 	seedFakeCache(t, root, strings.Repeat("b", 64), 2048, time.Now().Add(-2*time.Hour))
 
-	cacheCmd.SetArgs([]string{"list"})
+	rootCmd.SetArgs([]string{"cache", "list"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
 	var buf bytes.Buffer
-	cacheCmd.SetOut(&buf)
-	cacheCmd.SetErr(&buf)
-	err := cacheCmd.Execute()
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	err := rootCmd.Execute()
 	require.NoError(t, err)
 	out := buf.String()
 	assert.Contains(t, out, "Cache directory: "+root)
@@ -201,11 +203,12 @@ func TestCachePrune_AllDryRun_DoesNotTouchDisk(t *testing.T) {
 	seedFakeCache(t, root, digestA, 1024, time.Now().Add(-1*time.Hour))
 	seedFakeCache(t, root, digestB, 2048, time.Now().Add(-2*time.Hour))
 
-	cacheCmd.SetArgs([]string{"prune"}) // bare prune = dry run
+	rootCmd.SetArgs([]string{"cache", "prune"}) // bare prune = dry run
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
 	var buf bytes.Buffer
-	cacheCmd.SetOut(&buf)
-	cacheCmd.SetErr(&buf)
-	err := cacheCmd.Execute()
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	err := rootCmd.Execute()
 	require.NoError(t, err)
 	out := buf.String()
 	assert.Contains(t, out, "Would remove")

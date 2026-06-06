@@ -2,6 +2,7 @@ package image
 
 import (
 	"encoding/gob"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -797,7 +798,11 @@ func TestListCache_HappyPath(t *testing.T) {
 	assert.Equal(t, b, entries[1].Digest)
 	assert.Equal(t, c, entries[2].Digest)
 	assert.Equal(t, int64(1024), entries[0].Size)
-	assert.Equal(t, now.Add(-3*time.Hour), entries[0].CachedAt)
+	// time.Time.Equal compares instants; Equal-via-DeepEqual would
+	// fail on Linux where os.Stat returns Local-zoned mtime even
+	// though writeFakeCache passes a UTC value.
+	assert.True(t, now.Add(-3*time.Hour).Equal(entries[0].CachedAt),
+		"CachedAt mismatch: want %v got %v", now.Add(-3*time.Hour), entries[0].CachedAt)
 }
 
 func TestListCache_SkipsForeignAndIncomplete(t *testing.T) {
@@ -911,12 +916,6 @@ func TestPruneCache_DryRun_LeavesDiskUntouched(t *testing.T) {
 }
 
 func TestPruneCache_PartialFailure_WarnsOnce(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod 0o000 on parent dir does not block RemoveAll on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("running as root; chmod 0o000 does not block RemoveAll")
-	}
 	root := t.TempDir()
 	now := withFrozenNow(t)
 
@@ -927,19 +926,26 @@ func TestPruneCache_PartialFailure_WarnsOnce(t *testing.T) {
 	writeFakeCache(t, root, ok1, 100, now.Add(-31*24*time.Hour))
 	writeFakeCache(t, root, ok2, 100, now.Add(-31*24*time.Hour))
 
-	// Make `stuck`'s directory unremovable by stripping perms on its
-	// parent (the test root). RemoveAll on the child still recurses
-	// into it but cannot unlink the dir entry from a 0o500 parent.
-	stuckDir := filepath.Join(root, stuck)
-	require.NoError(t, os.Chmod(stuckDir, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(stuckDir, 0o700) })
+	// chmod-based failure injection is unreliable: os.RemoveAll has
+	// logic to chmod-up unreadable dirs and retry, and the behaviour
+	// drifts across kernels and Go versions. Use the removeAllFn seam
+	// instead — fail RemoveAll only for the `stuck` digest.
+	stuckPath := filepath.Join(root, stuck)
+	prev := removeAllFn
+	removeAllFn = func(p string) error {
+		if p == stuckPath {
+			return errors.New("synthetic remove failure")
+		}
+		return prev(p)
+	}
+	t.Cleanup(func() { removeAllFn = prev })
 
 	res, err := PruneCache(root, PruneOptions{
 		TTL: 30 * 24 * time.Hour, Now: nowFn,
 	})
 	require.NoError(t, err)
 
-	// Exactly one warning despite (potentially) one failure.
+	// Exactly one warning despite the failure (one-shot warn contract).
 	require.Len(t, res.Warnings, 1)
 	assert.Contains(t, res.Warnings[0], "cache prune partial:")
 
