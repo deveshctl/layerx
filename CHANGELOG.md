@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.4.0] - 2026-06-06
+
+Podman support and explicit cache management.
+
 ### Added
 - `layerx cache list` now shows an IMAGE column with the original image
   reference each entry was written with (e.g. `nginx:latest`,

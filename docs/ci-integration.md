@@ -103,16 +103,16 @@ cache APT downloads, pin a version and cache the unpacked binary directly:
         uses: actions/cache@v4
         with:
           path: /usr/local/bin/layerx
-          key: layerx-${{ runner.os }}-v1.3.0
+          key: layerx-${{ runner.os }}-v1.4.0
 
       - name: Install layerx
         if: steps.cache-layerx.outputs.cache-hit != 'true'
         run: |
-          curl -LO https://github.com/deveshctl/layerx/releases/download/v1.3.0/layerx_linux_amd64.deb
+          curl -LO https://github.com/deveshctl/layerx/releases/download/v1.4.0/layerx_linux_amd64.deb
           sudo dpkg -i layerx_linux_amd64.deb
 ```
 
-Pin to a specific version (`v1.3.0` here) so a tagged release upgrade is a
+Pin to a specific version (`v1.4.0` here) so a tagged release upgrade is a
 deliberate change, not an accidental green-to-red regression.
 
 ---
@@ -127,7 +127,7 @@ stages:
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
-  LAYERX_VERSION: "v1.3.0"
+  LAYERX_VERSION: "v1.4.0"
 
 build:
   stage: build
@@ -162,6 +162,32 @@ Two notes specific to GitLab:
   `.deb` package.)
 - Pinning `LAYERX_VERSION` keeps the gate deterministic. Bump it
   intentionally.
+
+---
+
+## Podman runners
+
+`layerx ci` talks to any daemon that implements the Docker Engine REST
+API. On Podman-native runners (common on RHEL/Fedora GitLab runners and
+some self-hosted GitHub Actions hosts), there are two equivalent paths:
+
+```bash
+# 1. Talk to the Podman socket directly. --engine auto picks Podman when no
+#    Docker socket is present, so the explicit flag is optional but makes
+#    the intent obvious in a CI script.
+systemctl --user enable --now podman.socket
+layerx ci --engine podman myapp:${CI_COMMIT_SHORT_SHA}
+
+# 2. Or skip the socket and hand layerx a saved archive. Works identically
+#    to the `docker save` flow shown above.
+podman save -o image.tar "$IMAGE"
+layerx ci ./image.tar
+```
+
+Path 2 is the simplest gate for a containerised CI job — no socket
+mounts, no daemon at evaluation time. Path 1 is useful when the runner
+already has a long-lived Podman service and you want to skip the
+`podman save` step.
 
 ---
 
@@ -244,7 +270,7 @@ silently let bad images through if you only watch for `1`.
 ## Tips
 
 - **Pin the version.** `releases/latest/download` is convenient for
-  exploration; pin a tag (`v1.3.0` or whatever your latest release is)
+  exploration; pin a tag (`v1.4.0` or whatever your latest release is)
   before you put it on a protected branch. Tooling that gates merges
   should never auto-upgrade.
 - **Cache the binary.** A few hundred KB to download, but every PR pays
@@ -271,3 +297,10 @@ silently let bad images through if you only watch for `1`.
   `layerx ci` form makes the intent obvious in the workflow file and
   lets you pass overrides. Reserve `CI=true` for ad-hoc local runs that
   mimic CI.
+- **Cache the analysis on long-lived runners.** Self-hosted runners that
+  re-scan the same image digest benefit from the analysis cache — point
+  `LAYERX_CACHE_DIR` at a path the runner persists across jobs to skip
+  the tar parse on a repeat run. On runners that build up cache over
+  time, prune it occasionally with `layerx cache prune --older-than 7d`
+  (the cache also self-prunes by `LAYERX_CACHE_TTL_DAYS` and
+  `LAYERX_CACHE_MAX_BYTES`). Ephemeral runners can ignore this.
