@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -38,6 +39,15 @@ func friendlyCLIError(err error) string {
 	}
 	if e, ok := errors.AsType[*image.ErrArchiveInfra](err); ok {
 		return fmt.Sprintf("could not %s: %v (free up disk space or set TMPDIR)", e.Op, e.Cause)
+	}
+	if e, ok := errors.AsType[*image.ErrPodmanSocketNotSet](err); ok {
+		return fmt.Sprintf("--engine podman on %s requires DOCKER_HOST to be set "+
+			"(see `podman system connection list`)", e.Platform)
+	}
+	if e, ok := errors.AsType[*image.ErrNoEngineFound](err); ok {
+		return fmt.Sprintf("no container engine found; tried: %s "+
+			"(start Docker or Podman, or set DOCKER_HOST)",
+			strings.Join(e.Tried, ", "))
 	}
 	return err.Error()
 }

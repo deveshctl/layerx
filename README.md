@@ -211,6 +211,51 @@ source <(layerx completion bash)
 
 ---
 
+## Container Engines
+
+layerx talks to any daemon that implements the Docker Engine REST API. Docker
+and Podman are both supported.
+
+### Docker (default)
+
+No setup required — layerx uses your `DOCKER_HOST` if set, or the platform
+default socket (`/var/run/docker.sock` on Linux, `~/.docker/run/docker.sock`
+on macOS, `\\.\pipe\docker_engine` on Windows).
+
+### Podman
+
+**Linux:** start the Podman socket and layerx auto-detects it:
+
+```bash
+systemctl --user enable --now podman.socket
+layerx --engine podman alpine:3
+```
+
+If Podman is your only engine, `--engine auto` (the default) will fall back
+to the Podman socket when no Docker socket is found, so the flag is
+optional.
+
+**macOS / Windows:** Podman Machine forwards the socket via SSH or a named
+pipe; the path varies per connection. Set `DOCKER_HOST` from your active
+connection:
+
+```bash
+DOCKER_HOST=$(podman system connection list --format '{{.URI}}' | head -n 1) \
+  layerx --engine podman alpine:3
+```
+
+### Archive mode (no daemon)
+
+You can skip the daemon entirely by passing a `docker save` or `podman save`
+tar archive directly:
+
+```bash
+podman save -o alpine.tar alpine:3
+layerx ./alpine.tar
+```
+
+---
+
 ## CI mode
 
 ### GitHub Actions
