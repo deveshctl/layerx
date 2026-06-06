@@ -294,6 +294,27 @@ or copy-paste.
 
 Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` (alias `--refresh`) bypasses the cache for a single run; the run still refreshes the cache on success. The cache directory self-prunes by age and total size at the end of every successful write; failures are best-effort and surface as `cache prune ...` warnings on stderr.
 
+### Cache management
+
+Inspect and explicitly evict cache entries with the `layerx cache`
+subcommands:
+
+```bash
+# Show what's in the cache (digest, size, cached-at).
+layerx cache list
+
+# Preview eviction without touching disk (bare prune is a dry run).
+layerx cache prune
+
+# Evict entries older than 7 days.
+layerx cache prune --older-than 7d
+
+# Empty the cache.
+layerx cache prune --all
+```
+
+`--older-than` accepts an integer plus a unit suffix (`s`, `m`, `h`, `d`, `w`); examples include `90m`, `12h`, `30d`, `2w`. `mo` and `y` are not accepted. `layerx cache --help` shows the resolved cache directory and references the `LAYERX_CACHE_TTL_DAYS` and `LAYERX_CACHE_MAX_BYTES` overrides documented above.
+
 ---
 
 ## Troubleshooting
