@@ -59,6 +59,33 @@ func TestFriendlyCLIError_ArchiveInfra(t *testing.T) {
 	assert.Contains(t, msg, "no space left on device")
 }
 
+func TestFriendlyCLIError_PodmanSocketNotSet_Darwin(t *testing.T) {
+	err := &image.ErrPodmanSocketNotSet{Platform: "darwin"}
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "--engine podman on darwin")
+	assert.Contains(t, msg, "DOCKER_HOST")
+	assert.Contains(t, msg, "podman system connection list")
+}
+
+func TestFriendlyCLIError_PodmanSocketNotSet_Windows(t *testing.T) {
+	err := &image.ErrPodmanSocketNotSet{Platform: "windows"}
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "--engine podman on windows")
+	assert.Contains(t, msg, "DOCKER_HOST")
+}
+
+func TestFriendlyCLIError_NoEngineFound(t *testing.T) {
+	err := &image.ErrNoEngineFound{Tried: []string{
+		"/var/run/docker.sock",
+		"/run/user/1000/podman/podman.sock",
+	}}
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "no container engine found")
+	assert.Contains(t, msg, "/var/run/docker.sock")
+	assert.Contains(t, msg, "/run/user/1000/podman/podman.sock")
+	assert.Contains(t, msg, "set DOCKER_HOST")
+}
+
 func TestFriendlyCLIError_FallsBackToErrorString(t *testing.T) {
 	err := errors.New("totally unexpected failure")
 	assert.Equal(t, "totally unexpected failure", friendlyCLIError(err))

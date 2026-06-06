@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `--engine docker|podman|auto` flag selects which container engine to talk
+  to. `auto` (the default) uses `DOCKER_HOST` if set, otherwise tries the
+  Docker socket then falls back to the Podman rootless socket on Linux.
+- New typed errors `ErrPodmanSocketNotSet` and `ErrNoEngineFound` for the
+  `--engine podman` and `--engine auto` failure paths.
 - `layerx cache list` and `layerx cache prune` subcommands. `list` prints
   every cached digest with its size on disk and cached-at time, plus a
   totals footer. `prune --older-than DURATION` (e.g. `7d`, `12h`, `2w`)
@@ -30,11 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (unexported; no API change). (I-03)
 
 ### Changed
+- `isDaemonUnreachable` now classifies low-level connection errors
+  (`no such file or directory`, `connection refused`, `connect: permission
+  denied`, `file does not exist`) as daemon-unreachable. Previously these
+  passed through as raw transport errors regardless of engine.
 - `cmd.selectResolver` is now a swappable package-level var (test-only
   seam; production behaviour unchanged). Unblocks two previously
   skipped cancellation tests (TestRunCICheckInner_ContextCancelled,
   TestRunJSONExport_ContextCancelled) and adds happy-path coverage
   for `runInspect`'s CI=true and --json routes. (I-02)
+
+### Documentation
+- New "Container Engines" section in README covering Docker, Podman
+  (Linux auto, macOS/Windows manual), and archive mode.
 
 ### Fixed
 - `TestCopyCtx_MidStreamCancel` was racy and failed intermittently on

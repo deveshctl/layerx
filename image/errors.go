@@ -1,6 +1,9 @@
 package image
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type ErrDaemonNotRunning struct {
 	Cause error
@@ -92,3 +95,22 @@ func (e *ErrArchiveInfra) Error() string {
 }
 
 func (e *ErrArchiveInfra) Unwrap() error { return e.Cause }
+
+type ErrPodmanSocketNotSet struct {
+	Platform string
+}
+
+func (e *ErrPodmanSocketNotSet) Error() string {
+	return fmt.Sprintf("--engine podman on %s requires DOCKER_HOST to be set; "+
+		"run `podman system connection list` to find your socket path",
+		e.Platform)
+}
+
+type ErrNoEngineFound struct {
+	Tried []string
+}
+
+func (e *ErrNoEngineFound) Error() string {
+	return fmt.Sprintf("no container engine found; tried: %s",
+		strings.Join(e.Tried, ", "))
+}

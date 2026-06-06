@@ -30,3 +30,44 @@ jobs:
         with:
           go-version: '1.26'
       - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o /dev/null ./...
+
+  test-podman:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+      - name: Resolve runner UID
+        id: uid
+        run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
+      - name: Start Podman socket service
+        run: |
+          if systemctl --user enable --now podman.socket 2>/dev/null; then
+            echo "Podman socket started via systemd"
+          else
+            podman system service --time=0 \
+              "unix:///run/user/${{ steps.uid.outputs.uid }}/podman/podman.sock" &
+            for i in 1 2 3 4 5; do
+              if [ -S "/run/user/${{ steps.uid.outputs.uid }}/podman/podman.sock" ]; then
+                break
+              fi
+              sleep 1
+            done
+          fi
+          test -S "/run/user/${{ steps.uid.outputs.uid }}/podman/podman.sock"
+      - name: Run image/ and cmd/ tests against Podman
+        env:
+          DOCKER_HOST: unix:///run/user/${{ steps.uid.outputs.uid }}/podman/podman.sock
+        run: go test -v -count=1 ./image/... ./cmd/...
+      - name: Smoke test - archive mode against podman save
+        run: |
+          podman pull alpine:3
+          podman save -o /tmp/alpine.tar alpine:3
+          go run . --json /tmp/inspect.json /tmp/alpine.tar
+          test -s /tmp/inspect.json
+          grep -q '"layers"' /tmp/inspect.json
