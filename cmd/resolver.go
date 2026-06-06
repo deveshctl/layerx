@@ -7,7 +7,10 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
-// selectResolver picks the right Resolver implementation based on imageRef.
+// selectResolver is a package-level var so tests can swap in a fake.
+var selectResolver = selectResolverDefault
+
+// selectResolverDefault picks the right Resolver implementation based on imageRef.
 //
 // If imageRef is the path of a regular file (after symlink resolution),
 // returns an ArchiveResolver that reads the file directly — no Docker daemon
@@ -18,7 +21,7 @@ import (
 // path. A user-supplied ref that happens to be both a valid Docker tag and an
 // existing file is resolved as the file (auto-detect prefers the local
 // artifact, since the user typed an existing path).
-func selectResolver(imageRef string) (image.Resolver, error) {
+func selectResolverDefault(imageRef string) (image.Resolver, error) {
 	if isRegularFilePath(imageRef) {
 		return image.NewArchiveResolver(imageRef), nil
 	}

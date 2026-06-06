@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warnings. The signature gained a trailing `progress` parameter
   (unexported; no API change). (I-03)
 
+### Changed
+- `cmd.selectResolver` is now a swappable package-level var (test-only
+  seam; production behaviour unchanged). Unblocks two previously
+  skipped cancellation tests (TestRunCICheckInner_ContextCancelled,
+  TestRunJSONExport_ContextCancelled) and adds happy-path coverage
+  for `runInspect`'s CI=true and --json routes. (I-02)
+
 ### Fixed
 - `TestCopyCtx_MidStreamCancel` was racy and failed intermittently on
   `main` once #39 and #40 landed together: the test's blocking reader
