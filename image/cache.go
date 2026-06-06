@@ -103,6 +103,52 @@ const (
 	maxCacheTTLDays = 100000
 )
 
+// CacheEntry is one record from the cache root, or one removal result.
+// Digest is the raw directory name (no "sha256:" prefix), matching how
+// it is stored on disk and accepted by the existing cache helpers.
+type CacheEntry struct {
+	Digest   string
+	Size     int64     // bytes — size of the layers.gob file on disk
+	CachedAt time.Time // mtime of layers.gob; honestly named (not "LastUsed")
+}
+
+// PruneOptions controls what PruneCache evicts. Zero value is a no-op.
+//
+//	TTL > 0       remove entries whose CachedAt is older than now-TTL
+//	MaxBytes > 0  after the TTL pass, evict oldest entries until the
+//	              surviving total is at or below MaxBytes
+//	All == true   ignore TTL/MaxBytes; remove every entry under root
+//	DryRun        walk and decide, but never call os.RemoveAll
+//	Keep          digest never to evict, regardless of other options.
+//	              Used by saveCache to protect the just-written entry,
+//	              even when its own size exceeds MaxBytes. The user-
+//	              driven `cache prune --all` always passes Keep="", so
+//	              it genuinely empties the cache.
+//	Now           injectable clock for tests; nil → time.Now
+type PruneOptions struct {
+	TTL      time.Duration
+	MaxBytes int64
+	All      bool
+	DryRun   bool
+	Keep     string
+	Now      func() time.Time
+}
+
+// PruneResult is the return value of PruneCache.
+//
+//	Removed   entries that were (or, in DryRun, would be) evicted, in
+//	          the order they were processed: TTL victims first (by
+//	          scan order), then size-cap victims oldest-first.
+//	Kept      entries that survived this prune, in scan order.
+//	Warnings  user-facing strings about partial failures (RemoveAll
+//	          errors, single-entry-exceeds-cap). cmd/ chooses how to
+//	          render; image/ does not print.
+type PruneResult struct {
+	Removed  []CacheEntry
+	Kept     []CacheEntry
+	Warnings []string
+}
+
 // nowFn lets prune tests freeze time without plumbing a clock interface
 // through every helper. Stdlib precedent: net/http/cookiejar uses the
 // same shape. Production code never overwrites it.
@@ -168,100 +214,15 @@ func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
 	if ttl == 0 && maxBytes == 0 {
 		return
 	}
-
-	dirs, err := os.ReadDir(root)
+	res, err := PruneCache(root, PruneOptions{
+		TTL: ttl, MaxBytes: maxBytes, Keep: keepDigest, Now: nowFn,
+	})
 	if err != nil {
 		emitCacheWarn(progress, fmt.Sprintf("cache prune skipped: %v", err))
 		return
 	}
-
-	now := nowFn()
-	records := make([]pruneEntry, 0, len(dirs))
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		if _, err := normalizeDigest(d.Name()); err != nil {
-			continue
-		}
-		gobPath := filepath.Join(root, d.Name(), "layers.gob")
-		info, statErr := os.Stat(gobPath)
-		if statErr != nil {
-			// Silent skip: the dir may be mid-write by another layerx
-			// process, or an orphan from a SIGKILL. A fresh save will
-			// repopulate or a future prune call will catch it.
-			continue
-		}
-		records = append(records, pruneEntry{
-			name:  d.Name(),
-			path:  filepath.Join(root, d.Name()),
-			mtime: info.ModTime(),
-			size:  info.Size(),
-		})
-	}
-
-	warned := false
-	tryRemove := func(p string) bool {
-		if err := os.RemoveAll(p); err != nil {
-			if !warned {
-				// One-shot warn: a misconfigured cache dir with N broken
-				// evictees should not produce N stderr lines.
-				emitCacheWarn(progress, fmt.Sprintf("cache prune partial: %v", err))
-				warned = true
-			}
-			return false
-		}
-		return true
-	}
-
-	// TTL pass.
-	if ttl > 0 {
-		survivors := records[:0]
-		for _, r := range records {
-			if r.name != keepDigest && now.Sub(r.mtime) > ttl && tryRemove(r.path) {
-				continue
-			}
-			survivors = append(survivors, r)
-		}
-		records = survivors
-	}
-
-	// Size-cap pass.
-	if maxBytes > 0 {
-		var total int64
-		for _, r := range records {
-			total += r.size
-		}
-		if total > maxBytes {
-			// Sort survivors oldest-first so we evict in increasing
-			// freshness order. keepDigest is filtered when scanning.
-			sort.Slice(records, func(i, j int) bool {
-				return records[i].mtime.Before(records[j].mtime)
-			})
-			for _, r := range records {
-				if total <= maxBytes {
-					break
-				}
-				if r.name == keepDigest {
-					continue
-				}
-				// Only credit the bytes back to `total` when the eviction
-				// actually succeeded. A failed RemoveAll (e.g. Windows
-				// handle still open) leaves the bytes on disk; assuming
-				// otherwise would silently overshoot the cap.
-				if tryRemove(r.path) {
-					total -= r.size
-				}
-			}
-			if total > maxBytes {
-				// Reachable when keepDigest alone exceeds the cap, OR
-				// when one or more evictions failed and the survivors
-				// still total over the cap. We deliberately keep
-				// keepDigest: the user just paid for that resolve,
-				// evicting it would be perverse.
-				emitCacheWarn(progress, "cache size cap exceeded by single entry; kept")
-			}
-		}
+	for _, w := range res.Warnings {
+		emitCacheWarn(progress, w)
 	}
 }
 
@@ -488,4 +449,198 @@ func sweepOrphanTempFiles(dir string) {
 			_ = os.Remove(m)
 		}
 	}
+}
+
+// ListCache returns every valid digest dir under root with its size and
+// mtime. A missing root is not an error; it returns ([], nil, nil) — the
+// cache simply hasn't been populated yet. Foreign files at root, dirs
+// whose names fail digest validation, and dirs whose layers.gob is
+// missing are silently skipped (same rule as the auto-prune).
+//
+// Warnings are returned as plain strings so the caller (cmd/cache.go)
+// can render them. ListCache itself never writes to stderr.
+//
+// Entries are returned sorted oldest-first by mtime. Predictable order
+// keeps the renderer test-stable and matches PruneCache's eviction order.
+func ListCache(root string) ([]CacheEntry, []string, error) {
+	dirs, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []CacheEntry{}, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	out := make([]CacheEntry, 0, len(dirs))
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		if _, err := normalizeDigest(d.Name()); err != nil {
+			continue
+		}
+		gobPath := filepath.Join(root, d.Name(), "layers.gob")
+		info, statErr := os.Stat(gobPath)
+		if statErr != nil {
+			continue
+		}
+		out = append(out, CacheEntry{
+			Digest:   d.Name(),
+			Size:     info.Size(),
+			CachedAt: info.ModTime(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CachedAt.Before(out[j].CachedAt)
+	})
+	return out, nil, nil
+}
+
+// PruneCache applies opts and returns what it did. Best-effort: a
+// RemoveAll failure is recorded in Warnings and skipped, never returned
+// as the function's err. The function's err is reserved for "could not
+// even read the cache root" — every other failure is per-entry.
+//
+// The first RemoveAll failure within a single call is appended to
+// Warnings as `cache prune partial: <err>`; subsequent failures during
+// the same call are silently counted to preserve I-03's "fifty broken
+// evictees should not produce fifty stderr lines" contract.
+//
+// Concurrent prunes against the same root may both try to remove the
+// same entry; the second RemoveAll returns ErrNotExist which is treated
+// as success (Removed gets the entry, no warning).
+func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
+	now := time.Now
+	if opts.Now != nil {
+		now = opts.Now
+	}
+
+	dirs, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return PruneResult{}, nil
+		}
+		return PruneResult{}, err
+	}
+
+	records := make([]pruneEntry, 0, len(dirs))
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		if _, err := normalizeDigest(d.Name()); err != nil {
+			continue
+		}
+		gobPath := filepath.Join(root, d.Name(), "layers.gob")
+		info, statErr := os.Stat(gobPath)
+		if statErr != nil {
+			continue
+		}
+		records = append(records, pruneEntry{
+			name:  d.Name(),
+			path:  filepath.Join(root, d.Name()),
+			mtime: info.ModTime(),
+			size:  info.Size(),
+		})
+	}
+
+	var res PruneResult
+	warned := false
+	tryRemove := func(p string) bool {
+		if opts.DryRun {
+			return true
+		}
+		if rmErr := os.RemoveAll(p); rmErr != nil {
+			if !warned {
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("cache prune partial: %v", rmErr))
+				warned = true
+			}
+			return false
+		}
+		return true
+	}
+
+	toEntry := func(r pruneEntry) CacheEntry {
+		return CacheEntry{Digest: r.name, Size: r.size, CachedAt: r.mtime}
+	}
+
+	// All=true short-circuits TTL/MaxBytes: every record except Keep is
+	// evicted. Auto-prune never sets All; the user-driven `prune --all`
+	// passes All=true with Keep="".
+	if opts.All {
+		for _, r := range records {
+			if r.name == opts.Keep {
+				res.Kept = append(res.Kept, toEntry(r))
+				continue
+			}
+			if tryRemove(r.path) {
+				res.Removed = append(res.Removed, toEntry(r))
+			} else {
+				res.Kept = append(res.Kept, toEntry(r))
+			}
+		}
+		return res, nil
+	}
+
+	if opts.TTL <= 0 && opts.MaxBytes <= 0 {
+		for _, r := range records {
+			res.Kept = append(res.Kept, toEntry(r))
+		}
+		return res, nil
+	}
+
+	// TTL pass.
+	if opts.TTL > 0 {
+		survivors := records[:0]
+		t := now()
+		for _, r := range records {
+			if r.name != opts.Keep && t.Sub(r.mtime) > opts.TTL && tryRemove(r.path) {
+				res.Removed = append(res.Removed, toEntry(r))
+				continue
+			}
+			survivors = append(survivors, r)
+		}
+		records = survivors
+	}
+
+	// Size-cap pass.
+	if opts.MaxBytes > 0 {
+		var total int64
+		for _, r := range records {
+			total += r.size
+		}
+		if total > opts.MaxBytes {
+			sort.Slice(records, func(i, j int) bool {
+				return records[i].mtime.Before(records[j].mtime)
+			})
+			survivors := records[:0]
+			for _, r := range records {
+				if total <= opts.MaxBytes {
+					survivors = append(survivors, r)
+					continue
+				}
+				if r.name == opts.Keep {
+					survivors = append(survivors, r)
+					continue
+				}
+				if tryRemove(r.path) {
+					total -= r.size
+					res.Removed = append(res.Removed, toEntry(r))
+				} else {
+					survivors = append(survivors, r)
+				}
+			}
+			records = survivors
+			if total > opts.MaxBytes {
+				res.Warnings = append(res.Warnings,
+					"cache size cap exceeded by single entry; kept")
+			}
+		}
+	}
+
+	for _, r := range records {
+		res.Kept = append(res.Kept, toEntry(r))
+	}
+	return res, nil
 }

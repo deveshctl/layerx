@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `layerx cache list` and `layerx cache prune` subcommands. List cached
+  digests with size and timestamp; prune by `--older-than DURATION`
+  (e.g. `7d`, `12h`, `2w`) or `--all`. Bare `prune` is a dry run.
+  `LAYERX_CACHE_DIR` discoverable from `layerx cache --help`. (I-04)
 - Analysis cache now self-prunes by age (default 30 days) and total size
   (default 1 GiB). Configurable via `LAYERX_CACHE_TTL_DAYS` and
   `LAYERX_CACHE_MAX_BYTES`; set either to `0` to disable that limit.
