@@ -165,7 +165,8 @@ func TestCachePrune_FlagsMutuallyExclusive(t *testing.T) {
 	rootCmd.SetErr(&buf)
 	err := rootCmd.Execute()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mutually exclusive")
+	// cobra's MarkFlagsMutuallyExclusive emits this exact phrasing.
+	assert.Contains(t, err.Error(), "none of the others can be")
 }
 
 func TestCacheList_EndToEnd(t *testing.T) {
@@ -231,9 +232,11 @@ func freezeRelativeTime(t *testing.T) {
 	t.Cleanup(func() { nowFn = prev })
 }
 
-// resetCacheFlags clears the package-level prune flag vars between
-// cobra-based test invocations. cobra does not auto-reset flag state
-// across Execute() calls.
+// resetCacheFlags clears the package-level prune flag vars AND cobra's
+// internal `Changed` state on each prune flag between cobra-based test
+// invocations. Without the Changed reset, a prior test that passed
+// --older-than/--all leaves those flags marked as set, and subsequent
+// tests trip the mutual-exclusion check on a bare `cache prune`.
 func resetCacheFlags(t *testing.T) {
 	t.Helper()
 	prevOlder := flagCacheOlderThan
@@ -242,10 +245,20 @@ func resetCacheFlags(t *testing.T) {
 	flagCacheOlderThan = ""
 	flagCacheAll = false
 	flagCacheDryRun = false
+	for _, name := range []string{"older-than", "all", "dry-run"} {
+		if f := cachePruneCmd.Flags().Lookup(name); f != nil {
+			f.Changed = false
+		}
+	}
 	t.Cleanup(func() {
 		flagCacheOlderThan = prevOlder
 		flagCacheAll = prevAll
 		flagCacheDryRun = prevDry
+		for _, name := range []string{"older-than", "all", "dry-run"} {
+			if f := cachePruneCmd.Flags().Lookup(name); f != nil {
+				f.Changed = false
+			}
+		}
 	})
 }
 
