@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Internal: theme/ package with six bundled palettes (Catppuccin
+  Mocha/Latte/Frappé/Macchiato, Nord, ANSI-16 minimal). User-facing
+  surface lands in subsequent commits.
+
 ## [v1.4.0] - 2026-06-06
 
 Podman support and explicit cache management.
