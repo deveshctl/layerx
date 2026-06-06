@@ -60,7 +60,15 @@ Environment:
             TUI. Useful for pipelines that invoke layerx without a
             subcommand. To override thresholds on the command line, invoke
             the ci subcommand directly:
-            "layerx ci --lowest-efficiency 0.95 IMG".`,
+            "layerx ci --lowest-efficiency 0.95 IMG".
+
+Engines:
+  By default layerx auto-detects the container runtime: DOCKER_HOST is
+  honoured if set; otherwise it tries the platform-default Docker socket,
+  then on Linux falls back to the Podman rootless socket. Pass --engine
+  docker or --engine podman to disable auto-detection. On macOS/Windows
+  with --engine podman, set DOCKER_HOST to the Podman Machine connection
+  URI from "podman system connection list".`,
 	Example: `  # Inspect an image interactively (Docker daemon required)
   layerx nginx:latest
 
@@ -77,7 +85,10 @@ Environment:
   layerx --json out.json ./build/app.tar
 
   # Run efficiency checks (also triggered by CI=true)
-  layerx ci nginx:latest`,
+  layerx ci nginx:latest
+
+  # Use Podman instead of Docker (Linux: socket auto-detected)
+  layerx --engine podman alpine:3`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInspect,
 	// SilenceUsage is intentionally left at its zero value (false) here —
@@ -92,7 +103,30 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().BoolVar(&flagRefresh, "refresh", false, "alias for --no-cache")
+	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
+		`container engine to use: "docker", "podman", or "auto"`)
 	_ = rootCmd.PersistentFlags().MarkHidden("refresh")
+}
+
+type engineValue struct{ v *string }
+
+func (e *engineValue) String() string {
+	if e.v == nil {
+		return ""
+	}
+	return *e.v
+}
+
+func (e *engineValue) Type() string { return "string" }
+
+func (e *engineValue) Set(s string) error {
+	switch s {
+	case "docker", "podman", "auto":
+		*e.v = s
+		return nil
+	default:
+		return fmt.Errorf("invalid engine %q (expected docker, podman, or auto)", s)
+	}
 }
 
 func SetVersionInfo(v, c, d string) {

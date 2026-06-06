@@ -49,6 +49,21 @@ func NewDockerResolver(opts ...Option) (Resolver, error) {
 	return r, nil
 }
 
+func NewDockerResolverWithHost(host string, opts ...Option) (Resolver, error) {
+	r := &DockerResolver{}
+	for _, opt := range opts {
+		opt(r)
+	}
+	if r.cli == nil {
+		cli, err := client.New(client.FromEnv, client.WithHost(host))
+		if err != nil {
+			return nil, fmt.Errorf("cannot connect to Docker daemon at %s: %w", host, err)
+		}
+		r.cli = cli
+	}
+	return r, nil
+}
+
 // Inspect returns lightweight image metadata without exporting the full tar.
 // It does not pull the image — if the image is not local, it returns an error.
 func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMeta, error) {
@@ -543,6 +558,10 @@ func isDaemonUnreachable(err error) bool {
 		"cannot connect to the docker daemon",
 		"is the docker daemon running",
 		"docker daemon is not running",
+		"no such file or directory",
+		"connection refused",
+		"connect: permission denied",
+		"file does not exist",
 	} {
 		if strings.Contains(s, needle) {
 			return true
