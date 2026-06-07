@@ -145,8 +145,9 @@ func renderFileView(p viewerParams) string {
 	}
 
 	if p.content.Truncated {
-		notice := fmt.Sprintf("  File truncated at 1 MB (total: %s)", image.FormatBytes(p.content.Size))
+		notice := fmt.Sprintf("File truncated at 1 MB (total: %s)", image.FormatBytes(p.content.Size))
 		sb.WriteString("\n")
+		sb.WriteString(s.Pad(2))
 		sb.WriteString(s.Modified.Render(notice))
 	}
 
@@ -242,7 +243,7 @@ func renderViewerLine(s Styles, line string, lineIdx int, query string, matches 
 
 func renderViewerSearchBar(s Styles, query string, active bool, matchCount, cursor, maxWidth int) string {
 	prefix := s.Accent.Render("/ ")
-	selFg := lipgloss.NewStyle().Foreground(s.palette.SelectedFg)
+	selFg := lipgloss.NewStyle().Foreground(s.palette.SelectedFg).Background(s.palette.Base)
 	if active {
 		cursorChar := selFg.Render("█")
 		queryStr := selFg.Render(query)

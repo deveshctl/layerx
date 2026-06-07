@@ -8,6 +8,7 @@ import "charm.land/lipgloss/v2"
 // Hex values are reproduced directly rather than imported via
 // catppuccin/go to avoid pulling a module dependency for ~80 strings.
 // Token mapping (same across all four flavors):
+//   Base                               -> base (the editor background)
 //   Accent / FocusedBorder / StatusKey -> blue
 //   UnfocusedBorder                    -> surface1
 //   Added                              -> green
@@ -26,6 +27,8 @@ import "charm.land/lipgloss/v2"
 
 // mocha is the default theme. Catppuccin Mocha (dark).
 var mocha = Palette{
+	Base: lipgloss.Color("#1E1E2E"), // base
+
 	Accent:          lipgloss.Color("#89B4FA"), // blue
 	FocusedBorder:   lipgloss.Color("#89B4FA"),
 	UnfocusedBorder: lipgloss.Color("#45475A"), // surface1
@@ -60,6 +63,8 @@ var mocha = Palette{
 // latte is the Catppuccin light flavor. Same token mapping as mocha
 // against the Latte palette. Dark text on light surfaces.
 var latte = Palette{
+	Base: lipgloss.Color("#EFF1F5"), // base
+
 	Accent:          lipgloss.Color("#1E66F5"),
 	FocusedBorder:   lipgloss.Color("#1E66F5"),
 	UnfocusedBorder: lipgloss.Color("#BCC0CC"),
@@ -93,6 +98,8 @@ var latte = Palette{
 
 // frappe is the Catppuccin medium-dark flavor.
 var frappe = Palette{
+	Base: lipgloss.Color("#303446"), // base
+
 	Accent:          lipgloss.Color("#8CAAEE"),
 	FocusedBorder:   lipgloss.Color("#8CAAEE"),
 	UnfocusedBorder: lipgloss.Color("#414559"),
@@ -126,6 +133,8 @@ var frappe = Palette{
 
 // macchiato is the Catppuccin dark flavor (one step lighter than mocha).
 var macchiato = Palette{
+	Base: lipgloss.Color("#24273A"), // base
+
 	Accent:          lipgloss.Color("#8AADF4"),
 	FocusedBorder:   lipgloss.Color("#8AADF4"),
 	UnfocusedBorder: lipgloss.Color("#363A4F"),

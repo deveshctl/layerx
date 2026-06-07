@@ -118,28 +118,28 @@ func newHelpStyles(s Styles) helpStyles {
 
 const helpKeyWidth = 12
 
-func padHelpKey(key string) string {
+func padHelpKey(s Styles, key string) string {
 	w := lipgloss.Width(key)
 	if w >= helpKeyWidth {
 		return key
 	}
-	return key + strings.Repeat(" ", helpKeyWidth-w)
+	return key + s.Pad(helpKeyWidth-w)
 }
 
-func renderHelpSection(sec helpSection, st helpStyles) string {
+func renderHelpSection(sec helpSection, s Styles, st helpStyles) string {
 	var lines []string
 	lines = append(lines, " "+st.section.Render(sec.title))
 	for _, e := range sec.entries {
-		line := " " + st.key.Render(padHelpKey(e.key)) + st.desc.Render(e.desc)
+		line := " " + st.key.Render(padHelpKey(s, e.key)) + st.desc.Render(e.desc)
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func renderHelpSectionsVertical(sections []helpSection, st helpStyles) string {
+func renderHelpSectionsVertical(sections []helpSection, s Styles, st helpStyles) string {
 	var blocks []string
 	for i, sec := range sections {
-		blocks = append(blocks, renderHelpSection(sec, st))
+		blocks = append(blocks, renderHelpSection(sec, s, st))
 		if i < len(sections)-1 {
 			blocks = append(blocks, "")
 		}
@@ -147,8 +147,8 @@ func renderHelpSectionsVertical(sections []helpSection, st helpStyles) string {
 	return strings.Join(blocks, "\n")
 }
 
-func renderHelpColumn(sections []helpSection, st helpStyles) string {
-	return renderHelpSectionsVertical(sections, st)
+func renderHelpColumn(sections []helpSection, s Styles, st helpStyles) string {
+	return renderHelpSectionsVertical(sections, s, st)
 }
 
 func helpLayoutColumns(sections []helpSection) [][]helpSection {
@@ -194,7 +194,7 @@ func (m model) overlayHelp() string {
 		colBodies := make([]string, len(cols))
 		maxH := 0
 		for i, group := range cols {
-			colBodies[i] = renderHelpColumn(group, st)
+			colBodies[i] = renderHelpColumn(group, m.styles, st)
 			if h := lipgloss.Height(colBodies[i]); h > maxH {
 				maxH = h
 			}
@@ -202,13 +202,13 @@ func (m model) overlayHelp() string {
 		parts := make([]string, 0, len(colBodies)*2-1)
 		for i, cb := range colBodies {
 			if i > 0 {
-				parts = append(parts, strings.Repeat(" ", helpColumnGap))
+				parts = append(parts, m.styles.Pad(helpColumnGap))
 			}
 			parts = append(parts, padHelpColumn(cb, maxH))
 		}
 		body.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, parts...))
 	} else {
-		body.WriteString(renderHelpSectionsVertical(sections, st))
+		body.WriteString(renderHelpSectionsVertical(sections, m.styles, st))
 	}
 
 	body.WriteString("\n\n")

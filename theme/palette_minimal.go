@@ -18,7 +18,13 @@ import "charm.land/lipgloss/v2"
 //
 // The Palette field type is color.Color; lipgloss.ANSIColor satisfies
 // that interface, so no special-casing is needed in tui/.
+//
+// Base is intentionally lipgloss.NoColor{}: minimal defers panel
+// backgrounds to the terminal so the user's shell theme remains
+// unaltered. Every other theme paints its own panel base.
 var minimal = Palette{
+	Base: lipgloss.NoColor{},
+
 	Accent:          lipgloss.ANSIColor(4), // blue
 	FocusedBorder:   lipgloss.ANSIColor(4),
 	UnfocusedBorder: lipgloss.ANSIColor(8), // bright black (gray)

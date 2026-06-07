@@ -1184,16 +1184,23 @@ func (m model) viewLoading() tea.View {
 	}
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 
+	// Loading-box lines mix styled and unstyled text. Each leading pad
+	// is rendered through Base so the panel's themed background runs
+	// continuously from the left border to the styled glyph instead of
+	// showing as a strip of terminal-default cells.
+	pad2 := m.styles.Pad(2)
+	pad4 := m.styles.Pad(4)
+
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, "  "+m.styles.AccentBold.Render("◆ layerx"))
+	lines = append(lines, pad2+m.styles.AccentBold.Render("◆ layerx"))
 	lines = append(lines, "")
 
 	switch m.loadPhase {
 	case image.PhasePulling:
-		lines = append(lines, fmt.Sprintf("  %s Pulling %s …", frame, m.imageRef))
+		lines = append(lines, pad2+m.styles.LoadHint.Render(fmt.Sprintf("%s Pulling %s …", frame, m.imageRef)))
 		if m.pullTotal > 0 {
-			detail := fmt.Sprintf("    Layer %d/%d", m.pullLayers, m.pullTotal)
+			detail := pad4 + m.styles.LoadHint.Render(fmt.Sprintf("Layer %d/%d", m.pullLayers, m.pullTotal))
 			if m.pullBytesMax > 0 {
 				pct := min(int(m.pullBytes*100/m.pullBytesMax), 100)
 				bytesText := fmt.Sprintf("  %s / %s",
@@ -1213,9 +1220,9 @@ func (m model) viewLoading() tea.View {
 					filled := barWidth * pct / 100
 					bar := m.styles.BarFilled.Render(strings.Repeat("━", filled)) +
 						m.styles.BarEmpty.Render(strings.Repeat("─", barWidth-filled))
-					detail += fmt.Sprintf("  [%s]%s", bar, bytesText)
+					detail += m.styles.LoadHint.Render("  [") + bar + m.styles.LoadHint.Render("]"+bytesText)
 				} else {
-					detail += bytesText
+					detail += m.styles.LoadHint.Render(bytesText)
 				}
 			}
 			lines = append(lines, detail)
@@ -1225,28 +1232,28 @@ func (m model) viewLoading() tea.View {
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
-		lines = append(lines, "    Exporting layers…")
+		lines = append(lines, pad2+m.styles.LoadHint.Render(fmt.Sprintf("%s Loading %s%s …", frame, m.imageRef, sizeInfo)))
+		lines = append(lines, pad4+m.styles.LoadHint.Render("Exporting layers…"))
 	case image.PhaseParsing:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
-		lines = append(lines, "    Parsing layers…")
+		lines = append(lines, pad2+m.styles.LoadHint.Render(fmt.Sprintf("%s Loading %s%s …", frame, m.imageRef, sizeInfo)))
+		lines = append(lines, pad4+m.styles.LoadHint.Render("Parsing layers…"))
 	case image.PhaseCacheLoad:
-		lines = append(lines, fmt.Sprintf("  %s %s — loaded from cache", frame, m.imageRef))
+		lines = append(lines, pad2+m.styles.LoadHint.Render(fmt.Sprintf("%s %s — loaded from cache", frame, m.imageRef)))
 	default:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
+		lines = append(lines, pad2+m.styles.LoadHint.Render(fmt.Sprintf("%s Loading %s%s …", frame, m.imageRef, sizeInfo)))
 	}
 
 	lines = append(lines, "")
 	hintStyle := m.styles.LoadHint
-	lines = append(lines, "  "+hintStyle.Render("Press q or Esc to exit."))
+	lines = append(lines, pad2+hintStyle.Render("Press q or Esc to exit."))
 	lines = append(lines, "")
 
 	boxWidth := 52
@@ -1304,7 +1311,12 @@ func (m model) viewReady() tea.View {
 	left := renderLayers(m.styles, m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := renderFileTree(m.styles, treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
 
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+	// Single-cell vertical strip between the two panels — paint Base so it
+	// doesn't read as a stripe of terminal-default cells against themed
+	// panel borders.
+	gap := strings.Repeat(m.styles.Pad(1)+"\n", panelHeight+2)
+	gap = strings.TrimRight(gap, "\n")
+	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
 
 	if m.viewState != viewNone {
 		viewer := renderFileView(viewerParams{

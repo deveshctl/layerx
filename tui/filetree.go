@@ -34,14 +34,15 @@ func renderFileTree(s Styles, files []*image.FileNode, cursor, offset int, width
 		if filterQuery != "" {
 			msg = "(no matches)"
 		}
-		pad := ""
+		padN := 0
 		if contentWidth > len(msg) {
-			pad = strings.Repeat(" ", (contentWidth-len(msg))/2)
+			padN = (contentWidth - len(msg)) / 2
 		}
 		midpoint := contentHeight / 2
 		for i := 0; i < contentHeight; i++ {
 			if i == midpoint {
-				sb.WriteString(pad + s.Unchanged.Render(msg))
+				sb.WriteString(s.Pad(padN))
+				sb.WriteString(s.Unchanged.Render(msg))
 			}
 			if i < contentHeight-1 {
 				sb.WriteString("\n")
@@ -129,11 +130,12 @@ func renderTreeHeader(s Styles, maxWidth int) string {
 func renderFilterBar(s Styles, active bool, query string, matchCount int, maxWidth int) string {
 	if active {
 		prefix := s.Accent.Render("/ ")
-		cursor := query + "█"
-		return prefix + cursor
+		queryRendered := lipgloss.NewStyle().Foreground(s.palette.SelectedFg).Background(s.palette.Base).Render(query)
+		cursor := lipgloss.NewStyle().Foreground(s.palette.SelectedFg).Background(s.palette.Base).Render("█")
+		return prefix + queryRendered + cursor
 	}
 	prefix := s.Accent.Render("/ ")
-	queryStr := lipgloss.NewStyle().Foreground(s.palette.SelectedFg).Render(query)
+	queryStr := lipgloss.NewStyle().Foreground(s.palette.SelectedFg).Background(s.palette.Base).Render(query)
 	matches := s.StatusDim.Render(fmt.Sprintf("  (%d matches)", matchCount))
 	hint := s.Unchanged.Render("  [⌫ clear]")
 
@@ -264,11 +266,11 @@ func formatFileNodeLine(s Styles, f *image.FileNode, selected bool, maxWidth int
 		permStr := s.MetaDim.Render(padRight(perms, permCol))
 		uidStr := s.MetaDim.Render(padRight(uidGid, uidGidCol))
 		sizeStr := s.HeaderDim.Render(padLeft(size, sizeCol))
-		gap := strings.Repeat(" ", colGap)
+		gap := s.Pad(colGap)
 		metaCols = permStr + gap + uidStr + gap + sizeStr + gap
 	} else if showSize {
 		sizeStr := s.HeaderDim.Render(padLeft(size, sizeCol))
-		metaCols = sizeStr + strings.Repeat(" ", colGap)
+		metaCols = sizeStr + s.Pad(colGap)
 	}
 
 	var nameRendered string
@@ -297,7 +299,7 @@ func formatFileNodeLine(s Styles, f *image.FileNode, selected bool, maxWidth int
 	diffGlyphWidth := lipgloss.Width(diffGlyph)
 	actualNamePad := max(nameSpace-nameRenderedWidth+diffGlyphWidth-2, 0)
 
-	fullLine := diffGlyph + metaCols + nameRendered + originRendered + strings.Repeat(" ", actualNamePad)
+	fullLine := diffGlyph + metaCols + nameRendered + originRendered + s.Pad(actualNamePad)
 
 	return fullLine
 }
@@ -428,7 +430,7 @@ func diffColorForNode(p theme.Palette, f *image.FileNode) color.Color {
 }
 
 func renderNameWithHighlight(s Styles, name, query string, fg color.Color) string {
-	normal := lipgloss.NewStyle().Foreground(fg)
+	normal := lipgloss.NewStyle().Foreground(fg).Background(s.palette.Base)
 	if query == "" || name == "" {
 		return normal.Render(name)
 	}

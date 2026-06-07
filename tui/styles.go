@@ -96,6 +96,15 @@ type Styles struct {
 	// (per-line search highlight foreground, diff-color selection in
 	// filetree). Render code uses palette directly only in those cases.
 	palette theme.Palette
+
+	// Base is the panel-content background. Painted under every panel
+	// rectangle (borders, body lines, filler pads, blank rows) so a
+	// theme's foreground colors meet the background it was designed
+	// for, regardless of the user's terminal default. Themes that opt
+	// out of this (minimal) set Palette.Base to lipgloss.NoColor{}, in
+	// which case lipgloss emits no background SGR and the terminal
+	// default shows through.
+	Base lipgloss.Style
 }
 
 // Palette returns the underlying theme palette this Styles was built
@@ -103,24 +112,42 @@ type Styles struct {
 // highlight foregrounds, diff coloring per file).
 func (s Styles) Palette() theme.Palette { return s.palette }
 
+// Pad returns n spaces painted with the panel Base background. Use
+// this for column gaps and trailing pads inside a panel body — the
+// SGR reset at the end of a styled segment clears the background, so
+// a literal " " between two styled segments would otherwise show as
+// terminal-default cells. n <= 0 returns "".
+func (s Styles) Pad(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return s.Base.Render(strings.Repeat(" ", n))
+}
+
 // BuildStyles constructs every Style from p once, at model creation
 // time. ~40 lipgloss.Style values cost less to allocate once at
 // startup than reconstructing them per Render call.
+//
+// fgOnBase pairs a foreground with the panel base background so any
+// styled text rendered inside a panel paints its own background and
+// the panel rectangle reads as a single solid color. Styles that
+// already set their own background (status bar, selection, search
+// highlight) skip this — their explicit bg is the intent.
 func BuildStyles(p theme.Palette) Styles {
-	fg := func(c color.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(c)
+	fgOnBase := func(c color.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(c).Background(p.Base)
 	}
 	on := func(fgc, bgc color.Color) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(fgc).Background(bgc)
 	}
 	return Styles{
-		FocusedBorder:   fg(p.FocusedBorder),
-		UnfocusedBorder: fg(p.UnfocusedBorder),
+		FocusedBorder:   fgOnBase(p.FocusedBorder),
+		UnfocusedBorder: fgOnBase(p.UnfocusedBorder),
 
-		Added:     fg(p.Added),
-		Modified:  fg(p.Modified),
-		Removed:   fg(p.Removed),
-		Unchanged: fg(p.Unchanged),
+		Added:     fgOnBase(p.Added),
+		Modified:  fgOnBase(p.Modified),
+		Removed:   fgOnBase(p.Removed),
+		Unchanged: fgOnBase(p.Unchanged),
 
 		Selected:     on(p.SelectedFg, p.SelectedBg),
 		SelectedBold: on(p.SelectedFg, p.SelectedBg).Bold(true),
@@ -140,42 +167,44 @@ func BuildStyles(p theme.Palette) Styles {
 		StatusRightHi:     on(p.SelectedFg, p.StatusBg).Bold(true),
 		StatusRightDim:    on(p.StatusDim, p.StatusBg),
 
-		HeaderDim:         fg(p.HeaderDim),
+		HeaderDim:         fgOnBase(p.HeaderDim),
 		HeaderDimOnStatus: on(p.HeaderDim, p.StatusBg),
-		HeaderSep:         fg(p.HeaderSep),
+		HeaderSep:         fgOnBase(p.HeaderSep),
 
-		FileName:        fg(p.FileName),
+		FileName:        fgOnBase(p.FileName),
 		SearchCurrent:   on(p.SearchCurrentFg, p.SearchCurrentBg),
 		SearchHighlight: lipgloss.NewStyle().Background(p.SearchHighlightBg),
 
-		HelpTitle:   fg(p.Accent).Bold(true),
-		HelpSection: fg(p.Modified).Bold(true),
-		HelpKey:     fg(p.StatusKey),
-		HelpDesc:    fg(p.FileName),
-		HelpDim:     fg(p.StatusDim),
-		HelpNote:    fg(p.StatusDim).Italic(true),
+		HelpTitle:   fgOnBase(p.Accent).Bold(true),
+		HelpSection: fgOnBase(p.Modified).Bold(true),
+		HelpKey:     fgOnBase(p.StatusKey),
+		HelpDesc:    fgOnBase(p.FileName),
+		HelpDim:     fgOnBase(p.StatusDim),
+		HelpNote:    fgOnBase(p.StatusDim).Italic(true),
 
-		LayerArrow:       fg(p.Accent).Bold(true),
-		LayerInstruction: fg(p.Accent).Bold(true),
-		LayerCursor:      fg(p.Accent),
+		LayerArrow:       fgOnBase(p.Accent).Bold(true),
+		LayerInstruction: fgOnBase(p.Accent).Bold(true),
+		LayerCursor:      fgOnBase(p.Accent),
 
-		WasteTitle: fg(p.Accent).Bold(true),
-		WasteDim:   fg(p.StatusDim),
-		WasteKey:   fg(p.StatusKey).Bold(true),
-		WasteDesc:  fg(p.FileName),
+		WasteTitle: fgOnBase(p.Accent).Bold(true),
+		WasteDim:   fgOnBase(p.StatusDim),
+		WasteKey:   fgOnBase(p.StatusKey).Bold(true),
+		WasteDesc:  fgOnBase(p.FileName),
 
-		BarFilled: fg(p.Accent),
-		BarEmpty:  fg(p.Separator),
-		LoadHint:  fg(p.StatusDim),
-		LoadError: fg(p.Removed).Bold(true),
+		BarFilled: fgOnBase(p.Accent),
+		BarEmpty:  fgOnBase(p.Separator),
+		LoadHint:  fgOnBase(p.StatusDim),
+		LoadError: fgOnBase(p.Removed).Bold(true),
 
-		Separator:  fg(p.Separator),
-		Command:    fg(p.Command),
-		MetaDim:    fg(p.MetaDim),
-		TreeDim:    fg(p.TreeDim),
-		ScrollDim:  fg(p.ScrollDim),
-		Accent:     fg(p.Accent),
-		AccentBold: fg(p.Accent).Bold(true),
+		Separator:  fgOnBase(p.Separator),
+		Command:    fgOnBase(p.Command),
+		MetaDim:    fgOnBase(p.MetaDim),
+		TreeDim:    fgOnBase(p.TreeDim),
+		ScrollDim:  fgOnBase(p.ScrollDim),
+		Accent:     fgOnBase(p.Accent),
+		AccentBold: fgOnBase(p.Accent).Bold(true),
+
+		Base: lipgloss.NewStyle().Background(p.Base),
 
 		palette: p,
 	}
@@ -188,11 +217,17 @@ const largeStepGrowthFraction = 0.10
 // renderPanel draws the framed panel used by the layers, tree, file,
 // help, and waste sub-views. Takes Styles instead of reading
 // package-level vars so the panel respects the active theme.
+//
+// Every cell in the panel rectangle — borders, title row, content
+// lines, trailing filler pads, scroll arrows, and any rows past the
+// end of the supplied content — is painted with the theme's Base
+// background. Without this, panel bodies inherit the user's terminal
+// default background and a light theme renders dark text on a dark
+// terminal (and vice versa). Inner content that sets its own bg
+// (Selected, SearchCurrent, SearchHighlight) overrides Base in the
+// cells it covers; trailing pads continue the Base bg from where the
+// inner SGR's reset left off.
 func renderPanel(s Styles, content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
-	// Defensive: callers can compute negative widths/heights when the
-	// terminal is unusually small (m.width-2 with m.width=1, etc.).
-	// strings.Repeat panics on negative counts; clamp here so every code
-	// path that reaches the panel renderer is safe.
 	if contentWidth < 0 {
 		contentWidth = 0
 	}
@@ -218,7 +253,7 @@ func renderPanel(s Styles, content, title string, focused bool, contentWidth, he
 
 	titleLen := lipgloss.Width(title)
 	fillCount := max(contentWidth-titleLen-3, 0)
-	topBorder := topLeft + border.Render("─") + " " + titleRendered + " " + border.Render(strings.Repeat("─", fillCount)) + topRight
+	topBorder := topLeft + border.Render("─ ") + titleRendered + border.Render(" "+strings.Repeat("─", fillCount)) + topRight
 
 	bottomBorder := bottomLeft + border.Render(strings.Repeat("─", contentWidth)) + bottomRight
 
@@ -241,7 +276,10 @@ func renderPanel(s Styles, content, title string, focused bool, contentWidth, he
 
 		sb.WriteString(vLine)
 		sb.WriteString(line)
-		sb.WriteString(strings.Repeat(" ", pad))
+		// Pad spaces are explicitly Base-styled so any inner SGR reset at
+		// the end of `line` (Selected, SearchCurrent, etc.) is followed by
+		// Base bg, not a stripe of terminal-default cells.
+		sb.WriteString(s.Pad(pad))
 
 		rightBorder := vLine
 		if hasAbove && i == 0 {

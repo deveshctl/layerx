@@ -35,3 +35,10 @@ in the Software without restriction, ...
 The `minimal` theme uses only the 8 base ANSI colors (and their bright
 variants), which means it inherits whatever palette the user has
 configured in their terminal. No hex values are reproduced.
+
+`minimal` is the only bundled theme that does not paint its own panel
+background — its `Base` token is `lipgloss.NoColor{}`, so panel bodies
+show through to the terminal default. Every other theme paints a solid
+`Base` surface under panel bodies so the theme's foreground colors
+read against the background they were designed for, regardless of the
+user's terminal default.

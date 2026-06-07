@@ -21,10 +21,19 @@ type Theme struct {
 }
 
 // Palette holds every color token consumed by the TUI. Field set is
-// frozen to the 22 tokens tui/styles.go uses today; adding a token here
+// frozen to the 23 tokens tui/styles.go uses today; adding a token here
 // requires updating BuildStyles in tui/styles.go in the same change
 // (TestPaletteCompleteness + TestBuildStyles_AllThemes guard this).
 type Palette struct {
+	// Base is the background painted under every panel body, overlay,
+	// and loading box. Without it, panel bodies inherit whatever
+	// background the user's terminal is configured with — so a dark
+	// theme on a light terminal (or vice versa) leaves panel text
+	// rendered against a clashing background and the foreground colors
+	// blend in. Set to lipgloss.NoColor{} on themes that intentionally
+	// defer to the terminal palette (minimal).
+	Base color.Color
+
 	// Borders & focus
 	Accent          color.Color
 	FocusedBorder   color.Color

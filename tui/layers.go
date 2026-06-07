@@ -82,12 +82,20 @@ func renderCommandBar(s Styles, cmd string, width int) string {
 	var sb strings.Builder
 	for i := range filled {
 		wl := wrappedLines[i]
+		var line string
 		if i == 0 {
 			styled := highlightInstruction(s, wl)
-			sb.WriteString(prefix + styled)
+			line = prefix + styled
 		} else {
-			sb.WriteString("  " + s.Command.Render(wl))
+			line = s.Pad(2) + s.Command.Render(wl)
 		}
+		// Right-pad to full width with Base bg so JoinVertical doesn't
+		// stripe terminal-default cells past the rendered command text.
+		lineW := lipgloss.Width(line)
+		if width > lineW {
+			line += s.Pad(width - lineW)
+		}
+		sb.WriteString(line)
 		if i < filled-1 {
 			sb.WriteString("\n")
 		}
@@ -104,7 +112,7 @@ func highlightInstruction(s Styles, line string) string {
 	if len(parts) == 1 {
 		return instruction
 	}
-	return instruction + " " + s.Command.Render(parts[1])
+	return instruction + s.Pad(1) + s.Command.Render(parts[1])
 }
 
 func wrapCommandLines(cmd string, width int, maxLines int) []string {
@@ -224,13 +232,13 @@ func formatLayerLine(s Styles, l image.Layer, selected bool, maxWidth int, mode 
 	numStr := fmt.Sprintf("%d", l.Index)
 	numPad := ""
 	if len([]rune(numStr))+1 < indexWidth {
-		numPad = strings.Repeat(" ", indexWidth-len([]rune(numStr))-1)
+		numPad = s.Pad(indexWidth - len([]rune(numStr)) - 1)
 	}
 
 	sizeRendered := renderSizeColumn(s, l, mode, finalLiveSize)
 	cmdRendered := s.Command.Render(cmd)
 
-	plain := "   " + dimHash + s.FileName.Render(numStr) + numPad + "  " + sizeRendered + "  " + cmdRendered
+	plain := s.Pad(3) + dimHash + s.FileName.Render(numStr) + numPad + s.Pad(2) + sizeRendered + s.Pad(2) + cmdRendered
 
 	lineWidth := lipgloss.Width(plain)
 	if lineWidth > maxWidth {
@@ -255,11 +263,11 @@ func renderSizeColumn(s Styles, l image.Layer, mode sizeColMode, finalLiveSize i
 		bw := max(len([]rune(blob)), 7)
 		dw := max(len([]rune(delta)), 7)
 		blobR := s.HeaderDim.Render(padLeftRunes(blob, bw))
-		deltaR := lipgloss.NewStyle().Foreground(deltaColor(p, l.NetDelta, finalLiveSize)).Render(padLeftRunes(delta, dw))
-		return blobR + " " + deltaR
+		deltaR := lipgloss.NewStyle().Foreground(deltaColor(p, l.NetDelta, finalLiveSize)).Background(p.Base).Render(padLeftRunes(delta, dw))
+		return blobR + s.Pad(1) + deltaR
 	default:
 		delta := image.FormatSignedBytes(l.NetDelta)
 		w := max(len([]rune(delta)), 7)
-		return lipgloss.NewStyle().Foreground(deltaColor(p, l.NetDelta, finalLiveSize)).Render(padLeftRunes(delta, w))
+		return lipgloss.NewStyle().Foreground(deltaColor(p, l.NetDelta, finalLiveSize)).Background(p.Base).Render(padLeftRunes(delta, w))
 	}
 }

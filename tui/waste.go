@@ -265,7 +265,7 @@ func (m model) renderWasteOverlay() string {
 		mid := bodyHeight / 2
 		for i := range bodyHeight {
 			if i == mid {
-				lines = append(lines, strings.Repeat(" ", pad)+dimStyle.Render(empty))
+				lines = append(lines, m.styles.Pad(pad)+dimStyle.Render(empty))
 			} else {
 				lines = append(lines, "")
 			}
@@ -294,7 +294,7 @@ func (m model) renderWasteOverlay() string {
 		if innerWidth > lipgloss.Width(copied) {
 			pad = (innerWidth - lipgloss.Width(copied)) / 2
 		}
-		footer = strings.Repeat(" ", pad) + copied
+		footer = m.styles.Pad(pad) + copied
 		lines = append(lines, footer)
 	case originalCount == 0:
 		footer = keyStyle.Render("Esc") + " " + descStyle.Render("close")
@@ -386,14 +386,14 @@ func formatWasteRow(s Styles, r wasteRow, selected bool, innerWidth int) string 
 	var b strings.Builder
 	b.WriteString(gutter)
 	b.WriteString(pathStyle.Render(path))
-	b.WriteString(strings.Repeat(" ", pathPad))
-	b.WriteString(strings.Repeat(" ", gap))
+	b.WriteString(s.Pad(pathPad))
+	b.WriteString(s.Pad(gap))
 	b.WriteString(wastedStyle.Render(padLeft(wastedStr, wastedW)))
 	if wide {
-		b.WriteString(strings.Repeat(" ", gap))
+		b.WriteString(s.Pad(gap))
 		b.WriteString(countStyle.Render(padLeft(countStr, countW)))
 	}
-	b.WriteString(strings.Repeat(" ", gap))
+	b.WriteString(s.Pad(gap))
 	b.WriteString(layerStyle.Render(padLeft(layerStr, layerW)))
 	return b.String()
 }

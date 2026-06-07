@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bubbletea Model, built once per session from the active theme's
   palette. No user-visible change with the default theme.
 
+### Fixed
+- Themes now paint a solid panel background (`Base`) under every panel
+  body, overlay, loading box, and the gap between panels. Previously
+  only the header and status strips were themed; panel bodies inherited
+  the user's terminal background, so a light theme on a dark terminal
+  (or vice versa) rendered text in colors that blended into the
+  surrounding background. The four dark Catppuccin variants also now
+  appear visibly distinct because each paints its own canonical `base`
+  surface. The `minimal` theme is unchanged — its `Base` is
+  `lipgloss.NoColor{}` so panel backgrounds stay terminal-default.
+
 ## [v1.4.0] - 2026-06-06
 
 Podman support and explicit cache management.
