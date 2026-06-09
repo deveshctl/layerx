@@ -6,8 +6,7 @@ Interactive Docker image layer inspector with CI-friendly efficiency checks. Sin
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
-
-<!-- Demo: a GIF will go here. -->
+![Layerx demo](assets/layerx-demo.gif)
 
 ---
 
