@@ -1999,3 +1999,157 @@ func TestHighlightedMsg_StaleRequestIDDiscarded(t *testing.T) {
 	assert.Equal(t, []string{"current"}, um.viewHighlightedLines,
 		"stale highlight must not overwrite the current one")
 }
+
+// --- Viewer cursor + horizontal scroll --------------------------------------
+
+func setupViewerModel(data []byte) model {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{
+		Path: "/test",
+		Data: data,
+		Size: int64(len(data)),
+	}
+	return m
+}
+
+func TestViewerCursorMovesWithJK(t *testing.T) {
+	m := setupViewerModel([]byte("line1\nline2\nline3\n"))
+
+	um := send(m, keyPress('j'))
+	assert.Equal(t, 1, um.viewCursorRow)
+	assert.Equal(t, 0, um.viewCursorCol)
+
+	um2 := send(um, keyPress('k'))
+	assert.Equal(t, 0, um2.viewCursorRow)
+}
+
+func TestViewerCursorMovesWithHL(t *testing.T) {
+	m := setupViewerModel([]byte("hello world\n"))
+
+	um := send(m, keyPress('l'))
+	assert.Equal(t, 1, um.viewCursorCol)
+
+	um2 := send(um, keyPress('l'))
+	assert.Equal(t, 2, um2.viewCursorCol)
+
+	um3 := send(um2, keyPress('h'))
+	assert.Equal(t, 1, um3.viewCursorCol)
+}
+
+func TestViewerCursorClampsAtFileBounds(t *testing.T) {
+	m := setupViewerModel([]byte("abc\n"))
+
+	um := send(m, keyPress('h')) // negative → clamp to 0
+	assert.Equal(t, 0, um.viewCursorCol)
+
+	um2 := send(m, keyPress('k')) // negative row → clamp to 0
+	assert.Equal(t, 0, um2.viewCursorRow)
+
+	// Step right past end of "abc" — clamps to len("abc")=3 (one past end allowed).
+	cur := m
+	for range 10 {
+		cur = send(cur, keyPress('l'))
+	}
+	assert.Equal(t, 3, cur.viewCursorCol, "cursor clamps to len(line)")
+}
+
+func TestViewerCursorGGJumpsRowAndResetsCol(t *testing.T) {
+	m := setupViewerModel([]byte("aaa\nbbb\nccc\n"))
+	m.viewCursorRow = 0
+	m.viewCursorCol = 2
+
+	um := send(m, keyPress('G'))
+	assert.Equal(t, 2, um.viewCursorRow, "G jumps to last line")
+	assert.Equal(t, 0, um.viewCursorCol, "G resets column")
+
+	um2 := send(um, keyPress('g'))
+	assert.Equal(t, 0, um2.viewCursorRow)
+	assert.Equal(t, 0, um2.viewCursorCol)
+}
+
+func TestViewerCursorScrollsViewportVertically(t *testing.T) {
+	// 60 lines, viewport ~32 rows on a 40-tall terminal.
+	var lines []string
+	for i := 0; i < 60; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+	m := setupViewerModel([]byte(strings.Join(lines, "\n") + "\n"))
+
+	cur := m
+	for range 50 {
+		cur = send(cur, keyPress('j'))
+	}
+	assert.Equal(t, 50, cur.viewCursorRow)
+	assert.Greater(t, cur.viewOffset, 0, "viewport must scroll to keep cursor visible")
+}
+
+func TestViewerCursorScrollsViewportHorizontally(t *testing.T) {
+	// One long line — 200 chars. Width 120 → ~110 visible columns after gutter.
+	long := strings.Repeat("x", 200)
+	m := setupViewerModel([]byte(long + "\n"))
+
+	cur := m
+	for range 150 {
+		cur = send(cur, keyPress('l'))
+	}
+	assert.Equal(t, 150, cur.viewCursorCol)
+	assert.Greater(t, cur.viewHorizOffset, 0, "horizontal offset must shift to keep cursor visible")
+}
+
+func TestViewerSearchJumpsCursorToMatch(t *testing.T) {
+	long := "x" + strings.Repeat("y", 200) + "needle" + strings.Repeat("z", 50)
+	m := setupViewerModel([]byte(long + "\n"))
+	m.viewSearchQuery = "needle"
+	m.recomputeViewerMatches()
+	require.Greater(t, len(m.viewSearchMatches), 0, "test setup: must find match")
+
+	m.scrollToViewerMatch()
+	expectedCol := m.viewSearchMatches[0][1]
+	assert.Equal(t, 0, m.viewCursorRow)
+	assert.Equal(t, expectedCol, m.viewCursorCol, "cursor lands on the match")
+	assert.Greater(t, m.viewHorizOffset, 0, "viewport horizontally scrolls to bring match into view")
+}
+
+func TestViewerCursorResetsOnFileOpen(t *testing.T) {
+	m := setupViewerModel([]byte("placeholder\n"))
+	m.viewCursorRow = 5
+	m.viewCursorCol = 10
+	m.viewHorizOffset = 50
+
+	updated, _ := m.Update(fileContentMsg{
+		requestID: m.viewRequestID,
+		content:   &image.FileContent{Path: "/new", Data: []byte("hi\n"), Size: 3},
+	})
+	um := updated.(model)
+	assert.Equal(t, 0, um.viewCursorRow)
+	assert.Equal(t, 0, um.viewCursorCol)
+	assert.Equal(t, 0, um.viewHorizOffset)
+	assert.Equal(t, 0, um.viewOffset)
+}
+
+func TestViewerCursorResetsOnViewerClose(t *testing.T) {
+	m := setupViewerModel([]byte("aaa\nbbb\n"))
+	m.viewCursorRow = 1
+	m.viewCursorCol = 2
+	m.viewHorizOffset = 5
+
+	um := send(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	assert.Equal(t, viewNone, um.viewState)
+	assert.Equal(t, 0, um.viewCursorRow)
+	assert.Equal(t, 0, um.viewCursorCol)
+	assert.Equal(t, 0, um.viewHorizOffset)
+}
+
+func TestViewerCursorPreservedAcrossSearchClear(t *testing.T) {
+	m := setupViewerModel([]byte("hello\n"))
+	m.viewCursorRow = 0
+	m.viewCursorCol = 3
+	m.viewSearchActive = true
+	m.viewSearchQuery = "hello"
+
+	// First Esc clears search, viewer stays open, cursor preserved.
+	um := send(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	assert.Equal(t, viewReady, um.viewState)
+	assert.Equal(t, 3, um.viewCursorCol, "cursor must survive search clear")
+}

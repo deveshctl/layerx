@@ -178,3 +178,94 @@ func TestFileViewLineCount_CRLFMatchesLF(t *testing.T) {
 	crlf := &image.FileContent{Data: []byte("a\r\nb\r\nc\r\n")}
 	assert.Equal(t, fileViewLineCount(lf), fileViewLineCount(crlf))
 }
+
+func TestRenderFileView_HorizOffsetSlicesAndPrependsEllipsis(t *testing.T) {
+	long := strings.Repeat("a", 50) + "TARGET" + strings.Repeat("b", 50)
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path: "/long.txt",
+			Data: []byte(long + "\n"),
+			Size: int64(len(long) + 1),
+		},
+		offset:      0,
+		horizOffset: 30,
+		width:       80,
+		height:      10,
+		// Force the plain-text path so search-disabling rules don't apply.
+		searchQuery: "TARGET",
+	})
+
+	// Each rendered line must fit the panel width.
+	for ln := range strings.SplitSeq(body, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(ln), 80)
+	}
+	// The visible window starts at column 30 → "TARGET" appears.
+	assert.Contains(t, body, "TARGET")
+	// Leading ellipsis indicates content hidden to the left.
+	assert.Contains(t, body, "…")
+	// The first 30 columns of 'a' are out of view.
+	assert.NotContains(t, body, strings.Repeat("a", 30))
+}
+
+func TestRenderFileView_CursorOverlayRendersInverseCell(t *testing.T) {
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path: "/c.txt",
+			Data: []byte("hello\n"),
+			Size: 6,
+		},
+		offset:    0,
+		cursorRow: 0,
+		cursorCol: 2,
+		width:     40,
+		height:    5,
+	})
+
+	// Reverse SGR (\x1b[7m) marks the cursor cell.
+	assert.Contains(t, body, "\x1b[7m", "cursor must render with reverse-video SGR")
+}
+
+func TestRenderFileView_CursorPastEndOfLineStillVisible(t *testing.T) {
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path: "/c.txt",
+			Data: []byte("hi\n"),
+			Size: 3,
+		},
+		offset:    0,
+		cursorRow: 0,
+		cursorCol: 2, // one past last rune of "hi"
+		width:     40,
+		height:    5,
+	})
+	assert.Contains(t, body, "\x1b[7m",
+		"cursor must remain visible when sitting at end-of-line")
+}
+
+func TestApplyHorizontalWindow_NoOffset(t *testing.T) {
+	got := applyHorizontalWindow("hello", 0, 10)
+	assert.Equal(t, "hello", got)
+}
+
+func TestApplyHorizontalWindow_OffsetPrependsEllipsis(t *testing.T) {
+	got := applyHorizontalWindow("abcdefghij", 3, 5)
+	// 5 cell budget; 1 reserved for "…", so 4 chars visible: "defg".
+	assert.Contains(t, got, "…")
+	assert.Contains(t, got, "defg")
+	assert.LessOrEqual(t, ansi.StringWidth(got), 5)
+}
+
+func TestOverlayCursorCell_AppliesReverseSGR(t *testing.T) {
+	got := overlayCursorCell("abc", 1)
+	assert.Contains(t, got, "\x1b[7m", "reverse SGR present")
+	// Plain stripped: original characters preserved.
+	assert.Equal(t, "abc", ansi.Strip(got))
+}
+
+func TestOverlayCursorCell_PastEndPadsWithSpace(t *testing.T) {
+	got := overlayCursorCell("ab", 5)
+	// At least one inverse cell on the right.
+	assert.Contains(t, got, "\x1b[7m")
+	// Total displayed width covers the cursor column.
+	assert.GreaterOrEqual(t, ansi.StringWidth(got), 6)
+}

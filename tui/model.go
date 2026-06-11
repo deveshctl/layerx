@@ -188,6 +188,9 @@ type model struct {
 	viewContent      *image.FileContent
 	viewHighlightedLines []string
 	viewOffset       int
+	viewHorizOffset  int
+	viewCursorRow    int
+	viewCursorCol    int
 	viewOriginLayer  int
 	viewOriginCmd    string
 	viewSearchActive bool
@@ -384,6 +387,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewContent = msg.content
 		m.viewHighlightedLines = nil
 		m.viewOffset = 0
+		m.viewHorizOffset = 0
+		m.viewCursorRow = 0
+		m.viewCursorCol = 0
 		// Defer Chroma syntax highlighting to a tea.Cmd. Tokenising even a
 		// few hundred KB of source can take hundreds of ms; running it
 		// inline here would freeze the TUI (no input, no spinner, no
@@ -467,6 +473,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewContent = nil
 				m.viewHighlightedLines = nil
 				m.viewOffset = 0
+				m.viewHorizOffset = 0
+				m.viewCursorRow = 0
+				m.viewCursorCol = 0
 				m.viewRequestID++
 				if m.viewerCancel != nil {
 					m.viewerCancel()
@@ -573,14 +582,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case key.Matches(msg, m.keys.Down):
-				m.scrollViewDown()
+				m.viewCursorRow++
+				m.clampViewerCursor()
+				m.adjustViewerScroll()
 			case key.Matches(msg, m.keys.Up):
-				m.scrollViewUp()
+				m.viewCursorRow--
+				m.clampViewerCursor()
+				m.adjustViewerScroll()
+			case key.Matches(msg, m.keys.Left):
+				m.viewCursorCol--
+				m.clampViewerCursor()
+				m.adjustViewerScroll()
+			case key.Matches(msg, m.keys.Right):
+				m.viewCursorCol++
+				m.clampViewerCursor()
+				m.adjustViewerScroll()
 			case key.Matches(msg, m.keys.Top):
-				m.viewOffset = 0
+				m.viewCursorRow = 0
+				m.viewCursorCol = 0
+				m.clampViewerCursor()
+				m.adjustViewerScroll()
 			case key.Matches(msg, m.keys.Bottom):
-				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
-				m.viewOffset = maxOffset
+				m.viewCursorRow = fileViewLineCount(m.viewContent) - 1
+				m.viewCursorCol = 0
+				m.clampViewerCursor()
+				m.adjustViewerScroll()
 			}
 			return m, nil
 		}
@@ -850,14 +876,108 @@ func (m *model) scrollToViewerMatch() {
 	if len(m.viewSearchMatches) == 0 {
 		return
 	}
-	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
+	target := m.viewSearchMatches[m.viewSearchCursor]
+	m.viewCursorRow = target[0]
+	m.viewCursorCol = target[1]
+	m.clampViewerCursor()
 	visHeight := m.viewVisibleHeight()
-	desired := max(targetLine-visHeight/2, 0)
+	// Centre vertically on jump (one-shot hint that adjustViewerScroll
+	// then leaves alone). Without this matches at the bottom of a long
+	// file would land flush against the bottom edge after every n/N.
+	desired := max(target[0]-visHeight/2, 0)
 	maxOffset := max(fileViewLineCount(m.viewContent)-visHeight, 0)
 	if desired > maxOffset {
 		desired = maxOffset
 	}
 	m.viewOffset = desired
+	m.adjustViewerScroll()
+}
+
+// viewerLineRunes returns the rune slice for the line the cursor is on,
+// using the same splitFileLines that drives the renderer and search.
+// Returns nil for empty / binary / nil content.
+func (m *model) viewerLineRunes(lineIdx int) []rune {
+	if m.viewContent == nil || m.viewContent.Binary || len(m.viewContent.Data) == 0 {
+		return nil
+	}
+	lines := splitFileLines(m.viewContent.Data)
+	if lineIdx < 0 || lineIdx >= len(lines) {
+		return nil
+	}
+	return []rune(lines[lineIdx])
+}
+
+// clampViewerCursor pins the cursor inside the file. Row clamps to
+// [0, lineCount-1]; col clamps to [0, len(lineRunes)] — len, not len-1,
+// so the cursor can sit one past the last rune (vim's "append after end"
+// position) and so empty lines have a valid col=0.
+func (m *model) clampViewerCursor() {
+	total := fileViewLineCount(m.viewContent)
+	if total == 0 {
+		m.viewCursorRow = 0
+		m.viewCursorCol = 0
+		return
+	}
+	if m.viewCursorRow < 0 {
+		m.viewCursorRow = 0
+	}
+	if m.viewCursorRow >= total {
+		m.viewCursorRow = total - 1
+	}
+	runes := m.viewerLineRunes(m.viewCursorRow)
+	maxCol := len(runes)
+	if m.viewCursorCol < 0 {
+		m.viewCursorCol = 0
+	}
+	if m.viewCursorCol > maxCol {
+		m.viewCursorCol = maxCol
+	}
+}
+
+// adjustViewerScroll shifts viewOffset / viewHorizOffset minimally so
+// the cursor sits inside the visible window. Vertical follows the
+// standard "step one row when cursor leaves" pattern; horizontal does
+// the same on display columns. maxLineWidth here matches the renderer's
+// budget — contentWidth (m.width-2) minus the gutter — so the cursor
+// stays clear of the line-number column on the left and the panel
+// border on the right.
+func (m *model) adjustViewerScroll() {
+	visHeight := m.viewVisibleHeight()
+	if visHeight > 0 {
+		if m.viewCursorRow < m.viewOffset {
+			m.viewOffset = m.viewCursorRow
+		} else if m.viewCursorRow >= m.viewOffset+visHeight {
+			m.viewOffset = m.viewCursorRow - visHeight + 1
+		}
+	}
+	maxLineWidth := m.viewerMaxLineWidth()
+	if maxLineWidth <= 0 {
+		return
+	}
+	runes := m.viewerLineRunes(m.viewCursorRow)
+	col := min(m.viewCursorCol, len(runes))
+	cursorDispCol := lipgloss.Width(string(runes[:col]))
+	// Reserve one cell on the right so the cursor never sits flush
+	// against the truncation ellipsis — matches typical pager UX.
+	if cursorDispCol < m.viewHorizOffset {
+		m.viewHorizOffset = cursorDispCol
+	} else if cursorDispCol >= m.viewHorizOffset+maxLineWidth {
+		m.viewHorizOffset = cursorDispCol - maxLineWidth + 1
+	}
+	if m.viewHorizOffset < 0 {
+		m.viewHorizOffset = 0
+	}
+}
+
+// viewerMaxLineWidth mirrors the renderer's per-line budget: the panel
+// content width minus the line-number gutter. Kept here so cursor-scroll
+// math stays in sync with what renderFileView actually draws.
+func (m *model) viewerMaxLineWidth() int {
+	contentWidth := m.width - 2
+	total := max(fileViewLineCount(m.viewContent), 1)
+	gutterDigits := len(fmt.Sprintf("%d", total)) + 1
+	gutterW := gutterDigits + 1 // " " trailing space inside the gutter format
+	return max(contentWidth-gutterW, 1)
 }
 
 func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
@@ -1302,6 +1422,9 @@ func (m model) viewReady() tea.View {
 		viewer := renderFileView(viewerParams{
 			content:       m.viewContent,
 			offset:        m.viewOffset,
+			horizOffset:   m.viewHorizOffset,
+			cursorRow:     m.viewCursorRow,
+			cursorCol:     m.viewCursorCol,
 			width:         m.width,
 			height:        panelHeight,
 			loading:       m.viewState == viewLoading,
@@ -1515,13 +1638,13 @@ func (m model) renderViewerStatusBar() string {
 		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
 	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
 		total := fileViewLineCount(m.viewContent)
-		line := m.viewOffset + 1
+		line := min(m.viewCursorRow+1, total)
 		pct := 0
 		if total > 0 {
 			pct = line * 100 / total
 		}
 		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
-		right = rightDim.Render(fmt.Sprintf("Line %d/%d (%d%%) ", line, total, pct))
+		right = rightDim.Render(fmt.Sprintf("Ln %d/%d · Col %d (%d%%) ", line, total, m.viewCursorCol+1, pct))
 	}
 
 	gap := max(m.width-lipgloss.Width(hints)-lipgloss.Width(right), 0)

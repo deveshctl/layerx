@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- File viewer: a search match past the right edge of a long line is now
+  brought into view instead of staying hidden behind the truncation
+  ellipsis. Previously the status bar would say `Match 1/1` while the
+  highlighted text remained off-screen because lines wider than the
+  panel were silently right-truncated and there was no way to scroll
+  horizontally.
+
+### Added
+- File viewer: vim-style movable cursor. `j` / `k` / `h` / `l` (and the
+  arrow keys) move the cursor; the viewport auto-scrolls — both
+  vertically and horizontally — to keep it visible. `g` / `G` jump the
+  cursor to the first / last line. Search (`/`, `n`, `N`) jumps the
+  cursor to each match, which together with the new horizontal
+  auto-scroll resolves the long-line invisible-match bug.
+- File viewer: status bar now shows the cursor's column alongside
+  line / total / percent (e.g. `Ln 42/100 · Col 487 (42%)`), so the
+  user can see where the cursor sits inside lines wider than the
+  terminal.
+- File viewer: when a line is wider than the panel and the user has
+  scrolled right, a leading dim `…` indicates content is hidden to
+  the left, mirroring the existing trailing `…` for content hidden
+  to the right.
+
 ## [v1.4.0] - 2026-06-06
 
 Podman support and explicit cache management.

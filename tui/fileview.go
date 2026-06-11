@@ -13,6 +13,9 @@ import (
 type viewerParams struct {
 	content      *image.FileContent
 	offset       int
+	horizOffset  int
+	cursorRow    int
+	cursorCol    int
 	width        int
 	height       int
 	loading      bool
@@ -112,15 +115,23 @@ func renderFileView(p viewerParams) string {
 		gutterW := ansi.StringWidth(gutter)
 
 		maxLineWidth := max(contentWidth-gutterW, 1)
-		if syntaxHighlight {
-			if ansi.StringWidth(line) > maxLineWidth {
-				line = ansi.Truncate(line, maxLineWidth, "…")
+		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
+		lineContent = applyHorizontalWindow(lineContent, p.horizOffset, maxLineWidth)
+
+		// Cursor overlay. Operates on the already-windowed string so the
+		// inverse-video cell lands at the correct visible column even when
+		// horizOffset > 0 (the leading "…" reserves col 0 in that case).
+		if lineIdx == p.cursorRow {
+			plainRunes := []rune(line)
+			col := min(p.cursorCol, len(plainRunes))
+			cursorDisp := ansi.StringWidth(string(plainRunes[:col]))
+			visibleCol := cursorDisp - p.horizOffset
+			if p.horizOffset > 0 {
+				visibleCol++ // leading "…" consumed col 0
 			}
-		} else if ansi.StringWidth(line) > maxLineWidth {
-			line = ansi.Truncate(line, maxLineWidth, "…")
+			lineContent = overlayCursorCell(lineContent, visibleCol)
 		}
 
-		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
 		fullLine := gutter + lineContent
 		if w := ansi.StringWidth(fullLine); w > contentWidth {
 			lineContent = ansi.Truncate(lineContent, contentWidth-gutterW, "…")
@@ -292,4 +303,62 @@ func splitFileLines(data []byte) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+// applyHorizontalWindow returns the [horizOffset, horizOffset+maxWidth)
+// display-cell slice of an already-rendered line (which may contain
+// ANSI escapes). When horizOffset > 0 a leading dim "…" is prepended to
+// signal hidden content on the left; the slice is widened by 1 cell to
+// keep the right edge stable. When the result would still exceed the
+// budget on the right, ansi.Truncate trails it with "…". ansi.Cut is
+// grapheme-width aware, so wide CJK at the seams slices cleanly.
+func applyHorizontalWindow(line string, horizOffset, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if horizOffset <= 0 {
+		if ansi.StringWidth(line) > maxWidth {
+			return ansi.Truncate(line, maxWidth, "…")
+		}
+		return line
+	}
+	body := ansi.Cut(line, horizOffset, horizOffset+maxWidth-1)
+	if ansi.StringWidth(body) > maxWidth-1 {
+		body = ansi.Truncate(body, maxWidth-1, "…")
+	}
+	return styleWithFg(metaDimColor).Render("…") + body
+}
+
+// overlayCursorCell replaces the cell at displayCol in s (which may
+// contain ANSI escapes) with a reverse-video version of that cell's
+// content. If displayCol falls outside the visible width or s is
+// effectively empty at that column, a single inverted space is appended
+// so the cursor remains visible at end-of-line. Reverse(true) swaps
+// foreground and background regardless of any underlying SGR — making
+// the cursor distinguishable on plain, syntax-highlighted, and
+// search-match cells without picking a colour that clashes with the
+// theme.
+func overlayCursorCell(s string, displayCol int) string {
+	if displayCol < 0 {
+		return s
+	}
+	w := ansi.StringWidth(s)
+	cursor := lipgloss.NewStyle().Reverse(true)
+	if displayCol >= w {
+		// Cursor sits past the last rendered cell — typical at end of a
+		// line shorter than the cursor's column. Pad with spaces so the
+		// inverse cell lands where the user expects.
+		pad := displayCol - w
+		if pad > 0 {
+			s += strings.Repeat(" ", pad)
+		}
+		return s + cursor.Render(" ")
+	}
+	left := ansi.Cut(s, 0, displayCol)
+	cell := ansi.Cut(s, displayCol, displayCol+1)
+	right := ansi.Cut(s, displayCol+1, w)
+	if cell == "" {
+		cell = " "
+	}
+	return left + cursor.Render(cell) + right
 }

@@ -8,6 +8,8 @@ type keyMap struct {
 	Quit         key.Binding
 	Up           key.Binding
 	Down         key.Binding
+	Left         key.Binding
+	Right        key.Binding
 	Top          key.Binding
 	Bottom       key.Binding
 	Switch       key.Binding
@@ -39,6 +41,14 @@ func defaultKeys() keyMap {
 		Down: key.NewBinding(
 			key.WithKeys("j", "down"),
 			key.WithHelp("j/↓", "down"),
+		),
+		Left: key.NewBinding(
+			key.WithKeys("h", "left"),
+			key.WithHelp("h/←", "left"),
+		),
+		Right: key.NewBinding(
+			key.WithKeys("l", "right"),
+			key.WithHelp("l/→", "right"),
 		),
 		Top: key.NewBinding(
 			key.WithKeys("g"),
