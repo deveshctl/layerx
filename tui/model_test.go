@@ -1999,3 +1999,149 @@ func TestHighlightedMsg_StaleRequestIDDiscarded(t *testing.T) {
 	assert.Equal(t, []string{"current"}, um.viewHighlightedLines,
 		"stale highlight must not overwrite the current one")
 }
+
+// --- Horizontal scroll for off-screen search matches -------------------------
+
+// Bug: pressing 'n' on a match whose column was past the visible width
+// updated the status bar to "Match found" but the highlight stayed clipped
+// off the right edge — invisible. The fix centers viewHOffset on the match's
+// display column whenever the column falls outside the visible window.
+func TestScrollToViewerMatch_AdjustsHOffsetForOffScreenMatch(t *testing.T) {
+	m := setupModel()
+	m.width = 80
+	m.height = 30
+	// One long line; the match starts at column 200 — well past the
+	// ~78-column display window after the gutter is subtracted.
+	prefix := strings.Repeat("x", 200)
+	data := []byte(prefix + "needle and rest of the line")
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))}
+	m.viewSearchQuery = "needle"
+	m.recomputeViewerMatches()
+
+	require.Len(t, m.viewSearchMatches, 1, "expected exactly one match")
+	assert.Equal(t, [2]int{0, 200}, m.viewSearchMatches[0])
+	assert.Greater(t, m.viewHOffset, 0,
+		"hOffset must shift right so the match is visible; got %d", m.viewHOffset)
+
+	// The match's display column (200) must lie inside [hOffset, hOffset+visWidth).
+	visWidth := m.viewVisibleWidth()
+	require.Greater(t, visWidth, 0)
+	assert.GreaterOrEqual(t, 200, m.viewHOffset, "match must be at or past hOffset")
+	assert.Less(t, 200, m.viewHOffset+visWidth, "match must be before hOffset+visWidth")
+}
+
+func TestScrollToViewerMatch_LeavesHOffsetWhenMatchAlreadyVisible(t *testing.T) {
+	m := setupModel()
+	m.width = 80
+	m.height = 30
+	// Short line with the match well within the viewport.
+	data := []byte("hello needle world")
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/short.txt", Data: data, Size: int64(len(data))}
+	m.viewSearchQuery = "needle"
+	m.recomputeViewerMatches()
+
+	require.Len(t, m.viewSearchMatches, 1)
+	assert.Equal(t, 0, m.viewHOffset, "no scrolling needed when match already on-screen")
+}
+
+// recomputeViewerMatches must reset hOffset before scrolling — otherwise a
+// stale offset from the previous query would persist when the new query's
+// first match falls in the un-shifted region of the line.
+func TestRecomputeViewerMatches_ResetsHOffsetOnEmptyQuery(t *testing.T) {
+	m := setupModel()
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("abc"), Size: 3}
+	m.viewHOffset = 999
+
+	m.viewSearchQuery = ""
+	m.recomputeViewerMatches()
+	assert.Equal(t, 0, m.viewHOffset, "clearing the query must clear hOffset")
+}
+
+// Esc on a confirmed search query clears the query and any horizontal scroll
+// it caused — the next view of the file should be from column 0, not stuck
+// in the middle of a long line where the last match landed.
+func TestViewerEsc_ClearsHOffsetWithSearch(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("hello world"), Size: 11}
+	m.viewSearchQuery = "world"
+	m.viewHOffset = 50
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	um := updated.(model)
+	assert.Equal(t, "", um.viewSearchQuery)
+	assert.Equal(t, 0, um.viewHOffset, "Esc must reset horizontal scroll alongside the query")
+}
+
+func TestViewerHKey_ScrollsLeft(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4}
+	m.viewHOffset = 10
+
+	um := send(m, keyPress('h'))
+	assert.Less(t, um.viewHOffset, 10, "h must decrease hOffset")
+	assert.GreaterOrEqual(t, um.viewHOffset, 0)
+}
+
+func TestViewerLKey_ScrollsRight(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4}
+	m.viewHOffset = 0
+
+	um := send(m, keyPress('l'))
+	assert.Greater(t, um.viewHOffset, 0, "l must increase hOffset")
+}
+
+func TestViewerHKey_ClampsAtZero(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4}
+	m.viewHOffset = 0
+
+	um := send(m, keyPress('h'))
+	assert.Equal(t, 0, um.viewHOffset, "h at column 0 must not go negative")
+}
+
+// g and G in the viewer should reset horizontal scroll along with vertical —
+// matching vim's behavior where line-jump commands return to column 0.
+func TestViewerGTop_ResetsHOffset(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("a\nb\nc\n"), Size: 6}
+	m.viewOffset = 2
+	m.viewHOffset = 50
+
+	um := send(m, keyPress('g'))
+	assert.Equal(t, 0, um.viewOffset)
+	assert.Equal(t, 0, um.viewHOffset, "g must reset hOffset")
+}
+
+func TestViewerGBottom_ResetsHOffset(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("a\nb\nc\n"), Size: 6}
+	m.viewHOffset = 50
+
+	um := send(m, keyPress('G'))
+	assert.Equal(t, 0, um.viewHOffset, "G must reset hOffset")
+}
+
+// File open (fileContentMsg) must reset hOffset — opening a new file from
+// the tree should start at the beginning of every line, not where the
+// previous file's hOffset happened to land.
+func TestFileContentMsg_ResetsHOffset(t *testing.T) {
+	m := setupModel()
+	m.viewHOffset = 100
+	m.viewRequestID = 5
+
+	updated, _ := m.Update(fileContentMsg{
+		requestID: 5,
+		content:   &image.FileContent{Path: "/x", Data: []byte("hi"), Size: 2},
+	})
+	um := updated.(model)
+	assert.Equal(t, 0, um.viewHOffset, "opening a new file must reset hOffset")
+}

@@ -178,3 +178,90 @@ func TestFileViewLineCount_CRLFMatchesLF(t *testing.T) {
 	crlf := &image.FileContent{Data: []byte("a\r\nb\r\nc\r\n")}
 	assert.Equal(t, fileViewLineCount(lf), fileViewLineCount(crlf))
 }
+
+// hOffset > 0 must shift the visible window right and prefix the cut with
+// "«" so users can tell the line continues to the left. Otherwise a search
+// match scrolled into view looks like the start of the line.
+func TestRenderFileView_HOffset_ShowsLeftMarker(t *testing.T) {
+	prefix := strings.Repeat("a", 100)
+	data := []byte(prefix + "MARKER suffix")
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))},
+		offset:  0,
+		hOffset: 80,
+		width:   80,
+		height:  10,
+	})
+	assert.Contains(t, body, "«", "left-cut marker must signal that text continues off-screen left")
+	assert.Contains(t, body, "MARKER", "the off-screen content must now be visible")
+}
+
+func TestRenderFileView_HOffsetZero_NoLeftMarker(t *testing.T) {
+	data := []byte("short line\n")
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{Path: "/x.txt", Data: data, Size: int64(len(data))},
+		offset:  0,
+		hOffset: 0,
+		width:   80,
+		height:  10,
+	})
+	assert.NotContains(t, body, "«", "no marker when hOffset is zero")
+}
+
+// Even with horizontal scrolling, no rendered line may exceed the panel
+// width. Without that guarantee the right border tears.
+func TestRenderFileView_HOffset_StillRespectsWidth(t *testing.T) {
+	data := []byte(strings.Repeat("x", 500) + "\n")
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{Path: "/x.txt", Data: data, Size: int64(len(data))},
+		offset:  0,
+		hOffset: 50,
+		width:   80,
+		height:  10,
+	})
+	for ln := range strings.SplitSeq(body, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(ln), 80, "panel width must not be exceeded")
+	}
+}
+
+// When the search match is on a long line, the rendered output must show
+// the match text. Before the fix the match was clipped by the right-side
+// truncate and the user saw only "Match 1/1" with no visible highlight.
+func TestRenderFileView_LongLineMatchVisibleAfterScroll(t *testing.T) {
+	prefix := strings.Repeat("a", 200)
+	data := []byte(prefix + "needle and rest")
+	matches := [][2]int{{0, 200}}
+	body := renderFileView(viewerParams{
+		content:       &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))},
+		offset:        0,
+		hOffset:       170, // chosen so column 200 falls within an 80-col view
+		width:         80,
+		height:        10,
+		searchQuery:   "needle",
+		searchMatches: matches,
+		searchCursor:  0,
+	})
+	assert.Contains(t, body, "needle", "match text must reach the rendered output")
+}
+
+// hOffset must compose with chroma-highlighted lines too: when the user
+// presses 'l' on a long source line, the chroma colors before the cut
+// should not bleed into broken ANSI escape sequences. ansi.TruncateLeft is
+// supposed to be escape-aware; this test guards that property.
+func TestRenderFileView_HOffset_PreservesChromaOutput(t *testing.T) {
+	src := []byte("package main\nfunc main() { var x = " + strings.Repeat("y", 200) + " }\n")
+	highlighted := highlightFileLines("app.go", src)
+	body := renderFileView(viewerParams{
+		content:          &image.FileContent{Path: "app.go", Data: src, Size: int64(len(src))},
+		offset:           0,
+		hOffset:          50,
+		width:            80,
+		height:           10,
+		highlightedLines: highlighted,
+	})
+	// No torn escape sequences: every CSI must be terminated.
+	assert.NotContains(t, body, "\x1b[\x1b[", "consecutive escapes signal a torn sequence")
+	for ln := range strings.SplitSeq(body, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(ln), 80)
+	}
+}

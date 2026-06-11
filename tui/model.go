@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -188,6 +189,7 @@ type model struct {
 	viewContent      *image.FileContent
 	viewHighlightedLines []string
 	viewOffset       int
+	viewHOffset      int
 	viewOriginLayer  int
 	viewOriginCmd    string
 	viewSearchActive bool
@@ -384,6 +386,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewContent = msg.content
 		m.viewHighlightedLines = nil
 		m.viewOffset = 0
+		m.viewHOffset = 0
 		// Defer Chroma syntax highlighting to a tea.Cmd. Tokenising even a
 		// few hundred KB of source can take hundreds of ms; running it
 		// inline here would freeze the TUI (no input, no spinner, no
@@ -455,18 +458,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewSearchQuery = ""
 					m.viewSearchMatches = nil
 					m.viewSearchCursor = 0
+					m.viewHOffset = 0
 					return m, nil
 				}
 				if m.viewSearchQuery != "" {
 					m.viewSearchQuery = ""
 					m.viewSearchMatches = nil
 					m.viewSearchCursor = 0
+					m.viewHOffset = 0
 					return m, nil
 				}
 				m.viewState = viewNone
 				m.viewContent = nil
 				m.viewHighlightedLines = nil
 				m.viewOffset = 0
+				m.viewHOffset = 0
 				m.viewRequestID++
 				if m.viewerCancel != nil {
 					m.viewerCancel()
@@ -576,11 +582,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollViewDown()
 			case key.Matches(msg, m.keys.Up):
 				m.scrollViewUp()
+			case key.Matches(msg, m.keys.Left):
+				m.scrollViewLeft()
+			case key.Matches(msg, m.keys.Right):
+				m.scrollViewRight()
 			case key.Matches(msg, m.keys.Top):
 				m.viewOffset = 0
+				m.viewHOffset = 0
 			case key.Matches(msg, m.keys.Bottom):
 				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
 				m.viewOffset = maxOffset
+				m.viewHOffset = 0
 			}
 			return m, nil
 		}
@@ -827,6 +839,7 @@ func (m model) handleViewerSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 func (m *model) recomputeViewerMatches() {
 	m.viewSearchMatches = nil
 	m.viewSearchCursor = 0
+	m.viewHOffset = 0
 	if m.viewSearchQuery == "" || m.viewContent == nil || m.viewContent.Binary {
 		return
 	}
@@ -844,6 +857,14 @@ func (m *model) recomputeViewerMatches() {
 			offset += idx + len(query)
 		}
 	}
+	// Vim-style incremental search: as the user types, follow the first match
+	// so it is visible immediately. Without this jump, matches past the line
+	// end (long minified JSON, base64 blobs, etc.) stayed clipped off-screen
+	// and the status bar's "Match 1/N" referred to a highlight no one could
+	// see — which is the exact bug this fixed.
+	if len(m.viewSearchMatches) > 0 {
+		m.scrollToViewerMatch()
+	}
 }
 
 func (m *model) scrollToViewerMatch() {
@@ -851,13 +872,62 @@ func (m *model) scrollToViewerMatch() {
 		return
 	}
 	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
+	targetCol := m.viewSearchMatches[m.viewSearchCursor][1]
 	visHeight := m.viewVisibleHeight()
+	lines := splitFileLines(m.viewContent.Data)
+	totalLines := len(lines)
 	desired := max(targetLine-visHeight/2, 0)
-	maxOffset := max(fileViewLineCount(m.viewContent)-visHeight, 0)
+	maxOffset := max(totalLines-visHeight, 0)
 	if desired > maxOffset {
 		desired = maxOffset
 	}
 	m.viewOffset = desired
+
+	// Translate the rune-indexed match column into a display column so wide
+	// characters before the match shift the offset correctly. ansi.StringWidth
+	// is grapheme-aware and matches the renderer's truncate metric.
+	displayCol := targetCol
+	if targetLine < totalLines {
+		runes := []rune(lines[targetLine])
+		if targetCol <= len(runes) {
+			displayCol = ansi.StringWidth(string(runes[:targetCol]))
+		}
+	}
+
+	visWidth := m.viewVisibleWidthFor(totalLines)
+	if visWidth <= 0 {
+		m.viewHOffset = 0
+		return
+	}
+	// Bring the match into view if it's outside [hOffset, hOffset+visWidth).
+	// Vim's sidescroll behavior centers the match horizontally when it would
+	// otherwise be off-screen, mirroring how vertical scroll centers it.
+	if displayCol < m.viewHOffset || displayCol >= m.viewHOffset+visWidth {
+		m.viewHOffset = max(displayCol-visWidth/2, 0)
+	}
+}
+
+// viewVisibleWidth returns the column budget available for line content
+// (panel width minus the gutter and panel borders). Used by horizontal
+// scrolling to decide when a match has fallen off the right edge. The 2
+// columns subtracted match renderFileView's contentWidth = m.width - 2.
+func (m *model) viewVisibleWidth() int {
+	if m.viewContent == nil {
+		return 0
+	}
+	return m.viewVisibleWidthFor(fileViewLineCount(m.viewContent))
+}
+
+// viewVisibleWidthFor is the totalLines-cached form, used inside
+// scrollToViewerMatch where the line split has already happened.
+func (m *model) viewVisibleWidthFor(totalLines int) int {
+	if m.width <= 0 {
+		return 0
+	}
+	contentWidth := m.width - 2
+	gutterDigits := len(fmt.Sprintf("%d", max(totalLines, 1))) + 1
+	// gutter is "%*d " — gutterDigits already accounts for the trailing space.
+	return max(contentWidth-gutterDigits, 1)
 }
 
 func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
@@ -1302,6 +1372,7 @@ func (m model) viewReady() tea.View {
 		viewer := renderFileView(viewerParams{
 			content:       m.viewContent,
 			offset:        m.viewOffset,
+			hOffset:       m.viewHOffset,
 			width:         m.width,
 			height:        panelHeight,
 			loading:       m.viewState == viewLoading,
@@ -1699,6 +1770,19 @@ func (m *model) scrollViewUp() {
 	if m.viewOffset > 0 {
 		m.viewOffset--
 	}
+}
+
+// hScrollStep is the column delta for one h/l keystroke. Stepping a single
+// column per press feels sluggish on long lines; 4 columns matches what most
+// terminal pagers use for arrow-key h-scroll.
+const hScrollStep = 4
+
+func (m *model) scrollViewRight() {
+	m.viewHOffset += hScrollStep
+}
+
+func (m *model) scrollViewLeft() {
+	m.viewHOffset = max(m.viewHOffset-hScrollStep, 0)
 }
 
 func (m *model) viewVisibleHeight() int {

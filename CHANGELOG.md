@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- File-viewer search no longer reports a "match" that is invisible. When a
+  search hit lies past the right edge of a long line, the viewer now
+  horizontally scrolls so the match is centered in view, matching vim's
+  `sidescroll` behavior. A `«` marker on the left edge signals that text
+  continues off-screen.
+
+### Added
+- File viewer: `h` / `l` (and `←` / `→`) scroll horizontally for inspecting
+  lines wider than the panel. `g` / `G` reset horizontal scroll along with
+  vertical, matching vim's line-jump semantics.
+
 ## [v1.4.0] - 2026-06-06
 
 Podman support and explicit cache management.

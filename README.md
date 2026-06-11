@@ -194,6 +194,7 @@ source <(layerx completion bash)
 | `Tab`       | Switch panel (layers ↔ file tree)                            |
 | `j` / `k`   | Move up / down                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
+| `h` / `l`   | Scroll left / right (file viewer, long lines)                |
 | `Enter`     | Open file viewer; expand or collapse a folder                |
 | `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |
 | `/`         | Filter file tree (tree) / search in viewer (viewer)          |

@@ -13,6 +13,7 @@ import (
 type viewerParams struct {
 	content      *image.FileContent
 	offset       int
+	hOffset      int
 	width        int
 	height       int
 	loading      bool
@@ -112,15 +113,21 @@ func renderFileView(p viewerParams) string {
 		gutterW := ansi.StringWidth(gutter)
 
 		maxLineWidth := max(contentWidth-gutterW, 1)
-		if syntaxHighlight {
-			if ansi.StringWidth(line) > maxLineWidth {
-				line = ansi.Truncate(line, maxLineWidth, "…")
-			}
-		} else if ansi.StringWidth(line) > maxLineWidth {
-			line = ansi.Truncate(line, maxLineWidth, "…")
+		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
+
+		// Horizontal scroll: keep the styled output intact, then trim from
+		// the left by display columns. ansi.TruncateLeft is grapheme-aware
+		// and preserves ANSI escapes, so chroma colors and search-match
+		// backgrounds carry through. The leading "«" only renders when the
+		// cut actually drops content; if the line is shorter than hOffset,
+		// TruncateLeft returns "" and the row is rendered blank.
+		if p.hOffset > 0 {
+			lineContent = ansi.TruncateLeft(lineContent, p.hOffset, "«")
+		}
+		if ansi.StringWidth(lineContent) > maxLineWidth {
+			lineContent = ansi.Truncate(lineContent, maxLineWidth, "…")
 		}
 
-		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
 		fullLine := gutter + lineContent
 		if w := ansi.StringWidth(fullLine); w > contentWidth {
 			lineContent = ansi.Truncate(lineContent, contentWidth-gutterW, "…")
