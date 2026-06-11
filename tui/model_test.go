@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1334,7 +1335,11 @@ func TestViewerScrollDown(t *testing.T) {
 
 	updated, _ := m.Update(keyPress('j'))
 	um := updated.(model)
-	assert.Equal(t, 1, um.viewOffset)
+	// 'j' now moves the cursor; viewOffset only shifts when the cursor
+	// leaves the visible window. Row 0→1 stays within view, so the
+	// offset is unchanged but the cursor row advanced.
+	assert.Equal(t, 0, um.viewOffset)
+	assert.Equal(t, 1, um.viewCursorRow)
 }
 
 func TestViewerScrollUpAtTopStays(t *testing.T) {
@@ -1782,7 +1787,11 @@ func TestViewerScrollStillWorksWithoutSearch(t *testing.T) {
 
 	updated, _ := m.Update(keyPress('j'))
 	um := updated.(model)
-	assert.Equal(t, 1, um.viewOffset)
+	// 'j' now drives the cursor; viewOffset stays 0 until the cursor
+	// reaches the bottom of the visible window. The regression this test
+	// guards is that the j-key path still functions when no search is in
+	// flight, not the specific offset jump.
+	assert.Equal(t, 1, um.viewCursorRow)
 }
 
 func TestViewerEscCascadeWithSearch(t *testing.T) {
@@ -2152,4 +2161,111 @@ func TestViewerCursorPreservedAcrossSearchClear(t *testing.T) {
 	um := send(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Equal(t, viewReady, um.viewState)
 	assert.Equal(t, 3, um.viewCursorCol, "cursor must survive search clear")
+}
+
+// Regression: pressing 'l' repeatedly on a long line used to push the cursor
+// to a column that the renderer's safety-truncate then chopped off, leaving
+// no inverse-video cursor in the rendered panel. Vertical key presses
+// "rescued" the cursor by re-clamping it on a shorter line. The fix tightens
+// the right-edge boundary in adjustViewerScroll to reserve one cell for the
+// "…" indicator so the cursor always lands inside the rendered body.
+func TestViewerCursorRemainsVisibleOnHorizontalScroll(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	m := setupViewerModel([]byte(long + "\n"))
+	m.width = 120
+	m.height = 40
+
+	cur := m
+	for range 150 {
+		cur = send(cur, keyPress('l'))
+	}
+
+	body := renderFileView(viewerParams{
+		content:     cur.viewContent,
+		offset:      cur.viewOffset,
+		horizOffset: cur.viewHorizOffset,
+		cursorRow:   cur.viewCursorRow,
+		cursorCol:   cur.viewCursorCol,
+		width:       cur.width,
+		height:      cur.height - 8,
+	})
+
+	assert.Contains(t, body, "\x1b[7m",
+		"cursor must remain visible (reverse SGR present) after deep horizontal scroll")
+	for ln := range strings.SplitSeq(body, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(ln), cur.width,
+			"no rendered line may exceed the panel width")
+	}
+}
+
+// Regression: the renderer's safety-truncate would silently drop the cursor
+// cell when adjustViewerScroll let it land at the rightmost rendered column.
+// The cursor display column is one cell inside the right edge, so the line's
+// width never exceeds the panel and overlay survives the safety net.
+func TestViewerCursorVisibleAtFarRightOfLongLine(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	m := setupViewerModel([]byte(long + "\n"))
+	m.width = 120
+	m.height = 40
+	// Place cursor far right so the boundary case fires.
+	m.viewCursorCol = 199
+	m.adjustViewerScroll()
+
+	body := renderFileView(viewerParams{
+		content:     m.viewContent,
+		offset:      m.viewOffset,
+		horizOffset: m.viewHorizOffset,
+		cursorRow:   m.viewCursorRow,
+		cursorCol:   m.viewCursorCol,
+		width:       m.width,
+		height:      m.height - 8,
+	})
+
+	assert.Contains(t, body, "\x1b[7m",
+		"cursor must render even at the far-right of a long line")
+}
+
+// Regression: pressing Enter in the search bar used to close the input
+// without moving the cursor to the match. A match past the visible viewport
+// (vertically or horizontally) stayed off-screen even though the status bar
+// reported "1/1" — the search felt broken. Enter now mirrors n/N and
+// vim/less: confirm the query AND jump to the current match.
+func TestViewerSearchEnterJumpsToMatch(t *testing.T) {
+	long := "x" + strings.Repeat("y", 200) + "needle" + strings.Repeat("z", 50)
+	m := setupViewerModel([]byte(long + "\n"))
+	m.width = 120
+	m.height = 40
+
+	// Open search bar.
+	m = send(m, keyPress('/'))
+	require.True(t, m.viewSearchActive)
+	// Type "needle".
+	for _, r := range "needle" {
+		m = send(m, keyPress(r))
+	}
+	require.Greater(t, len(m.viewSearchMatches), 0, "test setup: must find match")
+
+	// Enter confirms and jumps.
+	m = send(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	assert.False(t, m.viewSearchActive, "Enter exits the input")
+	expectedCol := m.viewSearchMatches[0][1]
+	assert.Equal(t, expectedCol, m.viewCursorCol,
+		"cursor lands on the match after Enter")
+	assert.Greater(t, m.viewHorizOffset, 0,
+		"horizontal scroll brings off-screen match into view")
+}
+
+// Enter in an empty search (no matches) must still close the input cleanly
+// without panicking on the empty match slice.
+func TestViewerSearchEnterWithNoMatchesIsNoop(t *testing.T) {
+	m := setupViewerModel([]byte("hello world\n"))
+	m = send(m, keyPress('/'))
+	for _, r := range "zzznotfound" {
+		m = send(m, keyPress(r))
+	}
+	require.Equal(t, 0, len(m.viewSearchMatches))
+
+	m = send(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	assert.False(t, m.viewSearchActive)
+	assert.Equal(t, 0, m.viewCursorCol, "cursor unchanged on empty match list")
 }

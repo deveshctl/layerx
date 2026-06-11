@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highlighted text remained off-screen because lines wider than the
   panel were silently right-truncated and there was no way to scroll
   horizontally.
+- File viewer: the cursor no longer disappears when scrolling right
+  with `l` past the panel width. The horizontal-scroll boundary now
+  reserves one cell for the `…` indicator, so the cursor cannot land
+  on the column that the renderer's safety-truncate would chop off.
+  Pressing `j` / `k` to "rescue" the cursor is no longer needed.
+- File viewer: pressing Enter inside the search input now jumps to the
+  current match (matching vim/less). Previously Enter only closed the
+  input — a match outside the visible viewport would stay off-screen
+  even though the status bar reported `1/1`.
 
 ### Added
 - File viewer: vim-style movable cursor. `j` / `k` / `h` / `l` (and the

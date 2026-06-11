@@ -822,6 +822,14 @@ func (m model) handleViewerSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 	switch msg.Code {
 	case tea.KeyEnter:
 		m.viewSearchActive = false
+		// Mirrors vim/less: pressing Enter both confirms the query and jumps
+		// to the current match. Without the jump, a search hit far past the
+		// visible viewport (or outside the horizontal slice on a long line)
+		// stays off-screen even though the status bar reports "1/1", which
+		// reads as a broken search.
+		if len(m.viewSearchMatches) > 0 {
+			m.scrollToViewerMatch()
+		}
 		return m, nil
 	case tea.KeyBackspace:
 		if len(m.viewSearchQuery) > 0 {
@@ -957,12 +965,26 @@ func (m *model) adjustViewerScroll() {
 	runes := m.viewerLineRunes(m.viewCursorRow)
 	col := min(m.viewCursorCol, len(runes))
 	cursorDispCol := lipgloss.Width(string(runes[:col]))
-	// Reserve one cell on the right so the cursor never sits flush
-	// against the truncation ellipsis — matches typical pager UX.
+	lineDispWidth := lipgloss.Width(string(runes))
+	// rightEdge is the first display col that's NOT visible. When the line
+	// fits the panel and we're not already scrolled, the full maxLineWidth
+	// budget is usable. Otherwise an "…" indicator (trailing when
+	// horizOffset==0 and the line overflows, leading when horizOffset>0)
+	// steals one cell, so the cursor must stop one column earlier — else
+	// it lands at a column the renderer's safety-truncate then chops off,
+	// producing an invisible cursor on long lines.
+	rightEdge := m.viewHorizOffset + maxLineWidth
+	if lineDispWidth > maxLineWidth || m.viewHorizOffset > 0 {
+		rightEdge = m.viewHorizOffset + maxLineWidth - 1
+	}
 	if cursorDispCol < m.viewHorizOffset {
 		m.viewHorizOffset = cursorDispCol
-	} else if cursorDispCol >= m.viewHorizOffset+maxLineWidth {
-		m.viewHorizOffset = cursorDispCol - maxLineWidth + 1
+	} else if cursorDispCol >= rightEdge {
+		// After the shift, horizOffset becomes > 0 — one cell is reserved
+		// for the leading "…" — so the post-shift visible source range is
+		// [newHorizOffset, newHorizOffset+maxLineWidth-1). Place the cursor
+		// at the rightmost source col within that range.
+		m.viewHorizOffset = cursorDispCol - maxLineWidth + 2
 	}
 	if m.viewHorizOffset < 0 {
 		m.viewHorizOffset = 0
