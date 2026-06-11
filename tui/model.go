@@ -1408,6 +1408,11 @@ func (m model) viewReady() tea.View {
 		content = m.renderWasteOverlay()
 	}
 
+	// Release mouse capture when the file viewer is open so the terminal
+	// handles mouse events natively, enabling text selection by click+drag.
+	if m.viewState != viewNone {
+		return finalizeViewNoMouse(tea.NewView(content))
+	}
 	return finalizeView(tea.NewView(content))
 }
 
@@ -1565,7 +1570,9 @@ func (m model) renderViewerStatusBar() string {
 	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
 
 	hints := " " +
-		keyStyle.Render("j/k") + " " + descStyle.Render("scroll") + " " +
+		keyStyle.Render("j/k") + " " + descStyle.Render("up/down") + " " +
+		sepStyle.Render("│") + " " +
+		keyStyle.Render("h/l") + " " + descStyle.Render("left/right") + " " +
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("/") + " " + descStyle.Render("search") + " " +
 		sepStyle.Render("│") + " " +
