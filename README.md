@@ -153,7 +153,7 @@ sudo rpm -i layerx_linux_arm64.rpm
 
 ### Direct download
 
-Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.4.0`) in the URLs above.
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.4.1`) in the URLs above.
 
 ### Build from source
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.4.1] - 2026-06-12
+
+`layerx build` thin wrapper plus a Docker-resolver fix for image-digest refs.
+
 ### Added
 - `layerx build [BUILD_ARGS...]` thin wrapper around `docker build` /
   `podman build`. Forwards every argument verbatim (including `-t`,
