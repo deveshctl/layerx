@@ -2075,25 +2075,63 @@ func TestViewerEsc_ClearsHOffsetWithSearch(t *testing.T) {
 	assert.Equal(t, 0, um.viewHOffset, "Esc must reset horizontal scroll alongside the query")
 }
 
-func TestViewerHKey_ScrollsLeft(t *testing.T) {
+// h moves the logical cursor left; the viewport (hOffset) only shifts
+// when the cursor would otherwise fall off the left edge. From column 0
+// with no horizontal scroll the row stays put — vim's sidescroll model.
+func TestViewerHKey_MovesCursorLeft(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4}
-	m.viewHOffset = 10
+	// Long line so the cursor has somewhere to be; place the viewport
+	// past the start so a leftward step on the cursor at the left edge
+	// drags the viewport but no further than column 0.
+	long := strings.Repeat("x", 200)
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))}
+	m.viewHOffset = 50
+	m.viewCursorCol = 50 // at the visible left edge
 
 	um := send(m, keyPress('h'))
-	assert.Less(t, um.viewHOffset, 10, "h must decrease hOffset")
-	assert.GreaterOrEqual(t, um.viewHOffset, 0)
+	assert.Less(t, um.viewCursorCol, 50, "h must move the cursor left")
+	assert.GreaterOrEqual(t, um.viewCursorCol, 0)
+	assert.LessOrEqual(t, um.viewHOffset, um.viewCursorCol,
+		"viewport must follow the cursor across the left edge")
 }
 
-func TestViewerLKey_ScrollsRight(t *testing.T) {
+// l moves the logical cursor right within the visible area; the viewport
+// stays put as long as the cursor is on-screen. Pressing l from column 0
+// in a wide window must NOT shift hOffset — that was the bug.
+func TestViewerLKey_KeepsViewportStable(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4}
+	long := strings.Repeat("x", 200)
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))}
 	m.viewHOffset = 0
+	m.viewCursorCol = 0
 
 	um := send(m, keyPress('l'))
-	assert.Greater(t, um.viewHOffset, 0, "l must increase hOffset")
+	assert.Greater(t, um.viewCursorCol, 0, "l must advance the cursor")
+	assert.Equal(t, 0, um.viewHOffset,
+		"cursor inside the visible window must not shift the viewport")
+}
+
+// When the cursor walks past the right edge, the viewport scrolls just
+// enough to keep the cursor visible — no more.
+func TestViewerLKey_ScrollsViewportAtRightEdge(t *testing.T) {
+	m := setupModel()
+	m.viewState = viewReady
+	long := strings.Repeat("x", 500)
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))}
+	visWidth := m.viewVisibleWidth()
+	require.Greater(t, visWidth, 0)
+	// Park the cursor at the rightmost visible column. Next l takes it
+	// past the edge and must drag the viewport along.
+	m.viewHOffset = 0
+	m.viewCursorCol = visWidth - 1
+
+	um := send(m, keyPress('l'))
+	assert.Greater(t, um.viewHOffset, 0, "viewport must scroll when cursor crosses right edge")
+	assert.GreaterOrEqual(t, um.viewCursorCol, um.viewHOffset)
+	assert.Less(t, um.viewCursorCol, um.viewHOffset+visWidth,
+		"cursor must remain inside the visible window after the scroll")
 }
 
 func TestViewerHKey_ClampsAtZero(t *testing.T) {

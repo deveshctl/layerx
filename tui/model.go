@@ -190,6 +190,7 @@ type model struct {
 	viewHighlightedLines []string
 	viewOffset       int
 	viewHOffset      int
+	viewCursorCol    int
 	viewOriginLayer  int
 	viewOriginCmd    string
 	viewSearchActive bool
@@ -387,6 +388,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewHighlightedLines = nil
 		m.viewOffset = 0
 		m.viewHOffset = 0
+		m.viewCursorCol = 0
 		// Defer Chroma syntax highlighting to a tea.Cmd. Tokenising even a
 		// few hundred KB of source can take hundreds of ms; running it
 		// inline here would freeze the TUI (no input, no spinner, no
@@ -459,6 +461,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewSearchMatches = nil
 					m.viewSearchCursor = 0
 					m.viewHOffset = 0
+					m.viewCursorCol = 0
 					return m, nil
 				}
 				if m.viewSearchQuery != "" {
@@ -466,6 +469,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewSearchMatches = nil
 					m.viewSearchCursor = 0
 					m.viewHOffset = 0
+					m.viewCursorCol = 0
 					return m, nil
 				}
 				m.viewState = viewNone
@@ -473,6 +477,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewHighlightedLines = nil
 				m.viewOffset = 0
 				m.viewHOffset = 0
+				m.viewCursorCol = 0
 				m.viewRequestID++
 				if m.viewerCancel != nil {
 					m.viewerCancel()
@@ -589,10 +594,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Top):
 				m.viewOffset = 0
 				m.viewHOffset = 0
+				m.viewCursorCol = 0
 			case key.Matches(msg, m.keys.Bottom):
 				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
 				m.viewOffset = maxOffset
 				m.viewHOffset = 0
+				m.viewCursorCol = 0
 			}
 			return m, nil
 		}
@@ -840,6 +847,7 @@ func (m *model) recomputeViewerMatches() {
 	m.viewSearchMatches = nil
 	m.viewSearchCursor = 0
 	m.viewHOffset = 0
+	m.viewCursorCol = 0
 	if m.viewSearchQuery == "" || m.viewContent == nil || m.viewContent.Binary {
 		return
 	}
@@ -897,6 +905,7 @@ func (m *model) scrollToViewerMatch() {
 	visWidth := m.viewVisibleWidthFor(totalLines)
 	if visWidth <= 0 {
 		m.viewHOffset = 0
+		m.viewCursorCol = displayCol
 		return
 	}
 	// Bring the match into view if it's outside [hOffset, hOffset+visWidth).
@@ -905,6 +914,9 @@ func (m *model) scrollToViewerMatch() {
 	if displayCol < m.viewHOffset || displayCol >= m.viewHOffset+visWidth {
 		m.viewHOffset = max(displayCol-visWidth/2, 0)
 	}
+	// Park the cursor on the match so subsequent h/l moves continue from
+	// here rather than jumping back to column 0.
+	m.viewCursorCol = displayCol
 }
 
 // viewVisibleWidth returns the column budget available for line content
@@ -1373,6 +1385,7 @@ func (m model) viewReady() tea.View {
 			content:       m.viewContent,
 			offset:        m.viewOffset,
 			hOffset:       m.viewHOffset,
+			cursorCol:     m.viewCursorCol,
 			width:         m.width,
 			height:        panelHeight,
 			loading:       m.viewState == viewLoading,
@@ -1779,17 +1792,64 @@ func (m *model) scrollViewUp() {
 	}
 }
 
-// hScrollStep is the column delta for one h/l keystroke. Stepping a single
-// column per press feels sluggish on long lines; 4 columns matches what most
+// hScrollStep is the column delta for one h/l keystroke. Single-column
+// stepping feels sluggish on long lines; 4 columns matches what most
 // terminal pagers use for arrow-key h-scroll.
 const hScrollStep = 4
 
+// scrollViewRight moves the logical cursor right by hScrollStep, then
+// shifts the viewport only when the cursor would cross the right edge —
+// matching vim's sidescroll behavior, where h/l move the cursor and the
+// window only scrolls when the cursor would otherwise leave it.
 func (m *model) scrollViewRight() {
-	m.viewHOffset += hScrollStep
+	maxCol := m.viewMaxCursorCol()
+	if m.viewCursorCol >= maxCol {
+		return
+	}
+	m.viewCursorCol = min(m.viewCursorCol+hScrollStep, maxCol)
+	visWidth := m.viewVisibleWidth()
+	if visWidth > 0 && m.viewCursorCol >= m.viewHOffset+visWidth {
+		m.viewHOffset = m.viewCursorCol - visWidth + 1
+	}
 }
 
+// scrollViewLeft is the mirror of scrollViewRight: cursor first, then
+// shift the viewport only if the cursor would fall left of the visible
+// region.
 func (m *model) scrollViewLeft() {
-	m.viewHOffset = max(m.viewHOffset-hScrollStep, 0)
+	if m.viewCursorCol == 0 {
+		m.viewHOffset = 0
+		return
+	}
+	m.viewCursorCol = max(m.viewCursorCol-hScrollStep, 0)
+	if m.viewCursorCol < m.viewHOffset {
+		m.viewHOffset = m.viewCursorCol
+	}
+}
+
+// viewMaxCursorCol bounds the cursor by the longest line in the visible
+// region. Bounding by the whole file would force a full O(N·W) scan on
+// every h/l press; bounding by visible lines keeps the cost proportional
+// to viewport height and matches what the user can actually see.
+func (m *model) viewMaxCursorCol() int {
+	if m.viewContent == nil {
+		return 0
+	}
+	lines := splitFileLines(m.viewContent.Data)
+	if len(lines) == 0 {
+		return 0
+	}
+	end := min(m.viewOffset+m.viewVisibleHeight(), len(lines))
+	if m.viewOffset >= end {
+		return 0
+	}
+	maxW := 0
+	for _, line := range lines[m.viewOffset:end] {
+		if w := ansi.StringWidth(line); w > maxW {
+			maxW = w
+		}
+	}
+	return maxW
 }
 
 func (m *model) viewVisibleHeight() int {
