@@ -1792,28 +1792,24 @@ func (m *model) scrollViewUp() {
 	}
 }
 
-// hScrollStep is the column delta for one h/l keystroke. Single-column
-// stepping feels sluggish on long lines; 4 columns matches what most
-// terminal pagers use for arrow-key h-scroll.
-const hScrollStep = 4
-
-// scrollViewRight moves the logical cursor right by hScrollStep, then
+// scrollViewRight moves the logical cursor one cell to the right, then
 // shifts the viewport only when the cursor would cross the right edge —
-// matching vim's sidescroll behavior, where h/l move the cursor and the
-// window only scrolls when the cursor would otherwise leave it.
+// matching vim's h/l semantics, where every keystroke advances exactly
+// one column and the window only scrolls when the cursor would otherwise
+// leave it.
 func (m *model) scrollViewRight() {
 	maxCol := m.viewMaxCursorCol()
 	if m.viewCursorCol >= maxCol {
 		return
 	}
-	m.viewCursorCol = min(m.viewCursorCol+hScrollStep, maxCol)
+	m.viewCursorCol++
 	visWidth := m.viewVisibleWidth()
 	if visWidth > 0 && m.viewCursorCol >= m.viewHOffset+visWidth {
 		m.viewHOffset = m.viewCursorCol - visWidth + 1
 	}
 }
 
-// scrollViewLeft is the mirror of scrollViewRight: cursor first, then
+// scrollViewLeft is the mirror of scrollViewRight: one cell at a time,
 // shift the viewport only if the cursor would fall left of the visible
 // region.
 func (m *model) scrollViewLeft() {
@@ -1821,7 +1817,7 @@ func (m *model) scrollViewLeft() {
 		m.viewHOffset = 0
 		return
 	}
-	m.viewCursorCol = max(m.viewCursorCol-hScrollStep, 0)
+	m.viewCursorCol--
 	if m.viewCursorCol < m.viewHOffset {
 		m.viewHOffset = m.viewCursorCol
 	}
