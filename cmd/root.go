@@ -32,6 +32,7 @@ Common usage:
   layerx IMAGE              browse layers interactively in a TUI
   layerx ci IMAGE           gate a build on efficiency thresholds
   layerx compare A B        diff two images for regressions
+  layerx build [ARGS...]    build via the active engine, then inspect the result
 
 IMAGE_OR_ARCHIVE accepts a Docker image reference (e.g. "nginx:latest") or
 a path to a local archive produced by "docker save" or an OCI layout

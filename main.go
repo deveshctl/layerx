@@ -42,6 +42,11 @@ func main() {
 	if _, ok := errors.AsType[*cmd.ErrCompareRegression](err); ok {
 		os.Exit(1)
 	}
+	if e, ok := errors.AsType[*cmd.ErrBuildFailed](err); ok {
+		// Mirror the engine's exit code so CI scripts treat
+		// `layerx build` exactly like `docker build` / `podman build`.
+		os.Exit(e.ExitCode)
+	}
 	os.Exit(2)
 }
 

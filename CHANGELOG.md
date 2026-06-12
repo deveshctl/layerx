@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `layerx build [BUILD_ARGS...]` thin wrapper around `docker build` /
+  `podman build`. Forwards every argument verbatim (including `-t`,
+  `--build-arg`, `--platform`, `--target`, `--file`, the build-context
+  path, and BuildKit flags), streams the engine's native progress output
+  to the terminal, and on success automatically opens the built image in
+  the layerx TUI. The image ID is recovered through the engine's
+  `--iidfile` (no terminal-output parsing); a user-supplied `--iidfile`
+  is respected. The engine binary follows the existing `--engine` flag
+  (`docker` / `podman` / `auto`); auto mirrors the same socket-probing
+  order layerx already uses to pick a resolver. On build failure layerx
+  exits with the engine's exit code and does not launch the TUI.
+- File viewer: `h` / `l` (and `←` / `→`) scroll horizontally for inspecting
+  lines wider than the panel. `g` / `G` reset horizontal scroll along with
+  vertical, matching vim's line-jump semantics.
+- File viewer status bar now shows `h/l` horizontal-scroll hint alongside
+  `j/k` so the navigation controls are self-documenting.
+- File viewer releases mouse capture while open, allowing text to be selected
+  by click-dragging in the terminal. Mouse wheel scrolling is still available
+  via keyboard (`j`/`k`, `h`/`l`). Mouse capture resumes when the viewer closes.
+
 ### Fixed
 - File viewer `h` / `l` are now vi-style cursor moves: each keystroke
   advances the cursor by one column within the visible area, and the
@@ -19,16 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   horizontally scrolls so the match is centered in view, matching vim's
   `sidescroll` behavior. A `«` marker on the left edge signals that text
   continues off-screen.
-
-### Added
-- File viewer: `h` / `l` (and `←` / `→`) scroll horizontally for inspecting
-  lines wider than the panel. `g` / `G` reset horizontal scroll along with
-  vertical, matching vim's line-jump semantics.
-- File viewer status bar now shows `h/l` horizontal-scroll hint alongside
-  `j/k` so the navigation controls are self-documenting.
-- File viewer releases mouse capture while open, allowing text to be selected
-  by click-dragging in the terminal. Mouse wheel scrolling is still available
-  via keyboard (`j`/`k`, `h`/`l`). Mouse capture resumes when the viewer closes.
 
 ## [v1.4.0] - 2026-06-06
 
