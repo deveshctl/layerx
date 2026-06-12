@@ -44,6 +44,7 @@ Other platforms: see [Install](#install).
 | Mode        | Command                                              | Best for                                                |
 |-------------|------------------------------------------------------|---------------------------------------------------------|
 | Interactive | `layerx IMAGE_OR_ARCHIVE`                            | Exploring layers, diffs, file contents, wasted bytes    |
+| Build       | `layerx build [BUILD_ARGS...]`                       | Build via docker/podman and inspect the result in one step |
 | CI          | `layerx ci IMAGE_OR_ARCHIVE` or `CI=true layerx ...` | Pipeline gates on efficiency / wasted bytes             |
 | Compare     | `layerx compare OLD NEW`                             | Side-by-side deltas between two builds; CI regression gate |
 | Export      | `layerx --json out.json IMAGE_OR_ARCHIVE`            | Scripts, dashboards, `jq`                               |

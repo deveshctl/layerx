@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `layerx build [BUILD_ARGS...]` thin wrapper around `docker build` /
+  `podman build`. Forwards every argument verbatim (including `-t`,
+  `--build-arg`, `--platform`, `--target`, `--file`, the build-context
+  path, and BuildKit flags), streams the engine's native progress output
+  to the terminal, and on success automatically opens the built image in
+  the layerx TUI. When `-t` / `--tag` is supplied, the first tag is used
+  as the TUI image reference (matching `docker build` UX); the engine's
+  `--iidfile` is only consulted as a fallback for untagged builds. The
+  engine binary follows the existing `--engine` flag (`docker` /
+  `podman` / `auto`); auto mirrors the same socket-probing order layerx
+  already uses to pick a resolver. On build failure layerx exits with
+  the engine's exit code and does not launch the TUI.
+- File viewer: `h` / `l` (and `←` / `→`) scroll horizontally for inspecting
+  lines wider than the panel. `g` / `G` reset horizontal scroll along with
+  vertical, matching vim's line-jump semantics.
+- File viewer status bar now shows `h/l` horizontal-scroll hint alongside
+  `j/k` so the navigation controls are self-documenting.
+- File viewer releases mouse capture while open, allowing text to be selected
+  by click-dragging in the terminal. Mouse wheel scrolling is still available
+  via keyboard (`j`/`k`, `h`/`l`). Mouse capture resumes when the viewer closes.
+
 ### Fixed
+- DockerResolver no longer tries to pull image content digests
+  (`sha256:<64hex>`) as if they were registry references. The `reference`
+  filter on the Docker daemon does not match content digests, so callers
+  that passed a raw image ID — e.g. `layerx build` falling back to
+  `--iidfile` for an untagged build — would hit "image not found" while
+  the image was sitting in the daemon. The resolver now detects ID-shaped
+  refs and uses `ImageInspect` directly.
 - File viewer `h` / `l` are now vi-style cursor moves: each keystroke
   advances the cursor by one column within the visible area, and the
   viewport only scrolls horizontally when the cursor would cross the
@@ -19,16 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   horizontally scrolls so the match is centered in view, matching vim's
   `sidescroll` behavior. A `«` marker on the left edge signals that text
   continues off-screen.
-
-### Added
-- File viewer: `h` / `l` (and `←` / `→`) scroll horizontally for inspecting
-  lines wider than the panel. `g` / `G` reset horizontal scroll along with
-  vertical, matching vim's line-jump semantics.
-- File viewer status bar now shows `h/l` horizontal-scroll hint alongside
-  `j/k` so the navigation controls are self-documenting.
-- File viewer releases mouse capture while open, allowing text to be selected
-  by click-dragging in the terminal. Mouse wheel scrolling is still available
-  via keyboard (`j`/`k`, `h`/`l`). Mouse capture resumes when the viewer closes.
 
 ## [v1.4.0] - 2026-06-06
 

@@ -638,3 +638,28 @@ func TestParseLayers_HonoursContextCancel(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+func TestIsImageDigestRef(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  string
+		want bool
+	}{
+		{"valid lowercase", "sha256:b217d8cee53a42fb1d63bd64968e49dff488a3f0ee2047fd440e28b68ccd1678", true},
+		{"valid uppercase hex", "sha256:B217D8CEE53A42FB1D63BD64968E49DFF488A3F0EE2047FD440E28B68CCD1678", true},
+		{"too short", "sha256:b217d8c", false},
+		{"too long", "sha256:b217d8cee53a42fb1d63bd64968e49dff488a3f0ee2047fd440e28b68ccd16780", false},
+		{"non-hex", "sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", false},
+		{"missing prefix", "b217d8cee53a42fb1d63bd64968e49dff488a3f0ee2047fd440e28b68ccd1678", false},
+		{"plain tag", "nginx:latest", false},
+		{"empty", "", false},
+		{"prefix only", "sha256:", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isImageDigestRef(tc.ref); got != tc.want {
+				t.Fatalf("isImageDigestRef(%q) = %v, want %v", tc.ref, got, tc.want)
+			}
+		})
+	}
+}
