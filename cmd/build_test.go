@@ -280,3 +280,29 @@ func TestErrBuildFailed_IsTyped(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 7", target.ExitCode)
 	}
 }
+
+func TestFirstTagFromArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"short flag space form", []string{"-t", "myimage", "."}, "myimage"},
+		{"short flag equals form", []string{"-t=myimage:1.0", "."}, "myimage:1.0"},
+		{"long flag space form", []string{"--tag", "myimage", "."}, "myimage"},
+		{"long flag equals form", []string{"--tag=myimage:dev", "."}, "myimage:dev"},
+		{"first of multiple tags wins", []string{"-t", "first:latest", "-t", "second:1.0", "."}, "first:latest"},
+		{"no tag", []string{"--build-arg", "X=1", "."}, ""},
+		{"trailing -t with no value", []string{"-t"}, ""},
+		{"-- stops parsing", []string{"--", "-t", "tricky", "."}, ""},
+		{"tag-like positional after build-arg is not picked up", []string{"--build-arg", "VERSION=1", "."}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := firstTagFromArgs(tc.args)
+			if got != tc.want {
+				t.Fatalf("firstTagFromArgs(%v) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}

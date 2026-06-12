@@ -134,6 +134,23 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 // ensureImageWithProgress checks if the image exists locally; if not, pulls it with progress.
 func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef string, progress chan<- ProgressEvent) error {
+	if isImageDigestRef(imageRef) {
+		_, err := r.cli.ImageInspect(ctx, imageRef)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		if isImageInspectNotFound(err) {
+			return &ErrImageNotFound{Ref: imageRef, Cause: err}
+		}
+		if isDaemonUnreachable(err) {
+			return &ErrDaemonNotRunning{Cause: err}
+		}
+		return fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
+	}
+
 	f := make(client.Filters).Add("reference", imageRef)
 	result, err := r.cli.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
@@ -171,6 +188,32 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
 	return nil
+}
+
+// isImageDigestRef reports whether ref is a content-addressable image
+// identifier (sha256:<64hex>) rather than a name/tag. The Docker reference
+// filter does not match content digests, so callers must use ImageInspect
+// directly for IDs. Validating the hex tail prevents a malformed ref that
+// happens to start with "sha256:" from silently bypassing the normal path.
+func isImageDigestRef(ref string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(ref, prefix) {
+		return false
+	}
+	hex := ref[len(prefix):]
+	if len(hex) != 64 {
+		return false
+	}
+	for _, c := range hex {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // streamPullProgress reads JSON pull events and sends progress updates.

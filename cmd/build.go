@@ -90,13 +90,21 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	iidPath, ownsIIDFile, err := ensureIIDFile(&engineArgs)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		return err
-	}
-	if ownsIIDFile {
-		defer os.Remove(iidPath)
+	firstTag := firstTagFromArgs(engineArgs)
+
+	var (
+		iidPath     string
+		ownsIIDFile bool
+	)
+	if firstTag == "" {
+		iidPath, ownsIIDFile, err = ensureIIDFile(&engineArgs)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			return err
+		}
+		if ownsIIDFile {
+			defer os.Remove(iidPath)
+		}
 	}
 
 	fullArgs := append([]string{"build"}, engineArgs...)
@@ -115,21 +123,52 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to invoke %s build: %w", binary, err)
 	}
 
-	imageID, err := readIIDFile(iidPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: build succeeded but could not read image id from %s: %v\n", iidPath, err)
-		return nil
+	imageRef := firstTag
+	if imageRef == "" {
+		id, readErr := readIIDFile(iidPath)
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: build succeeded but could not determine image to inspect (%v); pass -t TAG to layerx build to inspect by tag\n", readErr)
+			return nil
+		}
+		imageRef = id
 	}
 
-	resolver, err := selectResolver(imageID)
+	resolver, err := selectResolver(imageRef)
 	if err != nil {
 		return err
 	}
 	return tui.Run(tui.Config{
-		ImageRef: imageID,
+		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCacheRequested(),
 	})
+}
+
+// firstTagFromArgs returns the first -t / --tag value in args, or "" if none.
+// Both Docker and Podman accept -t and --tag with either a space or = form;
+// only the first occurrence is used because all tags resolve to the same
+// image and "the first one" matches what the engine itself would surface as
+// the canonical reference for output.
+func firstTagFromArgs(args []string) string {
+	for i := range len(args) {
+		a := args[i]
+		if a == "--" {
+			return ""
+		}
+		if a == "-t" || a == "--tag" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if v, ok := strings.CutPrefix(a, "--tag="); ok {
+			return v
+		}
+		if v, ok := strings.CutPrefix(a, "-t="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func extractLayerxFlags(args []string) ([]string, error) {
