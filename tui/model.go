@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -188,6 +189,8 @@ type model struct {
 	viewContent      *image.FileContent
 	viewHighlightedLines []string
 	viewOffset       int
+	viewHOffset      int
+	viewCursorCol    int
 	viewOriginLayer  int
 	viewOriginCmd    string
 	viewSearchActive bool
@@ -384,6 +387,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewContent = msg.content
 		m.viewHighlightedLines = nil
 		m.viewOffset = 0
+		m.viewHOffset = 0
+		m.viewCursorCol = 0
 		// Defer Chroma syntax highlighting to a tea.Cmd. Tokenising even a
 		// few hundred KB of source can take hundreds of ms; running it
 		// inline here would freeze the TUI (no input, no spinner, no
@@ -455,18 +460,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewSearchQuery = ""
 					m.viewSearchMatches = nil
 					m.viewSearchCursor = 0
+					m.viewHOffset = 0
+					m.viewCursorCol = 0
 					return m, nil
 				}
 				if m.viewSearchQuery != "" {
 					m.viewSearchQuery = ""
 					m.viewSearchMatches = nil
 					m.viewSearchCursor = 0
+					m.viewHOffset = 0
+					m.viewCursorCol = 0
 					return m, nil
 				}
 				m.viewState = viewNone
 				m.viewContent = nil
 				m.viewHighlightedLines = nil
 				m.viewOffset = 0
+				m.viewHOffset = 0
+				m.viewCursorCol = 0
 				m.viewRequestID++
 				if m.viewerCancel != nil {
 					m.viewerCancel()
@@ -576,11 +587,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollViewDown()
 			case key.Matches(msg, m.keys.Up):
 				m.scrollViewUp()
+			case key.Matches(msg, m.keys.Left):
+				m.scrollViewLeft()
+			case key.Matches(msg, m.keys.Right):
+				m.scrollViewRight()
 			case key.Matches(msg, m.keys.Top):
 				m.viewOffset = 0
+				m.viewHOffset = 0
+				m.viewCursorCol = 0
 			case key.Matches(msg, m.keys.Bottom):
 				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
 				m.viewOffset = maxOffset
+				m.viewHOffset = 0
+				m.viewCursorCol = 0
 			}
 			return m, nil
 		}
@@ -827,6 +846,8 @@ func (m model) handleViewerSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 func (m *model) recomputeViewerMatches() {
 	m.viewSearchMatches = nil
 	m.viewSearchCursor = 0
+	m.viewHOffset = 0
+	m.viewCursorCol = 0
 	if m.viewSearchQuery == "" || m.viewContent == nil || m.viewContent.Binary {
 		return
 	}
@@ -844,6 +865,14 @@ func (m *model) recomputeViewerMatches() {
 			offset += idx + len(query)
 		}
 	}
+	// Vim-style incremental search: as the user types, follow the first match
+	// so it is visible immediately. Without this jump, matches past the line
+	// end (long minified JSON, base64 blobs, etc.) stayed clipped off-screen
+	// and the status bar's "Match 1/N" referred to a highlight no one could
+	// see — which is the exact bug this fixed.
+	if len(m.viewSearchMatches) > 0 {
+		m.scrollToViewerMatch()
+	}
 }
 
 func (m *model) scrollToViewerMatch() {
@@ -851,13 +880,66 @@ func (m *model) scrollToViewerMatch() {
 		return
 	}
 	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
+	targetCol := m.viewSearchMatches[m.viewSearchCursor][1]
 	visHeight := m.viewVisibleHeight()
+	lines := splitFileLines(m.viewContent.Data)
+	totalLines := len(lines)
 	desired := max(targetLine-visHeight/2, 0)
-	maxOffset := max(fileViewLineCount(m.viewContent)-visHeight, 0)
+	maxOffset := max(totalLines-visHeight, 0)
 	if desired > maxOffset {
 		desired = maxOffset
 	}
 	m.viewOffset = desired
+
+	// Translate the rune-indexed match column into a display column so wide
+	// characters before the match shift the offset correctly. ansi.StringWidth
+	// is grapheme-aware and matches the renderer's truncate metric.
+	displayCol := targetCol
+	if targetLine < totalLines {
+		runes := []rune(lines[targetLine])
+		if targetCol <= len(runes) {
+			displayCol = ansi.StringWidth(string(runes[:targetCol]))
+		}
+	}
+
+	visWidth := m.viewVisibleWidthFor(totalLines)
+	if visWidth <= 0 {
+		m.viewHOffset = 0
+		m.viewCursorCol = displayCol
+		return
+	}
+	// Bring the match into view if it's outside [hOffset, hOffset+visWidth).
+	// Vim's sidescroll behavior centers the match horizontally when it would
+	// otherwise be off-screen, mirroring how vertical scroll centers it.
+	if displayCol < m.viewHOffset || displayCol >= m.viewHOffset+visWidth {
+		m.viewHOffset = max(displayCol-visWidth/2, 0)
+	}
+	// Park the cursor on the match so subsequent h/l moves continue from
+	// here rather than jumping back to column 0.
+	m.viewCursorCol = displayCol
+}
+
+// viewVisibleWidth returns the column budget available for line content
+// (panel width minus the gutter and panel borders). Used by horizontal
+// scrolling to decide when a match has fallen off the right edge. The 2
+// columns subtracted match renderFileView's contentWidth = m.width - 2.
+func (m *model) viewVisibleWidth() int {
+	if m.viewContent == nil {
+		return 0
+	}
+	return m.viewVisibleWidthFor(fileViewLineCount(m.viewContent))
+}
+
+// viewVisibleWidthFor is the totalLines-cached form, used inside
+// scrollToViewerMatch where the line split has already happened.
+func (m *model) viewVisibleWidthFor(totalLines int) int {
+	if m.width <= 0 {
+		return 0
+	}
+	contentWidth := m.width - 2
+	gutterDigits := len(fmt.Sprintf("%d", max(totalLines, 1))) + 1
+	// gutter is "%*d " — gutterDigits already accounts for the trailing space.
+	return max(contentWidth-gutterDigits, 1)
 }
 
 func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
@@ -1302,6 +1384,8 @@ func (m model) viewReady() tea.View {
 		viewer := renderFileView(viewerParams{
 			content:       m.viewContent,
 			offset:        m.viewOffset,
+			hOffset:       m.viewHOffset,
+			cursorCol:     m.viewCursorCol,
 			width:         m.width,
 			height:        panelHeight,
 			loading:       m.viewState == viewLoading,
@@ -1337,6 +1421,11 @@ func (m model) viewReady() tea.View {
 		content = m.renderWasteOverlay()
 	}
 
+	// Release mouse capture when the file viewer is open so the terminal
+	// handles mouse events natively, enabling text selection by click+drag.
+	if m.viewState != viewNone {
+		return finalizeViewNoMouse(tea.NewView(content))
+	}
 	return finalizeView(tea.NewView(content))
 }
 
@@ -1494,7 +1583,9 @@ func (m model) renderViewerStatusBar() string {
 	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
 
 	hints := " " +
-		keyStyle.Render("j/k") + " " + descStyle.Render("scroll") + " " +
+		keyStyle.Render("j/k") + " " + descStyle.Render("up/down") + " " +
+		sepStyle.Render("│") + " " +
+		keyStyle.Render("h/l") + " " + descStyle.Render("left/right") + " " +
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("/") + " " + descStyle.Render("search") + " " +
 		sepStyle.Render("│") + " " +
@@ -1699,6 +1790,62 @@ func (m *model) scrollViewUp() {
 	if m.viewOffset > 0 {
 		m.viewOffset--
 	}
+}
+
+// scrollViewRight moves the logical cursor one cell to the right, then
+// shifts the viewport only when the cursor would cross the right edge —
+// matching vim's h/l semantics, where every keystroke advances exactly
+// one column and the window only scrolls when the cursor would otherwise
+// leave it.
+func (m *model) scrollViewRight() {
+	maxCol := m.viewMaxCursorCol()
+	if m.viewCursorCol >= maxCol {
+		return
+	}
+	m.viewCursorCol++
+	visWidth := m.viewVisibleWidth()
+	if visWidth > 0 && m.viewCursorCol >= m.viewHOffset+visWidth {
+		m.viewHOffset = m.viewCursorCol - visWidth + 1
+	}
+}
+
+// scrollViewLeft is the mirror of scrollViewRight: one cell at a time,
+// shift the viewport only if the cursor would fall left of the visible
+// region.
+func (m *model) scrollViewLeft() {
+	if m.viewCursorCol == 0 {
+		m.viewHOffset = 0
+		return
+	}
+	m.viewCursorCol--
+	if m.viewCursorCol < m.viewHOffset {
+		m.viewHOffset = m.viewCursorCol
+	}
+}
+
+// viewMaxCursorCol bounds the cursor by the longest line in the visible
+// region. Bounding by the whole file would force a full O(N·W) scan on
+// every h/l press; bounding by visible lines keeps the cost proportional
+// to viewport height and matches what the user can actually see.
+func (m *model) viewMaxCursorCol() int {
+	if m.viewContent == nil {
+		return 0
+	}
+	lines := splitFileLines(m.viewContent.Data)
+	if len(lines) == 0 {
+		return 0
+	}
+	end := min(m.viewOffset+m.viewVisibleHeight(), len(lines))
+	if m.viewOffset >= end {
+		return 0
+	}
+	maxW := 0
+	for _, line := range lines[m.viewOffset:end] {
+		if w := ansi.StringWidth(line); w > maxW {
+			maxW = w
+		}
+	}
+	return maxW
 }
 
 func (m *model) viewVisibleHeight() int {

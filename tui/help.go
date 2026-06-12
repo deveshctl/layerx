@@ -69,6 +69,7 @@ func defaultHelpSections() []helpSection {
 			title: "File Viewer",
 			entries: []helpEntry{
 				{"j / k", "Scroll down / up"},
+				{"h / l", "Scroll left / right (long lines)"},
 				{"g / G", "Jump to top / bottom"},
 				{"/", "Search in file"},
 				{"n / N", "Next / previous match"},

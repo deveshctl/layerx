@@ -10,6 +10,8 @@ type keyMap struct {
 	Down         key.Binding
 	Top          key.Binding
 	Bottom       key.Binding
+	Left         key.Binding
+	Right        key.Binding
 	Switch       key.Binding
 	Copy         key.Binding
 	CopyPath     key.Binding
@@ -47,6 +49,14 @@ func defaultKeys() keyMap {
 		Bottom: key.NewBinding(
 			key.WithKeys("G"),
 			key.WithHelp("G", "bottom"),
+		),
+		Left: key.NewBinding(
+			key.WithKeys("h", "left"),
+			key.WithHelp("h/←", "scroll left"),
+		),
+		Right: key.NewBinding(
+			key.WithKeys("l", "right"),
+			key.WithHelp("l/→", "scroll right"),
 		),
 		Switch: key.NewBinding(
 			key.WithKeys("tab"),

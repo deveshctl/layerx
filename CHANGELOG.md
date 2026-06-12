@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- File viewer `h` / `l` are now vi-style cursor moves: each keystroke
+  advances the cursor by one column within the visible area, and the
+  viewport only scrolls horizontally when the cursor would cross the
+  left or right edge. Previously every keystroke shifted the entire
+  viewport four columns at a time, which made inspecting long lines
+  feel like tabbing through an indent and undid scroll progress on `h`.
+- File-viewer search no longer reports a "match" that is invisible. When a
+  search hit lies past the right edge of a long line, the viewer now
+  horizontally scrolls so the match is centered in view, matching vim's
+  `sidescroll` behavior. A `«` marker on the left edge signals that text
+  continues off-screen.
+
+### Added
+- File viewer: `h` / `l` (and `←` / `→`) scroll horizontally for inspecting
+  lines wider than the panel. `g` / `G` reset horizontal scroll along with
+  vertical, matching vim's line-jump semantics.
+- File viewer status bar now shows `h/l` horizontal-scroll hint alongside
+  `j/k` so the navigation controls are self-documenting.
+- File viewer releases mouse capture while open, allowing text to be selected
+  by click-dragging in the terminal. Mouse wheel scrolling is still available
+  via keyboard (`j`/`k`, `h`/`l`). Mouse capture resumes when the viewer closes.
+
 ## [v1.4.0] - 2026-06-06
 
 Podman support and explicit cache management.
