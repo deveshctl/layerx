@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now spells out how the build-side flag relates to the top-level
   `layerx --platform` (which selects an existing image's variant).
 
+### Fixed
+- `ArchiveResolver` rewinds the archive file handle after the
+  `--platform` compatibility check, so a successful platform match no
+  longer trips `parseLayers` into reporting "manifest.json not found"
+  (the platform scan had advanced the file offset past the tar entries).
+
 ## [v1.4.1] - 2026-06-12
 
 `layerx build` thin wrapper plus a Docker-resolver fix for image-digest refs.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -79,6 +80,15 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 
 	if err := r.checkPlatform(f); err != nil {
 		return nil, err
+	}
+
+	// checkPlatform advances the file offset past the tar entries it scans.
+	// parseLayers reads its input from the current position into a fresh
+	// spool tempfile, so it would see EOF (and report "manifest.json not
+	// found") without this rewind. Rewinding is a no-op when the platform
+	// pin is nil, but always safe.
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, &ErrArchiveInfra{Op: "seek archive", Cause: err}
 	}
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
