@@ -16,7 +16,11 @@ jobs:
           go-version: '1.26'
       - run: go build ./...
       - run: go vet ./...
-      - run: go test -v -count=1 ./...
+      - run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
 
   cross-compile:
     runs-on: ubuntu-latest
@@ -30,6 +34,41 @@ jobs:
         with:
           go-version: '1.26'
       - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o /dev/null ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      # Short PR-time fuzz smoke. Each fuzz target gets 30s; the nightly
+      # workflow runs longer budgets. The matrix expands as new Fuzz* targets
+      # are added — keep this list in sync with image/*_fuzz_test.go.
+      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=30s ./image/...
+      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=30s ./image/...
+      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=30s ./image/...
 
   test-podman:
     runs-on: ubuntu-latest

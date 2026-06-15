@@ -1,0 +1,34 @@
+name: Nightly
+
+on:
+  schedule:
+    # 06:17 UTC daily — off-the-hour to avoid GH Actions queue spikes.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  long-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      # Longer-budget fuzz across the same targets PRs run. 5 minutes per
+      # target is enough to surface coverage-guided crashes the 30s PR smoke
+      # cannot. Crashes are surfaced by go test's non-zero exit; failing
+      # corpora land under image/testdata/fuzz and should be committed
+      # alongside the fix when one is found.
+      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=5m ./image/...
+      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=5m ./image/...
+      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=5m ./image/...
+
+  vuln-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
