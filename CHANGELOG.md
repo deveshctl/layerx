@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CI: race detector (`go test -race`) on the main test job — surfaces data
+  races in `image/` (concurrent layer parsing, cache I/O) that the Windows
+  dev environment cannot detect locally.
+- CI: coverage reporting via `-coverprofile` uploaded to Codecov on every
+  push and PR.
+- CI: `golangci-lint` job with a conservative starter set (`errcheck`,
+  `gosec`, `govet`, `ineffassign`, `staticcheck`, `unused`). Configuration
+  lives in `.golangci.yml`.
+- CI: `govulncheck` job that fails the build on a known vulnerability in
+  any module the binary actually reaches. Also runs nightly via
+  `nightly.yml` so dependency advisories surface on a schedule, not only
+  on PR.
+- Fuzz tests for `image/` parsers — `FuzzReadManifestFromSpool`,
+  `FuzzScanBlobIndex`, `FuzzFindFileInLayer` — covering the tar / archive
+  surfaces that consume untrusted bytes. PR runs a 30-second smoke per
+  target; a nightly workflow runs 5 minutes per target.
+- Golden-file test for the JSON export schema (`cmd/testdata/golden/`).
+  Locks the full byte shape of `--json` output (field order, indent, leaf
+  keys) so silent reformatting can't break downstream consumers. Use
+  `go test ./cmd -update` to regenerate after an intentional schema
+  change.
+
 ## [v1.4.1] - 2026-06-12
 
 `layerx build` thin wrapper plus a Docker-resolver fix for image-digest refs.

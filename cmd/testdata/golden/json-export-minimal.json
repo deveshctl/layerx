@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0.0",
+  "imageRef": "alpine:3",
+  "totalSize": 1024,
+  "layerCount": 1,
+  "efficiency": {
+    "score": 1,
+    "wastedBytes": 0,
+    "wastedFiles": []
+  },
+  "layers": [
+    {
+      "index": 0,
+      "id": "sha256:abc",
+      "size": 1024,
+      "netDelta": 1024,
+      "command": "ADD rootfs",
+      "files": []
+    }
+  ]
+}
