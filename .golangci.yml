@@ -1,4 +1,4 @@
-# golangci-lint configuration for layerx.
+# golangci-lint v2 configuration for layerx.
 #
 # Rationale: layerx parses untrusted tar/archive bytes and writes files to
 # disk, so the linter set leans on errcheck (no silent error drops) and
@@ -6,12 +6,13 @@
 # linters are the conservative baseline — govet, staticcheck, unused,
 # ineffassign — kept narrow so noise stays low.
 
+version: "2"
+
 run:
   timeout: 5m
-  go: '1.26'
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - gosec
@@ -20,41 +21,43 @@ linters:
     - staticcheck
     - unused
 
-linters-settings:
-  errcheck:
-    # Don't flag fmt.Fprint* on os.Stderr or os.Stdout — these are write
-    # calls to terminal streams where a failed write has no useful recovery,
-    # and the codebase deliberately drops the error. Same for the standard
-    # Close()-on-defer pattern used throughout image/.
-    exclude-functions:
-      - (io.Closer).Close
-      - (*os.File).Close
-      - fmt.Fprint
-      - fmt.Fprintf
-      - fmt.Fprintln
+  settings:
+    errcheck:
+      # Don't flag fmt.Fprint* on os.Stderr or os.Stdout — these are write
+      # calls to terminal streams where a failed write has no useful
+      # recovery, and the codebase deliberately drops the error. Same for
+      # the standard Close()-on-defer pattern used throughout image/.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
 
-  gosec:
-    excludes:
-      # G104: errors not checked. Already handled (more precisely) by errcheck.
-      - G104
-      # G304: file path supplied as taint input. layerx is a CLI inspecting
-      # paths the user explicitly hands it; gating every os.Open on a string
-      # literal would defeat the tool's purpose.
-      - G304
-      # G306: poor file permissions on WriteFile. Use case-by-case review;
-      # the linter's 0600 default is wrong for layerx's extracted files
-      # (users expect 0644 so they can read what they extracted).
-      - G306
+    gosec:
+      excludes:
+        # G104: errors not checked. Already handled (more precisely) by
+        # errcheck.
+        - G104
+        # G304: file path supplied as taint input. layerx is a CLI
+        # inspecting paths the user explicitly hands it; gating every
+        # os.Open on a string literal would defeat the tool's purpose.
+        - G304
+        # G306: poor file permissions on WriteFile. Use case-by-case
+        # review; the linter's 0600 default is wrong for layerx's
+        # extracted files (users expect 0644 so they can read what they
+        # extracted).
+        - G306
 
-issues:
-  exclude-dirs:
-    - mcp
-    - internal-docs
-  # Test files routinely use "magic numbers" and ignore non-critical errors;
-  # silencing those keeps the noise floor down without weakening the checks
-  # that matter for production code.
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
+  exclusions:
+    paths:
+      - mcp
+      - internal-docs
+    # Test files routinely use "magic numbers" and ignore non-critical
+    # errors; silencing those keeps the noise floor down without weakening
+    # the checks that matter for production code.
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
