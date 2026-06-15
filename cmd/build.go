@@ -204,7 +204,10 @@ func extractLayerxFlags(args []string) ([]string, error) {
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--json requires a value")
 			}
-			flagJSON = args[i+1]
+			// gosec G602 cannot see that the i+1 < len(args) guard above
+			// makes args[i+1] safe; we already returned on the failure
+			// branch, so the access is unconditionally in-bounds.
+			flagJSON = args[i+1] //nolint:gosec // bound-checked above
 			i++
 			continue
 		}
