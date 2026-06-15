@@ -44,19 +44,23 @@ func TestCopyCtx_PreCancelled(t *testing.T) {
 	}
 }
 
-// blockingReader yields one chunk, then on the second call blocks until
-// ctx is done and returns ctx.Err(). This avoids the race where copyCtx
-// could see io.EOF before its next ctx.Err() check and return nil.
+// blockingReader yields one chunk, signals served once that chunk has been
+// returned, then on the second call blocks until ctx is done and returns
+// ctx.Err(). The served channel lets a test wait for the first chunk to be
+// written without polling the destination buffer (a polling read while
+// copyCtx is still writing trips the race detector).
 type blockingReader struct {
 	ctx     context.Context
 	first   []byte
 	yielded bool
+	served  chan struct{}
 }
 
 func (b *blockingReader) Read(p []byte) (int, error) {
 	if !b.yielded {
 		b.yielded = true
 		n := copy(p, b.first)
+		close(b.served)
 		return n, nil
 	}
 	<-b.ctx.Done()
@@ -66,7 +70,7 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 func TestCopyCtx_MidStreamCancel(t *testing.T) {
 	first := bytes.Repeat([]byte("a"), 32*1024) // exactly one chunk
 	ctx, cancel := context.WithCancel(context.Background())
-	br := &blockingReader{ctx: ctx, first: first}
+	br := &blockingReader{ctx: ctx, first: first, served: make(chan struct{})}
 	var dst bytes.Buffer
 
 	var (
@@ -80,14 +84,16 @@ func TestCopyCtx_MidStreamCancel(t *testing.T) {
 		n, cerr = copyCtx(ctx, &dst, br)
 	}()
 
-	// Wait until the first chunk has been written, then cancel.
+	// Wait until the reader has handed back the first chunk, then cancel.
+	// copyCtx may still be inside its dst.Write at this point, so we don't
+	// inspect dst until wg.Wait — the synchronisation comes from the
+	// goroutine completing, not from a polling read on the buffer.
 	// Whichever side observes the cancel first wins deterministically:
-	// copyCtx's top-of-loop ctx.Err() check returns context.Canceled,
-	// or the reader's <-ctx.Done() unblocks and returns ctx.Err() which
+	// copyCtx's top-of-loop ctx.Err() check returns context.Canceled, or
+	// the reader's <-ctx.Done() unblocks and returns ctx.Err() which
 	// copyCtx propagates via the rerr branch. Either way, cerr ==
 	// context.Canceled.
-	for dst.Len() != len(first) {
-	}
+	<-br.served
 	cancel()
 	wg.Wait()
 
