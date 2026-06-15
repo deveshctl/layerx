@@ -111,15 +111,19 @@ func TestErrPlatformNotInImage_Format(t *testing.T) {
 		Available: []string{"linux/amd64", "linux/arm64"},
 	}
 	msg := e.Error()
-	assert.Contains(t, msg, "linux/ppc64le not found in image \"nginx:latest\"")
+	assert.Contains(t, msg, "platform linux/ppc64le not found")
 	assert.Contains(t, msg, "linux/amd64")
 	assert.Contains(t, msg, "linux/arm64")
 	assert.Contains(t, msg, "Available platforms")
+	// The image ref is intentionally NOT in the rendered message — the user
+	// already typed it on the command line and the goal is a tight, scannable
+	// "X not found / try Y" hint. Field is still readable on the struct.
+	assert.NotContains(t, msg, "nginx:latest")
 
 	// Without an available list (older daemon), the error stays terse.
 	e2 := &ErrPlatformNotInImage{Ref: "nginx:latest", Requested: "linux/ppc64le"}
 	msg2 := e2.Error()
-	assert.Contains(t, msg2, "linux/ppc64le not found in image \"nginx:latest\"")
+	assert.Contains(t, msg2, "platform linux/ppc64le not found")
 	assert.NotContains(t, msg2, "Available platforms")
 }
 

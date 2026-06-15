@@ -32,8 +32,18 @@ func WithClient(cli client.APIClient) Option {
 // The platform flows into ImagePull (so the right manifest is fetched on a
 // cold pull), ImageSave (so only the requested variant is exported on a
 // multi-platform image store), and ImageInspect (for the digest read used
-// as the cache key). Daemons older than API 1.49 ignore the inspect-side
-// platform option silently; the pull and save paths work back to API 1.32.
+// as the cache key). The pull and save paths work back to API 1.32; the
+// inspect-side platform option requires API 1.49 (the moby client gates it
+// with requiresVersion and returns an error on older daemons).
+//
+// Cache-key invariant: AnalyzeWithOptions keys cache entries by ImageID,
+// which on API 1.49+ daemons returns the platform-specific image config
+// digest when WithPlatform is set. Different platforms therefore land in
+// different cache directories — `layerx nginx --platform linux/amd64` and
+// `layerx nginx --platform linux/arm64` cannot collide on cache. On older
+// daemons the inspect call errors out (requiresVersion 1.49), digestErr is
+// non-nil, and AnalyzeWithOptions skips the cache entirely. Either way,
+// platform-mismatched entries cannot share a cache slot.
 func WithPlatform(p *ocispec.Platform) Option {
 	return func(r *DockerResolver) { r.platform = p }
 }

@@ -22,6 +22,12 @@ type Config struct {
 	ImageRef string
 	Resolver image.Resolver
 	NoCache  bool
+	// Platform is the canonical "os/arch[/variant]" string the user passed
+	// via --platform, or "" when no pin was set. Display-only: shown in the
+	// header so the operator knows which variant of a multi-platform image
+	// is on screen. Resolver behaviour is governed by image.WithPlatform,
+	// not this field.
+	Platform string
 }
 
 type focus int
@@ -160,6 +166,7 @@ type model struct {
 	focus        focus
 	state        appState
 	imageRef     string
+	platform     string
 	analysis     *image.Analysis
 	layerCursor  int
 	layerOffset  int
@@ -225,6 +232,7 @@ func NewModel(cfg Config) model {
 	return model{
 		state:       stateLoading,
 		imageRef:    cfg.ImageRef,
+		platform:    cfg.Platform,
 		resolver:    cfg.Resolver,
 		progressCh:  ch,
 		writeFile:   atomicWriteFile,
@@ -1452,6 +1460,13 @@ func (m model) renderHeader() string {
 	sep := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor).Render(" │ ")
 	imageName := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Render(m.imageRef)
 	left := glyph + brand + sep + imageName
+	// Append the active platform after the image name when --platform is
+	// set. Multi-platform images otherwise give no visual cue which variant
+	// is on screen — easy to misread an arm64 layout as amd64.
+	if m.platform != "" {
+		platformStyle := lipgloss.NewStyle().Foreground(headerDimColor).Background(statusBgColor)
+		left += sep + platformStyle.Render(m.platform)
+	}
 
 	totalSize := image.FormatBytes(m.analysis.TotalSize)
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
@@ -1883,6 +1898,14 @@ func friendlyError(err error) string {
 	}
 	if infraErr, ok := errors.AsType[*image.ErrArchiveInfra](err); ok {
 		return fmt.Sprintf("Could not %s: %v. Free up disk space or set TMPDIR to a writable location and try again.", infraErr.Op, infraErr.Cause)
+	}
+	// Platform errors are already user-readable; pass them through verbatim
+	// so the multi-line "Available platforms:" list keeps its formatting.
+	if pErr, ok := errors.AsType[*image.ErrPlatformNotInImage](err); ok {
+		return pErr.Error()
+	}
+	if pErr, ok := errors.AsType[*image.ErrPlatformInvalid](err); ok {
+		return pErr.Error()
 	}
 	return err.Error()
 }

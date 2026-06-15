@@ -222,6 +222,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCache,
+		Platform: activePlatformDisplay(),
 	})
 }
 

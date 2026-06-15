@@ -23,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest list. The error names what was asked for and lists the
   variants the image actually carries when the daemon exposes them
   (Docker 25+ with the containerd image store), e.g.
-  `platform linux/ppc64le not found in image "nginx:latest" / Available
-  platforms: - linux/amd64 - linux/arm64`.
+  `platform linux/ppc64le not found / Available platforms: -
+  linux/amd64 - linux/arm64`.
 - Archive mode (`layerx ./image.tar`) tolerates `--platform` when it
   matches the archive's recorded variant and rejects it with the same
   `ErrPlatformNotInImage` shape otherwise — so a typo never silently
@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the engine's build (the engine governs what is built); the help text
   now spells out how the build-side flag relates to the top-level
   `layerx --platform` (which selects an existing image's variant).
+- The TUI header now appends the active `--platform` after the image
+  name (e.g. `layerx │ nginx:latest │ linux/arm64`) so multi-platform
+  images give a visual cue which variant is on screen.
+- `layerx --json` now emits an optional `platform` field alongside
+  `imageRef` whenever `--platform` is set, so a downstream consumer can
+  disambiguate two exports of the same multi-platform image without
+  re-running layerx. JSON schema bumped to **1.0.1** (additive,
+  backwards-compatible).
 
 ### Fixed
 - `ArchiveResolver` rewinds the archive file handle after the

@@ -16,6 +16,11 @@ import (
 type jsonExport struct {
 	SchemaVersion string         `json:"schemaVersion"`
 	ImageRef      string         `json:"imageRef"`
+	// Platform is the canonical "os/arch[/variant]" pinned by --platform on
+	// this run, or omitted when the user did not pass --platform. Lets a
+	// downstream consumer disambiguate two exports of the same multi-
+	// platform image without re-running layerx.
+	Platform      string         `json:"platform,omitempty"`
 	TotalSize     int64          `json:"totalSize"`
 	LayerCount    int            `json:"layerCount"`
 	Efficiency    jsonEfficiency `json:"efficiency"`
@@ -25,7 +30,10 @@ type jsonExport struct {
 // jsonSchemaVersion identifies the format produced by buildJSONExport.
 // Bump per semver: patch for non-breaking field additions, minor for
 // additive structural changes, major for incompatible changes.
-const jsonSchemaVersion = "1.0.0"
+//
+// 1.0.1 — added optional "platform" field (omitempty); existing consumers
+//         that don't read it are unaffected, so this is a patch bump.
+const jsonSchemaVersion = "1.0.1"
 
 type jsonEfficiency struct {
 	Score       float64          `json:"score"`
@@ -79,6 +87,7 @@ func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) erro
 	efficiency := image.EfficiencyFromAnalysis(analysis)
 
 	export := buildJSONExport(analysis, efficiency)
+	export.Platform = activePlatformDisplay()
 
 	data, err := json.MarshalIndent(export, "", "  ")
 	if err != nil {

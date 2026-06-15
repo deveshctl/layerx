@@ -255,7 +255,7 @@ func TestWriteJSONAtomic_ConcurrentRunsDontCollide(t *testing.T) {
 }
 
 // TestJSON_SchemaVersionFirstField pins two contracts simultaneously:
-//  1. The exported JSON contains "schemaVersion": "1.0.0".
+//  1. The exported JSON contains "schemaVersion": "1.0.1".
 //  2. SchemaVersion is the FIRST field in the output (encoding/json
 //     preserves struct declaration order).
 //
@@ -271,12 +271,12 @@ func TestJSON_SchemaVersionFirstField(t *testing.T) {
 	efficiency := &image.EfficiencyResult{Score: 1.0}
 	export := buildJSONExport(analysis, efficiency)
 
-	require.Equal(t, "1.0.0", export.SchemaVersion)
+	require.Equal(t, "1.0.1", export.SchemaVersion)
 
 	data, err := json.MarshalIndent(export, "", "  ")
 	require.NoError(t, err)
 	out := string(data)
-	assert.Contains(t, out, `"schemaVersion": "1.0.0"`)
+	assert.Contains(t, out, `"schemaVersion": "1.0.1"`)
 
 	// Field-order pin: schemaVersion appears before imageRef.
 	svIdx := strings.Index(out, "schemaVersion")

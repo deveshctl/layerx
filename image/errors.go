@@ -134,6 +134,11 @@ func (e *ErrPlatformInvalid) Error() string {
 // holds the platforms the image does carry, formatted as "os/arch[/variant]";
 // it may be empty when the daemon could not enumerate them (older daemon,
 // non-multi-platform image store).
+//
+// The Error() output deliberately omits the image ref to keep the user-
+// facing message tight (the ref is already in the user's command line).
+// Callers that want to render the ref alongside the message should read
+// e.Ref directly rather than parse Error() output.
 type ErrPlatformNotInImage struct {
 	Ref       string
 	Requested string
@@ -142,9 +147,8 @@ type ErrPlatformNotInImage struct {
 
 func (e *ErrPlatformNotInImage) Error() string {
 	if len(e.Available) == 0 {
-		return fmt.Sprintf("platform %s not found in image %q",
-			e.Requested, e.Ref)
+		return fmt.Sprintf("platform %s not found", e.Requested)
 	}
-	return fmt.Sprintf("platform %s not found in image %q\n\nAvailable platforms:\n  - %s",
-		e.Requested, e.Ref, strings.Join(e.Available, "\n  - "))
+	return fmt.Sprintf("platform %s not found\n\nAvailable platforms:\n- %s",
+		e.Requested, strings.Join(e.Available, "\n- "))
 }

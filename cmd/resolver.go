@@ -45,6 +45,22 @@ func selectResolverDefault(imageRef string) (image.Resolver, error) {
 	return selectDockerLikeResolver(engineFlag, plat)
 }
 
+// activePlatformDisplay returns the canonical "os/arch[/variant]" form of the
+// active --platform flag, or "" when no pin is set or the spec was malformed
+// (the malformed case is reported elsewhere by selectResolver). Used by the
+// JSON exporter and the TUI bridge to surface which variant is on screen
+// without each caller re-implementing parse + format.
+func activePlatformDisplay() string {
+	if platformFlag == "" {
+		return ""
+	}
+	plat, err := image.ParsePlatform(platformFlag)
+	if err != nil || plat == nil {
+		return ""
+	}
+	return image.FormatPlatform(plat)
+}
+
 func selectDockerLikeResolver(engine string, plat *ocispec.Platform) (image.Resolver, error) {
 	switch engine {
 	case "docker":
