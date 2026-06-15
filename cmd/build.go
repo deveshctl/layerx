@@ -183,7 +183,7 @@ func extractLayerxFlags(args []string) ([]string, error) {
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--engine requires a value")
 			}
-			if err := setEngine(args[i+1]); err != nil {
+			if err := setEngine(args[i+1]); err != nil { //nolint:gosec // bound-checked above
 				return nil, err
 			}
 			i++
