@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // ArchiveResolver resolves image layers from a local image archive on disk
@@ -19,7 +21,8 @@ import (
 // caller move or delete the file between calls (the active call still
 // finishes against the file handle it opened).
 type ArchiveResolver struct {
-	path string
+	path     string
+	platform *ocispec.Platform
 }
 
 // NewArchiveResolver creates a resolver that reads from the archive at path.
@@ -28,6 +31,16 @@ type ArchiveResolver struct {
 // single file-open code path with consistent error wrapping).
 func NewArchiveResolver(path string) *ArchiveResolver {
 	return &ArchiveResolver{path: path}
+}
+
+// NewArchiveResolverWithPlatform pins the archive resolver to a specific
+// platform. The pin is used purely as a sanity check: a "docker save" /
+// OCI-layout tarball normally contains exactly one image variant, so the
+// flag is tolerated when it matches what the archive recorded and rejected
+// (with available platform context) otherwise. Passing a nil platform is
+// equivalent to NewArchiveResolver — no check is performed.
+func NewArchiveResolverWithPlatform(path string, p *ocispec.Platform) *ArchiveResolver {
+	return &ArchiveResolver{path: path, platform: p}
 }
 
 // openArchive opens path read-only, mapping fs errors to typed errors so the
@@ -64,6 +77,10 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 	}
 	defer f.Close()
 
+	if err := r.checkPlatform(f); err != nil {
+		return nil, err
+	}
+
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
 	layers, err := parseLayers(ctx, f)
@@ -77,6 +94,74 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 		return nil, &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
 	return layers, nil
+}
+
+// checkPlatform compares the resolver's pinned --platform against what the
+// archive's image config actually records. A docker-save / OCI-layout tarball
+// contains a single image variant; the check exists so a user passing the
+// wrong --platform sees a clear "this archive is amd64, not arm64" message
+// instead of a confusing successful inspect of the wrong content. nil pin =
+// no check.
+func (r *ArchiveResolver) checkPlatform(f *os.File) error {
+	if r.platform == nil {
+		return nil
+	}
+	got, err := readArchivePlatform(f)
+	if err != nil {
+		return &ErrInvalidArchive{Path: r.path, Cause: err}
+	}
+	if PlatformsEqual(r.platform, got) {
+		return nil
+	}
+	requested := FormatPlatform(r.platform)
+	available := []string{}
+	if s := FormatPlatform(got); s != "" {
+		available = []string{s}
+	}
+	return &ErrPlatformNotInImage{
+		Ref:       r.path,
+		Requested: requested,
+		Available: available,
+	}
+}
+
+// readArchivePlatform reads the image config blob and returns its declared
+// platform. Used only for the archive-side --platform sanity check; the
+// parseLayers fast-path does not need it.
+func readArchivePlatform(f *os.File) (*ocispec.Platform, error) {
+	manifestData, rootJSON, _, err := scanResolveMetadata(f)
+	if err != nil {
+		return nil, err
+	}
+	if manifestData == nil {
+		return nil, errors.New("manifest.json not found")
+	}
+	var manifests []dockerManifest
+	if err := json.Unmarshal(manifestData, &manifests); err != nil {
+		return nil, fmt.Errorf("cannot parse manifest: %w", err)
+	}
+	if len(manifests) == 0 {
+		return nil, errors.New("empty manifest")
+	}
+	cfgPath := manifests[0].Config
+	cfgBytes, ok := rootJSON[cfgPath]
+	if !ok {
+		// OCI layout: config lives under blobs/sha256/<digest>.
+		b, err := readEntryFromSpool(f, cfgPath)
+		if err != nil {
+			return nil, fmt.Errorf("config %s not found: %w", cfgPath, err)
+		}
+		cfgBytes = b
+	}
+	var cfg imageConfig
+	if err := json.Unmarshal(cfgBytes, &cfg); err != nil {
+		return nil, fmt.Errorf("cannot parse config: %w", err)
+	}
+	return &ocispec.Platform{
+		OS:           cfg.OS,
+		Architecture: cfg.Architecture,
+		Variant:      cfg.Variant,
+	}, nil
 }
 
 // Inspect returns lightweight metadata (total declared layer size) by

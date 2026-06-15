@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // Option configures a DockerResolver.
@@ -24,9 +25,23 @@ func WithClient(cli client.APIClient) Option {
 	return func(r *DockerResolver) { r.cli = cli }
 }
 
+// WithPlatform pins the resolver to a specific image variant for
+// multi-platform images. nil (or unset) means "use the daemon's default
+// platform", which is the historical behaviour.
+//
+// The platform flows into ImagePull (so the right manifest is fetched on a
+// cold pull), ImageSave (so only the requested variant is exported on a
+// multi-platform image store), and ImageInspect (for the digest read used
+// as the cache key). Daemons older than API 1.49 ignore the inspect-side
+// platform option silently; the pull and save paths work back to API 1.32.
+func WithPlatform(p *ocispec.Platform) Option {
+	return func(r *DockerResolver) { r.platform = p }
+}
+
 // DockerResolver resolves image layers via the Docker daemon.
 type DockerResolver struct {
-	cli client.APIClient
+	cli      client.APIClient
+	platform *ocispec.Platform
 }
 
 // NewDockerResolver creates a resolver connected to the local Docker daemon.
@@ -67,7 +82,7 @@ func NewDockerResolverWithHost(host string, opts ...Option) (Resolver, error) {
 // Inspect returns lightweight image metadata without exporting the full tar.
 // It does not pull the image — if the image is not local, it returns an error.
 func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMeta, error) {
-	inspect, err := r.cli.ImageInspect(ctx, imageRef)
+	inspect, err := r.cli.ImageInspect(ctx, imageRef, r.inspectOpts()...)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
@@ -87,7 +102,7 @@ func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMe
 // not pull; the caller is expected to ensure the image is local first
 // (AnalyzeWithProgress does this).
 func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, error) {
-	inspect, err := r.cli.ImageInspect(ctx, imageRef)
+	inspect, err := r.cli.ImageInspect(ctx, imageRef, r.inspectOpts()...)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return "", err
@@ -101,6 +116,30 @@ func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, 
 		return "", fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
 	return inspect.ID, nil
+}
+
+// inspectOpts builds the per-call ImageInspectOption slice, attaching the
+// resolver's pinned --platform when set. The Manifests option is always
+// requested when --platform is in use because it lets us produce the
+// "available platforms" list for ErrPlatformNotInImage; daemons older than
+// API 1.48 silently ignore the field.
+func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
+	if r.platform == nil {
+		return nil
+	}
+	return []client.ImageInspectOption{
+		client.ImageInspectWithPlatform(r.platform),
+	}
+}
+
+// inspectOptsWithManifests is the variant used by enumeratePlatforms to read
+// the Manifests array — independent of the platform-pin so we can list
+// platforms even after a platform-mismatch failure (which already swallowed
+// the platform-pinned inspect).
+func (r *DockerResolver) inspectOptsWithManifests() []client.ImageInspectOption {
+	return []client.ImageInspectOption{
+		client.ImageInspectWithManifests(true),
+	}
 }
 
 // NewExtractor creates an Extractor using this resolver's Docker client.
@@ -121,7 +160,7 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseExporting})
 
-	rc, err := r.cli.ImageSave(ctx, []string{imageRef})
+	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, r.saveOpts()...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
@@ -132,10 +171,30 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 	return parseLayers(ctx, rc)
 }
 
+// saveOpts builds the per-call ImageSaveOption slice, scoping the export to
+// the resolver's pinned --platform when set. Without this, ImageSave on a
+// multi-platform-image-store daemon (Docker 25+ with containerd image store)
+// emits an OCI index containing every variant — and parseLayers picks the
+// first manifest, which is not necessarily the one the user asked for.
+//
+// The save-side platform option requires daemon API 1.48 or newer; older
+// daemons return an error from ImageSave that we surface verbatim. There is
+// no point papering over that, because the same daemon ignored the pull-side
+// platform option too, so the wrong variant is what is local — silently
+// falling back would lie about which image we exported.
+func (r *DockerResolver) saveOpts() []client.ImageSaveOption {
+	if r.platform == nil {
+		return nil
+	}
+	return []client.ImageSaveOption{
+		client.ImageSaveWithPlatforms(*r.platform),
+	}
+}
+
 // ensureImageWithProgress checks if the image exists locally; if not, pulls it with progress.
 func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef string, progress chan<- ProgressEvent) error {
 	if isImageDigestRef(imageRef) {
-		_, err := r.cli.ImageInspect(ctx, imageRef)
+		_, err := r.cli.ImageInspect(ctx, imageRef, r.inspectOpts()...)
 		if err == nil {
 			return nil
 		}
@@ -151,28 +210,37 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		return fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
 
-	f := make(client.Filters).Add("reference", imageRef)
-	result, err := r.cli.ImageList(ctx, client.ImageListOptions{Filters: f})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return err
+	// When --platform is pinned, we cannot use the cheap "is the image
+	// locally cached?" short-circuit: a previous run may have populated the
+	// daemon with a different variant under the same tag. Letting a stale
+	// local copy of "linux/amd64" satisfy a "linux/arm64" request would
+	// silently inspect the wrong image. Skip ImageList and let ImagePull
+	// run — the daemon's content store deduplicates layers, so the cost of
+	// the redundant pull is at most the manifest fetch when every layer
+	// blob is already present.
+	if r.platform == nil {
+		f := make(client.Filters).Add("reference", imageRef)
+		result, err := r.cli.ImageList(ctx, client.ImageListOptions{Filters: f})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			return &ErrDaemonNotRunning{Cause: err}
 		}
-		return &ErrDaemonNotRunning{Cause: err}
-	}
-
-	if len(result.Items) > 0 {
-		return nil
+		if len(result.Items) > 0 {
+			return nil
+		}
 	}
 
 	emitProgress(progress, ProgressEvent{Phase: PhasePulling})
 
-	rc, err := r.cli.ImagePull(ctx, imageRef, client.ImagePullOptions{})
+	rc, err := r.cli.ImagePull(ctx, imageRef, r.pullOpts())
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
 		if isImageNotFoundMessage(err.Error()) {
-			return &ErrImageNotFound{Ref: imageRef, Cause: err}
+			return r.classifyPullNotFound(ctx, imageRef, err)
 		}
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
@@ -183,11 +251,123 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 			return err
 		}
 		if isImageNotFoundMessage(err.Error()) {
-			return &ErrImageNotFound{Ref: imageRef, Cause: err}
+			return r.classifyPullNotFound(ctx, imageRef, err)
+		}
+		if isPlatformPullFailure(err.Error()) {
+			return r.classifyPlatformMissing(ctx, imageRef, err)
 		}
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}
 	return nil
+}
+
+// pullOpts builds the ImagePullOptions for the active resolve, attaching
+// the pinned --platform when set. The daemon resolves the manifest list and
+// pulls only the matching manifest's layer blobs.
+func (r *DockerResolver) pullOpts() client.ImagePullOptions {
+	opts := client.ImagePullOptions{}
+	if r.platform != nil {
+		opts.Platforms = []ocispec.Platform{*r.platform}
+	}
+	return opts
+}
+
+// classifyPullNotFound disambiguates a "not found" pull error: the image
+// reference itself doesn't exist (returned as ErrImageNotFound, the historic
+// behaviour), versus the image exists but lacks the requested platform
+// variant (returned as ErrPlatformNotInImage with an Available list when we
+// can recover one). Without --platform pinned, every "not found" stays
+// ErrImageNotFound so the new branch cannot regress existing callers.
+func (r *DockerResolver) classifyPullNotFound(ctx context.Context, imageRef string, cause error) error {
+	if r.platform == nil {
+		return &ErrImageNotFound{Ref: imageRef, Cause: cause}
+	}
+	// Try a platform-less inspect to learn whether the image exists at all.
+	// A fresh probe avoids depending on whatever state the failed pull left.
+	if _, err := r.cli.ImageInspect(ctx, imageRef); err == nil {
+		// Image is present locally without the requested platform — this is
+		// the "asked for arm64 on an amd64-only image" case.
+		return r.classifyPlatformMissing(ctx, imageRef, cause)
+	}
+	return &ErrImageNotFound{Ref: imageRef, Cause: cause}
+}
+
+// classifyPlatformMissing builds ErrPlatformNotInImage with a best-effort
+// list of available platforms. A daemon that supports the multi-platform
+// image store (Docker 25+ with containerd snapshotter) returns a Manifests
+// array on inspect when asked; older daemons return nothing useful and we
+// fall back to a list with a single Architecture/OS/Variant entry, or an
+// empty list when even that is unavailable.
+func (r *DockerResolver) classifyPlatformMissing(ctx context.Context, imageRef string, cause error) error {
+	requested := FormatPlatform(r.platform)
+	available := r.enumeratePlatforms(ctx, imageRef)
+	if requested == "" {
+		// The platform pin became empty between the request and the error.
+		// Don't lie about which platform was asked for; surface the cause.
+		return &ErrPullFailed{Ref: imageRef, Cause: cause}
+	}
+	return &ErrPlatformNotInImage{
+		Ref:       imageRef,
+		Requested: requested,
+		Available: available,
+	}
+}
+
+// enumeratePlatforms reads the multi-platform manifest list for imageRef and
+// returns the available "os/arch[/variant]" strings in declaration order.
+// Falls back to a single-element slice with the image's own
+// Architecture/OS/Variant when the daemon doesn't expose a Manifests array,
+// and to nil when even that read fails. Errors are intentionally swallowed
+// — this is best-effort context for an error message, not a failure path.
+func (r *DockerResolver) enumeratePlatforms(ctx context.Context, imageRef string) []string {
+	inspect, err := r.cli.ImageInspect(ctx, imageRef, r.inspectOptsWithManifests()...)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, m := range inspect.Manifests {
+		if m.ImageData == nil {
+			continue
+		}
+		s := FormatPlatform(&m.ImageData.Platform)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) > 0 {
+		return out
+	}
+	if inspect.Architecture != "" {
+		single := ocispec.Platform{
+			OS:           inspect.Os,
+			Architecture: inspect.Architecture,
+			Variant:      inspect.Variant,
+		}
+		if s := FormatPlatform(&single); s != "" {
+			return []string{s}
+		}
+	}
+	return nil
+}
+
+// isPlatformPullFailure matches the daemon-side phrases that mean "the
+// requested platform is not available in this image". The Docker daemon
+// surfaces this as a streaming errorDetail event during pull — separate
+// from the registry-level "manifest unknown" / "not found" set covered
+// by isImageNotFoundMessage.
+func isPlatformPullFailure(s string) bool {
+	s = strings.ToLower(s)
+	for _, needle := range []string{
+		"no matching manifest",
+		"image does not exist for the requested platform",
+		"platform mismatch",
+	} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // isImageDigestRef reports whether ref is a content-addressable image
@@ -545,7 +725,10 @@ type dockerManifest struct {
 }
 
 type imageConfig struct {
-	History []configHistoryEntry `json:"history"`
+	OS           string               `json:"os"`
+	Architecture string               `json:"architecture"`
+	Variant      string               `json:"variant"`
+	History      []configHistoryEntry `json:"history"`
 }
 
 type configHistoryEntry struct {

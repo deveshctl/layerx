@@ -78,3 +78,25 @@ func completeImageRefs(cmd *cobra.Command, args []string, toComplete string) ([]
 	}
 	return refs, cobra.ShellCompDirectiveNoFileComp
 }
+
+// completePlatform offers the canonical Docker / OCI platform strings the
+// vast majority of multi-arch images actually publish. Custom variants
+// (e.g. linux/arm/v6) are still accepted by --platform; this list is just a
+// useful tab-complete starting point, mirroring what `docker buildx ls`
+// surfaces by default.
+func completePlatform(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	suggestions := []string{
+		"linux/amd64",
+		"linux/arm64",
+		"linux/arm64/v8",
+		"linux/arm/v7",
+		"linux/arm/v6",
+		"linux/386",
+		"linux/ppc64le",
+		"linux/s390x",
+		"linux/riscv64",
+		"windows/amd64",
+		"windows/arm64",
+	}
+	return suggestions, cobra.ShellCompDirectiveNoFileComp
+}

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--platform OS/ARCH[/VARIANT]` flag for selecting a specific variant of a
+  multi-platform image. Available on `layerx`, `layerx ci`, `layerx compare`,
+  and `layerx --json`. Accepts the same shapes Docker CLI does:
+  `linux/amd64`, `linux/arm64`, `linux/arm/v7`, `linux/arm64/v8`,
+  `windows/amd64`, and the bare-arch shortcut (`amd64` → `linux/amd64`).
+  The platform flows into the daemon's pull, save, and inspect calls, so
+  layerx fetches and analyzes exactly the requested manifest. Without
+  `--platform`, the historic behaviour is preserved (the daemon's default
+  platform is used).
+- Shell completion for `--platform` lists the canonical Docker / OCI
+  variants out of the box.
+- Helpful error when the requested platform is not part of the image's
+  manifest list. The error names what was asked for and lists the
+  variants the image actually carries when the daemon exposes them
+  (Docker 25+ with the containerd image store), e.g.
+  `platform linux/ppc64le not found in image "nginx:latest" / Available
+  platforms: - linux/amd64 - linux/arm64`.
+- Archive mode (`layerx ./image.tar`) tolerates `--platform` when it
+  matches the archive's recorded variant and rejects it with the same
+  `ErrPlatformNotInImage` shape otherwise — so a typo never silently
+  inspects the wrong content.
+- `layerx build --platform LIST .` continues to forward `--platform` to
+  the engine's build (the engine governs what is built); the help text
+  now spells out how the build-side flag relates to the top-level
+  `layerx --platform` (which selects an existing image's variant).
+
 ## [v1.4.1] - 2026-06-12
 
 `layerx build` thin wrapper plus a Docker-resolver fix for image-digest refs.

@@ -255,6 +255,53 @@ podman save -o alpine.tar alpine:3
 layerx ./alpine.tar
 ```
 
+### Multi-platform images (`--platform`)
+
+Most images on Docker Hub today are multi-platform: a single tag like
+`nginx:latest` resolves to a manifest list with separate manifests for
+`linux/amd64`, `linux/arm64`, and friends. By default layerx inspects
+whichever variant the daemon picks for your host (an Apple Silicon Mac
+sees the arm64 manifest; a typical CI runner sees amd64). Pass
+`--platform` to pick a specific variant explicitly:
+
+```bash
+# Inspect the arm64 variant on an amd64 host (or anywhere)
+layerx --platform linux/arm64 nginx:latest
+
+# Variant suffixes are supported (e.g. arm/v7 for older Pis)
+layerx --platform linux/arm/v7 alpine:3
+
+# CI gate against the variant your service actually runs
+layerx ci --platform linux/amd64 --lowest-efficiency 0.9 myapp:${{ github.sha }}
+
+# Compare the same logical image across architectures
+layerx compare --platform linux/amd64 myapp:1.5.0 myapp:1.5.0
+# (point one side at a different ref to compare across versions)
+```
+
+Accepted shapes (same as `docker --platform`): `OS/ARCH`, `OS/ARCH/VARIANT`,
+or the bare arch shortcut (`amd64` is treated as `linux/amd64`). When the
+requested platform is not present in the image's manifest list, layerx
+prints the variants the image actually carries:
+
+```
+Error: platform linux/ppc64le not found in image "nginx:latest"
+
+Available platforms:
+  - linux/amd64
+  - linux/arm64
+  - linux/arm/v7
+```
+
+`--platform` works in archive mode too — it sanity-checks that the archive
+was produced for the requested variant and refuses to inspect a mismatched
+tarball, so a typo can't silently analyze the wrong image.
+
+`layerx build --platform <list>` is forwarded straight to the engine's
+own `build --platform` (it governs what gets *built*); the engine then
+hands a single-variant image to layerx, so the top-level `--platform`
+flag is unused on the build path.
+
 ---
 
 ## CI mode

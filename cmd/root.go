@@ -47,7 +47,10 @@ bare form behave as "layerx ci" with config-file (or default) thresholds.
 Cache: results are cached per image digest. Use --no-cache to bypass for
 a single run; "layerx cache list" inspects entries and "layerx cache prune"
 evicts them (see "layerx cache --help" for full details).
-Engines: layerx auto-detects Docker or Podman; pass --engine to override.`,
+Engines: layerx auto-detects Docker or Podman; pass --engine to override.
+Platforms: pass --platform OS/ARCH (e.g. linux/arm64) to inspect a specific
+variant of a multi-platform image; layerx pulls and exports only that
+variant. Without --platform, the daemon's default platform is used.`,
 	Example: `  # Inspect an image interactively (Docker daemon required)
   layerx nginx:latest
 
@@ -59,6 +62,10 @@ Engines: layerx auto-detects Docker or Podman; pass --engine to override.`,
 
   # Force a fresh analysis, ignoring any cached result
   layerx --no-cache nginx:latest
+
+  # Inspect a specific platform variant of a multi-platform image
+  layerx --platform linux/arm64 nginx:latest
+  layerx --platform linux/amd64 alpine:3
 
   # Export analysis as JSON (skips the TUI; works with archives too)
   layerx --json out.json ./build/app.tar
@@ -83,6 +90,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto"`)
+	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",
+		`target platform for multi-platform images (e.g. "linux/amd64", "linux/arm64", "linux/arm64/v8")`)
+	_ = rootCmd.RegisterFlagCompletionFunc("platform", completePlatform)
 }
 
 type engineValue struct{ v *string }

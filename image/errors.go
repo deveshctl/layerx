@@ -114,3 +114,37 @@ func (e *ErrNoEngineFound) Error() string {
 	return fmt.Sprintf("no container engine found; tried: %s",
 		strings.Join(e.Tried, ", "))
 }
+
+// ErrPlatformInvalid is returned when --platform cannot be parsed at all
+// (empty component, too many slashes). Distinct from ErrPlatformNotInImage:
+// the spec itself is malformed, no image lookup happened.
+type ErrPlatformInvalid struct {
+	Spec   string
+	Reason string
+}
+
+func (e *ErrPlatformInvalid) Error() string {
+	return fmt.Sprintf("invalid --platform %q: %s "+
+		"(expected ARCH, OS/ARCH, or OS/ARCH/VARIANT, e.g. \"linux/amd64\" or \"linux/arm64/v8\")",
+		e.Spec, e.Reason)
+}
+
+// ErrPlatformNotInImage is returned when --platform is well-formed but the
+// requested variant does not exist in the image's manifest list. Available
+// holds the platforms the image does carry, formatted as "os/arch[/variant]";
+// it may be empty when the daemon could not enumerate them (older daemon,
+// non-multi-platform image store).
+type ErrPlatformNotInImage struct {
+	Ref       string
+	Requested string
+	Available []string
+}
+
+func (e *ErrPlatformNotInImage) Error() string {
+	if len(e.Available) == 0 {
+		return fmt.Sprintf("platform %s not found in image %q",
+			e.Requested, e.Ref)
+	}
+	return fmt.Sprintf("platform %s not found in image %q\n\nAvailable platforms:\n  - %s",
+		e.Requested, e.Ref, strings.Join(e.Available, "\n  - "))
+}

@@ -9,7 +9,9 @@ import (
 	"errors"
 	"testing"
 
+	mobyimage "github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,6 +50,25 @@ func buildConfig(t *testing.T, commands []string, emptyIndices ...int) []byte {
 	}
 
 	data, err := json.Marshal(imageConfig{History: history})
+	require.NoError(t, err)
+	return data
+}
+
+// buildConfigWithPlatform is buildConfig plus an os/arch[/variant] block in
+// the JSON payload — needed for tests that exercise --platform compatibility
+// against an archive's recorded variant.
+func buildConfigWithPlatform(t *testing.T, os, arch, variant string, commands []string) []byte {
+	t.Helper()
+	var history []configHistoryEntry
+	for _, cmd := range commands {
+		history = append(history, configHistoryEntry{CreatedBy: cmd})
+	}
+	data, err := json.Marshal(imageConfig{
+		OS:           os,
+		Architecture: arch,
+		Variant:      variant,
+		History:      history,
+	})
 	require.NoError(t, err)
 	return data
 }
@@ -662,4 +683,65 @@ func TestIsImageDigestRef(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnsureImage_WithPlatform_SkipsLocalCacheShortCircuit(t *testing.T) {
+	// With --platform pinned, ensureImageWithProgress must NOT trust the
+	// local-image-list short-circuit: a previous run may have populated the
+	// daemon with a different variant under the same tag. The pull goes
+	// through every time so the daemon resolves the right manifest.
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+
+	imageListCalls := 0
+	imagePullCalls := 0
+	var lastPullPlatforms []ocispec.Platform
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			imageListCalls++
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, opts client.ImagePullOptions) (client.ImagePullResponse, error) {
+			imagePullCalls++
+			lastPullPlatforms = opts.Platforms
+			return nil, errors.New("dial tcp: i/o timeout") // short-circuit; we only care opts arrived
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	require.Error(t, err)
+	assert.Equal(t, 0, imageListCalls, "ImageList must NOT be consulted when --platform is pinned")
+	assert.Equal(t, 1, imagePullCalls)
+	require.Len(t, lastPullPlatforms, 1)
+	assert.Equal(t, "linux", lastPullPlatforms[0].OS)
+	assert.Equal(t, "arm64", lastPullPlatforms[0].Architecture)
+}
+
+func TestEnsureImage_WithoutPlatform_ConsultsImageList(t *testing.T) {
+	// Backward-compat sanity: without --platform, the existing
+	// "is the image already local?" short-circuit still runs and
+	// suppresses a redundant pull.
+	imageListCalls := 0
+	imagePullCalls := 0
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			imageListCalls++
+			return client.ImageListResult{Items: []mobyimage.Summary{{ID: "sha256:abc"}}}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			imagePullCalls++
+			return nil, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, imageListCalls)
+	assert.Equal(t, 0, imagePullCalls, "image was already local; no pull should run")
 }
