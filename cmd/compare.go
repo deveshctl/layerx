@@ -299,7 +299,7 @@ func drainProgress(w io.Writer, side, ref string, ch <-chan image.ProgressEvent)
 // interval and clock are injected so tests don't sleep.
 func drainProgressWithClock(w io.Writer, side, ref string, ch <-chan image.ProgressEvent, coalesce time.Duration, now func() time.Time) {
 	var (
-		lastPhase     image.ProgressPhase = image.PhaseUnknown
+		lastPhase     = image.PhaseUnknown
 		lastPullEmit  time.Time
 		announced     bool
 	)

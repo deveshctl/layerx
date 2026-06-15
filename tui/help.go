@@ -157,7 +157,9 @@ func helpLayoutColumns(sections []helpSection) [][]helpSection {
 	case 0:
 		return nil
 	case 6:
-		return [][]helpSection{
+		// gosec G602 fires on the indexed access here, but the case-6
+		// guard on len(sections) makes every index in [0,5] safe.
+		return [][]helpSection{ //nolint:gosec // indices guarded by case 6
 			{sections[0], sections[1]},
 			{sections[2], sections[3]},
 			{sections[4], sections[5]},
