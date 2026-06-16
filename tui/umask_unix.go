@@ -18,5 +18,8 @@ import (
 func applyUmask(perm os.FileMode) os.FileMode {
 	mask := syscall.Umask(0)
 	syscall.Umask(mask)
-	return perm &^ os.FileMode(mask)
+	// gosec G115: int → uint32 conversion. mask comes from syscall.Umask,
+	// which on every supported Unix returns a value that fits the file-mode
+	// bits (well below 2^32). The narrowing is safe by construction.
+	return perm &^ os.FileMode(mask) //nolint:gosec // umask bits fit os.FileMode
 }

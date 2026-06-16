@@ -1,0 +1,81 @@
+# golangci-lint v2 configuration for layerx.
+#
+# Rationale: layerx parses untrusted tar/archive bytes and writes files to
+# disk, so the linter set leans on errcheck (no silent error drops) and
+# gosec (file-mode, path-traversal, integer-overflow rules). The remaining
+# linters are the conservative baseline — govet, staticcheck, unused,
+# ineffassign — kept narrow so noise stays low.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+  settings:
+    errcheck:
+      # Don't flag fmt.Fprint* on os.Stderr or os.Stdout — these are write
+      # calls to terminal streams where a failed write has no useful
+      # recovery, and the codebase deliberately drops the error. Same for
+      # the standard Close()-on-defer pattern used throughout image/, and
+      # for os.Remove in cleanup-after-error paths (the original error is
+      # what the caller surfaces; a Remove failure during teardown is
+      # unactionable).
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.Remove
+
+    gosec:
+      excludes:
+        # G104: errors not checked. Already handled (more precisely) by
+        # errcheck.
+        - G104
+        # G204: subprocess launched with variable. layerx build is a thin
+        # wrapper that intentionally execs the engine binary the user
+        # selected (docker / podman); the variable IS the contract. Audit
+        # remains on direct exec.* call sites; nothing else in the tree
+        # spawns a process from user data.
+        - G204
+        # G304: file path supplied as taint input. layerx is a CLI
+        # inspecting paths the user explicitly hands it; gating every
+        # os.Open on a string literal would defeat the tool's purpose.
+        - G304
+        # G306: poor file permissions on WriteFile. Use case-by-case
+        # review; the linter's 0600 default is wrong for layerx's
+        # extracted files (users expect 0644 so they can read what they
+        # extracted).
+        - G306
+        # G703: path traversal via taint analysis. Cache paths flow
+        # through normalizeDigest (rejects separators, "..", empty) and
+        # cachePath before reaching the file APIs; the taint check fires
+        # on Stat without seeing the upstream validation. The narrower
+        # path-handling protections live in image/cache.go.
+        - G703
+
+  exclusions:
+    paths:
+      - mcp
+      - internal-docs
+    # Test files routinely use "magic numbers", ignore non-critical
+    # errors, and keep helpers that are referenced selectively across
+    # build tags. Silencing those keeps the noise floor down without
+    # weakening the checks that matter for production code.
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - unused

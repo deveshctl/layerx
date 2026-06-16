@@ -271,7 +271,10 @@ func renderListTable(w io.Writer, root string, entries []image.CacheEntry) {
 			relativeTime(e.CachedAt))
 		total += e.Size
 	}
-	tw.Flush()
+	// tw is a tabwriter; Flush writes the column-aligned output. A failed
+	// write to the underlying terminal stream has no useful recovery (we
+	// were already writing to it), so the error is intentionally dropped.
+	_ = tw.Flush()
 	fmt.Fprintf(w, "\nTotal: %d entries, %s\n", len(entries), image.FormatBytes(total))
 }
 
