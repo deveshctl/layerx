@@ -49,6 +49,12 @@ func friendlyCLIError(err error) string {
 			"(start Docker or Podman, or set DOCKER_HOST)",
 			strings.Join(e.Tried, ", "))
 	}
+	if e, ok := errors.AsType[*image.ErrPlatformInvalid](err); ok {
+		return e.Error()
+	}
+	if e, ok := errors.AsType[*image.ErrPlatformNotInImage](err); ok {
+		return e.Error()
+	}
 	return err.Error()
 }
 

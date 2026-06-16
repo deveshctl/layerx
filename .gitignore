@@ -36,6 +36,7 @@ layerx.md
 layerx_guide.md
 CLAUDE.md
 docs/superpowers/
+internal-docs/
 
 # Vendor (we use modules, not vendoring)
 /vendor/

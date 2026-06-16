@@ -9,7 +9,9 @@ import (
 	"errors"
 	"testing"
 
+	mobyimage "github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,6 +50,25 @@ func buildConfig(t *testing.T, commands []string, emptyIndices ...int) []byte {
 	}
 
 	data, err := json.Marshal(imageConfig{History: history})
+	require.NoError(t, err)
+	return data
+}
+
+// buildConfigWithPlatform is buildConfig plus an os/arch[/variant] block in
+// the JSON payload — needed for tests that exercise --platform compatibility
+// against an archive's recorded variant.
+func buildConfigWithPlatform(t *testing.T, os, arch, variant string, commands []string) []byte {
+	t.Helper()
+	var history []configHistoryEntry
+	for _, cmd := range commands {
+		history = append(history, configHistoryEntry{CreatedBy: cmd})
+	}
+	data, err := json.Marshal(imageConfig{
+		OS:           os,
+		Architecture: arch,
+		Variant:      variant,
+		History:      history,
+	})
 	require.NoError(t, err)
 	return data
 }
@@ -662,4 +683,240 @@ func TestIsImageDigestRef(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnsureImage_WithPlatform_SkipsLocalCacheShortCircuit(t *testing.T) {
+	// With --platform pinned, ensureImageWithProgress must NOT trust the
+	// local-image-list short-circuit: a previous run may have populated the
+	// daemon with a different variant under the same tag. The pull goes
+	// through every time so the daemon resolves the right manifest.
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+
+	imageListCalls := 0
+	imagePullCalls := 0
+	var lastPullPlatforms []ocispec.Platform
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			imageListCalls++
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, opts client.ImagePullOptions) (client.ImagePullResponse, error) {
+			imagePullCalls++
+			lastPullPlatforms = opts.Platforms
+			return nil, errors.New("dial tcp: i/o timeout") // short-circuit; we only care opts arrived
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	require.Error(t, err)
+	assert.Equal(t, 0, imageListCalls, "ImageList must NOT be consulted when --platform is pinned")
+	assert.Equal(t, 1, imagePullCalls)
+	require.Len(t, lastPullPlatforms, 1)
+	assert.Equal(t, "linux", lastPullPlatforms[0].OS)
+	assert.Equal(t, "arm64", lastPullPlatforms[0].Architecture)
+}
+
+func TestEnsureImage_WithoutPlatform_ConsultsImageList(t *testing.T) {
+	// Backward-compat sanity: without --platform, the existing
+	// "is the image already local?" short-circuit still runs and
+	// suppresses a redundant pull.
+	imageListCalls := 0
+	imagePullCalls := 0
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			imageListCalls++
+			return client.ImageListResult{Items: []mobyimage.Summary{{ID: "sha256:abc"}}}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			imagePullCalls++
+			return nil, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, imageListCalls)
+	assert.Equal(t, 0, imagePullCalls, "image was already local; no pull should run")
+}
+
+func TestEnumeratePlatforms_ManifestsListAuthoritative(t *testing.T) {
+	// When the daemon's containerd image store populates the Manifests
+	// array, enumeratePlatforms returns it verbatim.
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Manifests = []mobyimage.ManifestSummary{
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm", Variant: "v7"}}},
+			}
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	got := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.Equal(t, []string{"linux/amd64", "linux/arm64", "linux/arm/v7"}, got)
+}
+
+func TestEnumeratePlatforms_LegacyStoreReturnsNil(t *testing.T) {
+	// On the legacy daemon image store, ImageInspect returns an empty
+	// Manifests array. enumeratePlatforms returns nil — we don't synthesise
+	// a single-element list from the locally-cached variant, because that
+	// would imply layerx knows what platforms the image carries when it
+	// only knows what was already pulled.
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Manifests = nil
+			result.Os = "linux"
+			result.Architecture = "amd64"
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	got := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.Nil(t, got)
+}
+
+func TestEnumeratePlatforms_InspectFailsReturnsNil(t *testing.T) {
+	// enumeratePlatforms is best-effort context for an error path; if the
+	// inspect itself fails, return nil and let the caller emit the
+	// terse "platform X not found" message without a list.
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			return client.ImageInspectResult{}, errors.New("daemon hung up")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	got := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.Nil(t, got)
+}
+
+func TestClassifyPlatformMissing_LegacyStoreLeavesAvailableEmpty(t *testing.T) {
+	// On the legacy daemon image store the manifest list is unavailable,
+	// so the returned ErrPlatformNotInImage has an empty Available slice.
+	// The error renders as the terse "platform X not found" — no guess at
+	// what the image carries. Listing the locally-cached variant would
+	// imply more knowledge than layerx actually has.
+	plat, err := ParsePlatform("linux/arm64dd")
+	require.NoError(t, err)
+
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Os = "linux"
+			result.Architecture = "amd64"
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.classifyPlatformMissing(context.Background(), "nginx:latest", errors.New("no matching manifest"))
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, "linux/arm64dd", pe.Requested)
+	assert.Empty(t, pe.Available)
+}
+
+func TestClassifyPlatformMissing_ManifestListPopulatesAvailable(t *testing.T) {
+	// When the daemon (containerd image store) returns a populated
+	// manifest list, ErrPlatformNotInImage carries the full set so the
+	// rendered error can show the user what the image actually does carry.
+	plat, err := ParsePlatform("linux/ppc64le")
+	require.NoError(t, err)
+
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Manifests = []mobyimage.ManifestSummary{
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm64"}}},
+			}
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.classifyPlatformMissing(context.Background(), "nginx:latest", errors.New("no matching manifest"))
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
+}
+
+// TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotFound
+// regression-locks the bug Gate C surfaced: with the containerd image store
+// enabled, a bad --platform produced "image not found" instead of
+// "platform not found". Root cause was the daemon's "no matching manifest
+// for X in the manifest list entries" message also matching the broader
+// "manifest for " substring used by isImageNotFoundMessage. The platform
+// classifier must run first.
+//
+// The fake here mirrors the cold-pull scenario most clearly: the image is
+// not locally cached, so the platform-less inspect that classifyPullNotFound
+// would consult also fails — meaning the PRE-FIX code path could not have
+// recovered into ErrPlatformNotInImage even via classifyPullNotFound, and
+// would have surfaced ErrImageNotFound. The post-fix path bypasses that
+// branch entirely because isPlatformPullFailure now wins on this message.
+func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotFound(t *testing.T) {
+	plat, err := ParsePlatform("linux/arm64dd")
+	require.NoError(t, err)
+
+	inspectCalls := 0
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			// Verbatim message moby's containerd image store backend emits
+			// for a platform miss (see daemon/containerd/image_pull.go).
+			return nil, errors.New("no matching manifest for linux/arm64dd in the manifest list entries: not found")
+		},
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			inspectCalls++
+			// First inspect call is enumeratePlatforms reading the manifest
+			// list. With containerd image store, that succeeds and returns
+			// the full set of platforms the image carries.
+			result := client.ImageInspectResult{}
+			result.Manifests = []mobyimage.ManifestSummary{
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm64"}}},
+			}
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe, "platform-miss must surface as ErrPlatformNotInImage, not ErrImageNotFound")
+	assert.Equal(t, "linux/arm64dd", pe.Requested)
+	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
+	// The fix routes straight to classifyPlatformMissing → enumeratePlatforms,
+	// which is one inspect call. The pre-fix code path would have first run
+	// classifyPullNotFound (one inspect to probe existence) and only THEN
+	// classifyPlatformMissing (a second inspect for the manifest list) — so
+	// pinning to exactly one inspect locks the win in.
+	assert.Equal(t, 1, inspectCalls, "platform classifier should reach enumeratePlatforms directly, no probe inspect needed")
 }

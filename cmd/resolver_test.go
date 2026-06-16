@@ -199,3 +199,47 @@ func TestSelectResolverDefault_RegularFileBypassesEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectResolverDefault_InvalidPlatformIsRejectedEarly(t *testing.T) {
+	// A malformed --platform must not reach any image-resolution code path.
+	// selectResolverDefault returns ErrPlatformInvalid synchronously so the
+	// CLI presents a clear error before any daemon call or archive open.
+	prevPlat := platformFlag
+	t.Cleanup(func() { platformFlag = prevPlat })
+	platformFlag = "linux/amd64/v8/extra"
+
+	tmp := t.TempDir() + "/fake.tar"
+	if err := writeEmptyFile(tmp); err != nil {
+		t.Fatal(err)
+	}
+	_, err := selectResolverDefault(tmp)
+	if err == nil {
+		t.Fatal("expected error for malformed platform, got nil")
+	}
+	var inv *image.ErrPlatformInvalid
+	if !errors.As(err, &inv) {
+		t.Fatalf("error type = %T, want *image.ErrPlatformInvalid", err)
+	}
+}
+
+func TestSelectResolverDefault_ValidPlatformPassesThrough(t *testing.T) {
+	// A well-formed --platform on an archive path must produce a resolver
+	// with the platform pin set; we test the seam by confirming no error
+	// from selectResolverDefault and that subsequent Resolve would reject
+	// a mismatching archive (covered by archive_test.go).
+	prevPlat := platformFlag
+	t.Cleanup(func() { platformFlag = prevPlat })
+	platformFlag = "linux/arm64"
+
+	tmp := t.TempDir() + "/fake.tar"
+	if err := writeEmptyFile(tmp); err != nil {
+		t.Fatal(err)
+	}
+	r, err := selectResolverDefault(tmp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r == nil {
+		t.Fatal("nil resolver")
+	}
+}
