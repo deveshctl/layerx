@@ -132,37 +132,25 @@ func (e *ErrPlatformInvalid) Error() string {
 // ErrPlatformNotInImage is returned when --platform is well-formed but the
 // requested variant does not exist in the image's manifest list. Available
 // holds the platforms the image does carry, formatted as "os/arch[/variant]";
-// it may be empty when the daemon could not enumerate them (older daemon,
-// non-multi-platform image store).
-//
-// AvailableSource describes where Available came from when it is NOT the
-// authoritative manifest list. Empty means "Available is the full list and
-// can be trusted as complete"; a non-empty value is rendered as a parenthetical
-// caveat after "Available platforms" so the user understands why the list may
-// be partial. This matters most on the legacy Docker daemon image store, which
-// only retains the single platform that was pulled — we fall back to listing
-// that one variant, but it is not the same shape of answer the multi-platform
-// store gives.
+// it is best-effort and may be empty when the daemon does not expose a
+// manifest list (legacy image store, older daemons). When Available is
+// empty the error renders as the terse "platform X not found" — the user
+// still sees what they asked for, with no guess at what the image carries.
 //
 // The Error() output deliberately omits the image ref to keep the user-
 // facing message tight (the ref is already in the user's command line).
 // Callers that want to render the ref alongside the message should read
 // e.Ref directly rather than parse Error() output.
 type ErrPlatformNotInImage struct {
-	Ref             string
-	Requested       string
-	Available       []string
-	AvailableSource string
+	Ref       string
+	Requested string
+	Available []string
 }
 
 func (e *ErrPlatformNotInImage) Error() string {
 	if len(e.Available) == 0 {
 		return fmt.Sprintf("platform %s not found", e.Requested)
 	}
-	header := "Available platforms"
-	if e.AvailableSource != "" {
-		header = fmt.Sprintf("Available platforms (%s)", e.AvailableSource)
-	}
-	return fmt.Sprintf("platform %s not found\n\n%s:\n- %s",
-		e.Requested, header, strings.Join(e.Available, "\n- "))
+	return fmt.Sprintf("platform %s not found\n\nAvailable platforms:\n- %s",
+		e.Requested, strings.Join(e.Available, "\n- "))
 }

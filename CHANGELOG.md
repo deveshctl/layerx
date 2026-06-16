@@ -20,11 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shell completion for `--platform` lists the canonical Docker / OCI
   variants out of the box.
 - Helpful error when the requested platform is not part of the image's
-  manifest list. The error names what was asked for and lists the
-  variants the image actually carries when the daemon exposes them
-  (Docker 25+ with the containerd image store), e.g.
-  `platform linux/ppc64le not found / Available platforms: -
-  linux/amd64 - linux/arm64`.
+  manifest list. The error always names what was asked for (`platform
+  linux/ppc64le not found`); when the engine exposes the multi-platform
+  manifest list (Docker 25+ with the containerd image store), it also
+  lists the variants the image actually carries. On the legacy image store
+  the list is omitted rather than guessed at — a registry/manifest probe
+  is out of scope, and listing only the locally-cached variant would
+  misrepresent what the image really contains.
 - Archive mode (`layerx ./image.tar`) tolerates `--platform` when it
   matches the archive's recorded variant and rejects it with the same
   `ErrPlatformNotInImage` shape otherwise — so a typo never silently
@@ -51,18 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truly missing image references fall through to the not-found path. Affects
   Docker daemons running the containerd image store (where every pull goes
   through the daemon and there is no local short-circuit) most visibly.
-- `--platform` error now disclaims when the "Available platforms" list comes
-  from the daemon's locally-cached variant rather than the full manifest
-  list. On the legacy Docker image store (the default unless the
-  containerd snapshotter is enabled), `ImageInspect` does not return the
-  manifest list, so layerx fell back to listing whatever single platform
-  was already pulled — and the rendered error implied that was the full
-  set the image carries. The list now reads
-  `Available platforms (locally cached only — enable the daemon's
-  containerd image store to see every platform this image advertises):`
-  in that case, so a typo like `--platform linux/arm64dd` on an
-  amd64-only-cached image no longer misleads the user into thinking the
-  image lacks an arm64 variant.
 - `ArchiveResolver` rewinds the archive file handle after the
   `--platform` compatibility check, so a successful platform match no
   longer trips `parseLayers` into reporting "manifest.json not found"

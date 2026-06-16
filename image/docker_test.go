@@ -748,8 +748,7 @@ func TestEnsureImage_WithoutPlatform_ConsultsImageList(t *testing.T) {
 
 func TestEnumeratePlatforms_ManifestsListAuthoritative(t *testing.T) {
 	// When the daemon's containerd image store populates the Manifests
-	// array, enumeratePlatforms must use it verbatim and report localOnly=false
-	// so callers can render the list without a "may be incomplete" disclaimer.
+	// array, enumeratePlatforms returns it verbatim.
 	fake := &fakeAPIClient{
 		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
 			result := client.ImageInspectResult{}
@@ -765,16 +764,16 @@ func TestEnumeratePlatforms_ManifestsListAuthoritative(t *testing.T) {
 	require.NoError(t, err)
 	dr := r.(*DockerResolver)
 
-	got, localOnly := dr.enumeratePlatforms(context.Background(), "nginx:latest")
-	assert.False(t, localOnly, "manifest list came back populated; not a local-only fallback")
+	got := dr.enumeratePlatforms(context.Background(), "nginx:latest")
 	assert.Equal(t, []string{"linux/amd64", "linux/arm64", "linux/arm/v7"}, got)
 }
 
-func TestEnumeratePlatforms_LegacyStoreFallback(t *testing.T) {
+func TestEnumeratePlatforms_LegacyStoreReturnsNil(t *testing.T) {
 	// On the legacy daemon image store, ImageInspect returns an empty
-	// Manifests array — the only platform layerx can name is whatever single
-	// variant is locally cached. The boolean must signal that so callers
-	// disclaim the partial list to the user.
+	// Manifests array. enumeratePlatforms returns nil — we don't synthesise
+	// a single-element list from the locally-cached variant, because that
+	// would imply layerx knows what platforms the image carries when it
+	// only knows what was already pulled.
 	fake := &fakeAPIClient{
 		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
 			result := client.ImageInspectResult{}
@@ -788,14 +787,13 @@ func TestEnumeratePlatforms_LegacyStoreFallback(t *testing.T) {
 	require.NoError(t, err)
 	dr := r.(*DockerResolver)
 
-	got, localOnly := dr.enumeratePlatforms(context.Background(), "nginx:latest")
-	assert.True(t, localOnly, "Manifests was empty; the single-platform fallback fired")
-	assert.Equal(t, []string{"linux/amd64"}, got)
+	got := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.Nil(t, got)
 }
 
 func TestEnumeratePlatforms_InspectFailsReturnsNil(t *testing.T) {
 	// enumeratePlatforms is best-effort context for an error path; if the
-	// inspect itself fails, return (nil, false) and let the caller emit the
+	// inspect itself fails, return nil and let the caller emit the
 	// terse "platform X not found" message without a list.
 	fake := &fakeAPIClient{
 		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
@@ -806,18 +804,16 @@ func TestEnumeratePlatforms_InspectFailsReturnsNil(t *testing.T) {
 	require.NoError(t, err)
 	dr := r.(*DockerResolver)
 
-	got, localOnly := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	got := dr.enumeratePlatforms(context.Background(), "nginx:latest")
 	assert.Nil(t, got)
-	assert.False(t, localOnly)
 }
 
-func TestClassifyPlatformMissing_LegacyStoreSetsAvailableSource(t *testing.T) {
-	// End-to-end: when --platform is pinned and the daemon falls back to the
-	// single locally-cached variant, the returned ErrPlatformNotInImage must
-	// carry an AvailableSource explaining the limitation. Without that, a
-	// user who asks for "linux/arm64dd" on a daemon that has only
-	// linux/amd64 cached sees "Available: linux/amd64" and reasonably (but
-	// wrongly) concludes layerx thinks linux/arm64 doesn't exist.
+func TestClassifyPlatformMissing_LegacyStoreLeavesAvailableEmpty(t *testing.T) {
+	// On the legacy daemon image store the manifest list is unavailable,
+	// so the returned ErrPlatformNotInImage has an empty Available slice.
+	// The error renders as the terse "platform X not found" — no guess at
+	// what the image carries. Listing the locally-cached variant would
+	// imply more knowledge than layerx actually has.
 	plat, err := ParsePlatform("linux/arm64dd")
 	require.NoError(t, err)
 
@@ -837,15 +833,13 @@ func TestClassifyPlatformMissing_LegacyStoreSetsAvailableSource(t *testing.T) {
 	var pe *ErrPlatformNotInImage
 	require.ErrorAs(t, err, &pe)
 	assert.Equal(t, "linux/arm64dd", pe.Requested)
-	assert.Equal(t, []string{"linux/amd64"}, pe.Available)
-	assert.NotEmpty(t, pe.AvailableSource, "legacy-store fallback must disclaim the partial list")
-	assert.Contains(t, pe.AvailableSource, "containerd image store")
+	assert.Empty(t, pe.Available)
 }
 
-func TestClassifyPlatformMissing_ManifestListLeavesAvailableSourceEmpty(t *testing.T) {
-	// Sibling of the above: when the manifest list is authoritative,
-	// AvailableSource must stay empty so the rendered error has no
-	// parenthetical caveat — the listed platforms ARE the full set.
+func TestClassifyPlatformMissing_ManifestListPopulatesAvailable(t *testing.T) {
+	// When the daemon (containerd image store) returns a populated
+	// manifest list, ErrPlatformNotInImage carries the full set so the
+	// rendered error can show the user what the image actually does carry.
 	plat, err := ParsePlatform("linux/ppc64le")
 	require.NoError(t, err)
 
@@ -867,7 +861,6 @@ func TestClassifyPlatformMissing_ManifestListLeavesAvailableSourceEmpty(t *testi
 	var pe *ErrPlatformNotInImage
 	require.ErrorAs(t, err, &pe)
 	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
-	assert.Empty(t, pe.AvailableSource, "manifest-list path must not disclaim a list it can fully enumerate")
 }
 
 // TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotFound
@@ -920,7 +913,6 @@ func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotF
 	require.ErrorAs(t, err, &pe, "platform-miss must surface as ErrPlatformNotInImage, not ErrImageNotFound")
 	assert.Equal(t, "linux/arm64dd", pe.Requested)
 	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
-	assert.Empty(t, pe.AvailableSource, "containerd image store returned the full manifest list; no disclaimer needed")
 	// The fix routes straight to classifyPlatformMissing → enumeratePlatforms,
 	// which is one inspect call. The pre-fix code path would have first run
 	// classifyPullNotFound (one inspect to probe existence) and only THEN

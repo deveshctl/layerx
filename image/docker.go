@@ -129,26 +129,13 @@ func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, 
 }
 
 // inspectOpts builds the per-call ImageInspectOption slice, attaching the
-// resolver's pinned --platform when set. The Manifests option is always
-// requested when --platform is in use because it lets us produce the
-// "available platforms" list for ErrPlatformNotInImage; daemons older than
-// API 1.48 silently ignore the field.
+// resolver's pinned --platform when set.
 func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
 	if r.platform == nil {
 		return nil
 	}
 	return []client.ImageInspectOption{
 		client.ImageInspectWithPlatform(r.platform),
-	}
-}
-
-// inspectOptsWithManifests is the variant used by enumeratePlatforms to read
-// the Manifests array — independent of the platform-pin so we can list
-// platforms even after a platform-mismatch failure (which already swallowed
-// the platform-pinned inspect).
-func (r *DockerResolver) inspectOptsWithManifests() []client.ImageInspectOption {
-	return []client.ImageInspectOption{
-		client.ImageInspectWithManifests(true),
 	}
 }
 
@@ -315,46 +302,34 @@ func (r *DockerResolver) classifyPullNotFound(ctx context.Context, imageRef stri
 // classifyPlatformMissing builds ErrPlatformNotInImage with a best-effort
 // list of available platforms. A daemon that supports the multi-platform
 // image store (Docker 25+ with containerd snapshotter) returns a Manifests
-// array on inspect when asked; older daemons return nothing useful and we
-// fall back to a list with a single Architecture/OS/Variant entry, or an
-// empty list when even that is unavailable.
+// array on inspect when asked; older daemons do not, so Available is left
+// empty and the error renders as the terse "platform X not found".
 func (r *DockerResolver) classifyPlatformMissing(ctx context.Context, imageRef string, cause error) error {
 	requested := FormatPlatform(r.platform)
-	available, localOnly := r.enumeratePlatforms(ctx, imageRef)
 	if requested == "" {
 		// The platform pin became empty between the request and the error.
 		// Don't lie about which platform was asked for; surface the cause.
 		return &ErrPullFailed{Ref: imageRef, Cause: cause}
 	}
-	err := &ErrPlatformNotInImage{
+	return &ErrPlatformNotInImage{
 		Ref:       imageRef,
 		Requested: requested,
-		Available: available,
+		Available: r.enumeratePlatforms(ctx, imageRef),
 	}
-	if localOnly {
-		// The daemon could not give us the manifest list, so what we have is
-		// just whatever variant was already pulled. Disclaim that explicitly
-		// — without it, a user who asks for linux/arm64dd on a daemon that has
-		// only linux/amd64 cached sees "Available: linux/amd64" and reasonably
-		// (but wrongly) concludes layerx thinks linux/arm64 doesn't exist.
-		err.AvailableSource = "locally cached only — enable the daemon's containerd image store to see every platform this image advertises"
-	}
-	return err
 }
 
 // enumeratePlatforms reads the multi-platform manifest list for imageRef and
-// returns the available "os/arch[/variant]" strings in declaration order. The
-// second return reports whether the list came from the local-cache fallback
-// (true) rather than the manifest list (false): callers use that to disclaim
-// an incomplete list in user-facing errors. Falls back to a single-element
-// slice with the image's own Architecture/OS/Variant when the daemon doesn't
-// expose a Manifests array, and to nil when even that read fails. Errors are
-// intentionally swallowed — this is best-effort context for an error message,
-// not a failure path.
-func (r *DockerResolver) enumeratePlatforms(ctx context.Context, imageRef string) ([]string, bool) {
-	inspect, err := r.cli.ImageInspect(ctx, imageRef, r.inspectOptsWithManifests()...)
+// returns the available "os/arch[/variant]" strings in declaration order.
+// Best-effort context for an error message: returns nil on any inspect failure
+// or when the daemon does not expose a Manifests array (legacy image store).
+// We deliberately do NOT synthesise a single-platform list from the locally-
+// cached variant — that would imply layerx knows what platforms the image
+// carries when it really only knows what was already pulled, and a
+// registry/manifest probe is out of scope for the current build.
+func (r *DockerResolver) enumeratePlatforms(ctx context.Context, imageRef string) []string {
+	inspect, err := r.cli.ImageInspect(ctx, imageRef, client.ImageInspectWithManifests(true))
 	if err != nil {
-		return nil, false
+		return nil
 	}
 	var out []string
 	for _, m := range inspect.Manifests {
@@ -367,20 +342,7 @@ func (r *DockerResolver) enumeratePlatforms(ctx context.Context, imageRef string
 		}
 		out = append(out, s)
 	}
-	if len(out) > 0 {
-		return out, false
-	}
-	if inspect.Architecture != "" {
-		single := ocispec.Platform{
-			OS:           inspect.Os,
-			Architecture: inspect.Architecture,
-			Variant:      inspect.Variant,
-		}
-		if s := FormatPlatform(&single); s != "" {
-			return []string{s}, true
-		}
-	}
-	return nil, false
+	return out
 }
 
 // isPlatformPullFailure matches the daemon-side phrases that mean "the
