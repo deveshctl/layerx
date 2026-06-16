@@ -3,7 +3,7 @@
 # JSON Export
 
 `layerx --json PATH IMAGE` writes a structured, versioned snapshot of the
-full layer analysis to disk. Schema version is `1.0.0` and is pinned by
+full layer analysis to disk. Schema version is `1.0.1` and is pinned by
 tests — a breaking change to any field will fail CI before a release.
 
 ---
@@ -66,12 +66,13 @@ A few practical notes:
 
 ## Full JSON Schema
 
-Schema version `1.0.0`. Pretty-printed with two-space indent.
+Schema version `1.0.1`. Pretty-printed with two-space indent.
 
 ```json
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.0.1",
   "imageRef": "nginx:latest",
+  "platform": "linux/arm64",
   "totalSize": 187654321,
   "layerCount": 7,
   "efficiency": {
@@ -108,8 +109,9 @@ Schema version `1.0.0`. Pretty-printed with two-space indent.
 
 | Field | Type | Description |
 |---|---|---|
-| `schemaVersion` | string | `"1.0.0"`. Always emitted first. Bump = breaking change. |
+| `schemaVersion` | string | `"1.0.1"`. Always emitted first. Bump = breaking change. |
 | `imageRef` | string | The argument passed on the command line (`nginx:latest`, `./build/app.tar`, etc.). Not the digest. |
+| `platform` | string | Optional. Canonical `"os/arch[/variant]"` form of `--platform`. Omitted (not emitted at all) when `--platform` was not set on the run. Available in schema **1.0.1+**. |
 | `totalSize` | int64 | Sum of every layer's raw tar size, pre-stack. Bytes. |
 | `layerCount` | int | `len(layers)`. |
 | `efficiency` | object | Aggregate efficiency data. Always present. |
@@ -175,9 +177,12 @@ the v1 JSON schema. They may be added later under a `1.x` minor bump
 - Top-level `layers` is `null` when the image has zero layers; for any
   real image it is always an array.
 - Field declaration order is fixed: `schemaVersion` first, then
-  `imageRef`, `totalSize`, `layerCount`, `efficiency`, `layers`. Tests
-  pin this so streaming consumers can rely on it.
-- No `omitempty` anywhere — every field is always emitted.
+  `imageRef`, `platform` (when present), `totalSize`, `layerCount`,
+  `efficiency`, `layers`. Tests pin this so streaming consumers can
+  rely on it.
+- `platform` is the only `omitempty` field: it is omitted entirely
+  when `--platform` was not set on the run. Every other field is
+  always emitted.
 
 ---
 

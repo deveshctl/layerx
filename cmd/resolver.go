@@ -7,9 +7,15 @@ import (
 	"strconv"
 
 	"github.com/deveshctl/layerx/image"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 var engineFlag = "auto"
+
+// platformFlag holds the raw --platform string. Empty = "use the daemon's
+// default platform" (historic behaviour). Parsed once per Run via
+// selectResolverDefault so a typo surfaces as a single error before any I/O.
+var platformFlag = ""
 
 var selectResolver = selectResolverDefault
 
@@ -29,16 +35,36 @@ func (osSocketProber) Exists(path string) bool {
 }
 
 func selectResolverDefault(imageRef string) (image.Resolver, error) {
-	if isRegularFilePath(imageRef) {
-		return image.NewArchiveResolver(imageRef), nil
+	plat, err := image.ParsePlatform(platformFlag)
+	if err != nil {
+		return nil, err
 	}
-	return selectDockerLikeResolver(engineFlag)
+	if isRegularFilePath(imageRef) {
+		return image.NewArchiveResolverWithPlatform(imageRef, plat), nil
+	}
+	return selectDockerLikeResolver(engineFlag, plat)
 }
 
-func selectDockerLikeResolver(engine string) (image.Resolver, error) {
+// activePlatformDisplay returns the canonical "os/arch[/variant]" form of the
+// active --platform flag, or "" when no pin is set or the spec was malformed
+// (the malformed case is reported elsewhere by selectResolver). Used by the
+// JSON exporter and the TUI bridge to surface which variant is on screen
+// without each caller re-implementing parse + format.
+func activePlatformDisplay() string {
+	if platformFlag == "" {
+		return ""
+	}
+	plat, err := image.ParsePlatform(platformFlag)
+	if err != nil || plat == nil {
+		return ""
+	}
+	return image.FormatPlatform(plat)
+}
+
+func selectDockerLikeResolver(engine string, plat *ocispec.Platform) (image.Resolver, error) {
 	switch engine {
 	case "docker":
-		r, err := image.NewDockerResolver()
+		r, err := image.NewDockerResolver(image.WithPlatform(plat))
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize: %w", err)
 		}
@@ -49,18 +75,18 @@ func selectDockerLikeResolver(engine string) (image.Resolver, error) {
 			return nil, err
 		}
 		if host == "" {
-			return image.NewDockerResolver()
+			return image.NewDockerResolver(image.WithPlatform(plat))
 		}
-		return image.NewDockerResolverWithHost(host)
+		return image.NewDockerResolverWithHost(host, image.WithPlatform(plat))
 	case "auto":
 		host, err := autoEngineHost()
 		if err != nil {
 			return nil, err
 		}
 		if host == "" {
-			return image.NewDockerResolver()
+			return image.NewDockerResolver(image.WithPlatform(plat))
 		}
-		return image.NewDockerResolverWithHost(host)
+		return image.NewDockerResolverWithHost(host, image.WithPlatform(plat))
 	default:
 		return nil, fmt.Errorf("unknown engine %q (expected docker, podman, or auto)", engine)
 	}

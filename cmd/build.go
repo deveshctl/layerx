@@ -42,6 +42,12 @@ The engine is selected the same way as the rest of layerx: --engine
 docker|podman|auto (default auto). Auto-detection probes the same sockets
 "layerx" itself uses to pick docker or podman.
 
+--platform on "layerx build" is passed straight through to the engine and
+governs what the engine builds; layerx then inspects exactly that built
+image. The top-level "layerx --platform" flag, by contrast, selects a
+variant of an existing multi-platform image to inspect. Use the engine's
+own --platform here; the layerx-level flag is unused on the build path.
+
 To recover the built image's identifier without parsing terminal output,
 layerx asks the engine to write the image ID to a temporary file via
 --iidfile. If you pass --iidfile yourself, your value is used and respected.

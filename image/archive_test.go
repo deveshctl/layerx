@@ -392,3 +392,81 @@ func TestArchiveResolver_ImplementsExtractorSource(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, src.NewExtractor())
 }
+
+func TestArchiveResolver_PlatformMatch_Allows(t *testing.T) {
+	// Archive recorded as linux/arm64; user passes the same --platform.
+	// The resolver must succeed without complaint.
+	manifest := []dockerManifest{{
+		Config: "cfg.json",
+		Layers: []string{"l0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	cfgData := buildConfigWithPlatform(t, "linux", "arm64", "", []string{"RUN x"})
+	layer := buildSimpleLayerTar(t, map[string][]byte{"a": []byte("b")})
+	path := writeArchive(t, map[string][]byte{
+		"manifest.json": manifestData,
+		"cfg.json":      cfgData,
+		"l0/layer.tar":  layer,
+	})
+
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+	r := NewArchiveResolverWithPlatform(path, plat)
+
+	layers, err := r.Resolve(context.Background(), path)
+	require.NoError(t, err)
+	require.Len(t, layers, 1)
+}
+
+func TestArchiveResolver_PlatformMismatch_ReturnsTypedError(t *testing.T) {
+	// Archive is linux/amd64; user asks for linux/arm64. Must return
+	// ErrPlatformNotInImage with the recorded platform listed as available.
+	manifest := []dockerManifest{{
+		Config: "cfg.json",
+		Layers: []string{"l0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	cfgData := buildConfigWithPlatform(t, "linux", "amd64", "", []string{"RUN x"})
+	layer := buildSimpleLayerTar(t, map[string][]byte{"a": []byte("b")})
+	path := writeArchive(t, map[string][]byte{
+		"manifest.json": manifestData,
+		"cfg.json":      cfgData,
+		"l0/layer.tar":  layer,
+	})
+
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+	r := NewArchiveResolverWithPlatform(path, plat)
+
+	_, err = r.Resolve(context.Background(), path)
+	require.Error(t, err)
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, "linux/arm64", pe.Requested)
+	assert.Equal(t, []string{"linux/amd64"}, pe.Available)
+}
+
+func TestArchiveResolver_NoPlatformPin_AllowsAnyArchive(t *testing.T) {
+	// Backward-compat: if the user does not pass --platform, the archive
+	// resolver must not reject anything regardless of the recorded variant.
+	manifest := []dockerManifest{{
+		Config: "cfg.json",
+		Layers: []string{"l0/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	cfgData := buildConfigWithPlatform(t, "linux", "ppc64le", "", []string{"RUN x"})
+	layer := buildSimpleLayerTar(t, map[string][]byte{"a": []byte("b")})
+	path := writeArchive(t, map[string][]byte{
+		"manifest.json": manifestData,
+		"cfg.json":      cfgData,
+		"l0/layer.tar":  layer,
+	})
+
+	r := NewArchiveResolver(path) // no platform pin
+	layers, err := r.Resolve(context.Background(), path)
+	require.NoError(t, err)
+	require.Len(t, layers, 1)
+}

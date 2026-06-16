@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--platform OS/ARCH[/VARIANT]` flag for selecting a specific variant of a
+  multi-platform image. Available on `layerx`, `layerx ci`, `layerx compare`,
+  and `layerx --json`. Accepts the same shapes Docker CLI does:
+  `linux/amd64`, `linux/arm64`, `linux/arm/v7`, `linux/arm64/v8`,
+  `windows/amd64`, and the bare-arch shortcut (`amd64` → `linux/amd64`).
+  The platform flows into the daemon's pull, save, and inspect calls, so
+  layerx fetches and analyzes exactly the requested manifest. Without
+  `--platform`, the historic behaviour is preserved (the daemon's default
+  platform is used).
+- Shell completion for `--platform` lists the canonical Docker / OCI
+  variants out of the box.
+- Helpful error when the requested platform is not part of the image's
+  manifest list. The error always names what was asked for (`platform
+  linux/ppc64le not found`); when the engine exposes the multi-platform
+  manifest list (Docker 25+ with the containerd image store), it also
+  lists the variants the image actually carries. On the legacy image store
+  the list is omitted rather than guessed at — a registry/manifest probe
+  is out of scope, and listing only the locally-cached variant would
+  misrepresent what the image really contains.
+- Archive mode (`layerx ./image.tar`) tolerates `--platform` when it
+  matches the archive's recorded variant and rejects it with the same
+  `ErrPlatformNotInImage` shape otherwise — so a typo never silently
+  inspects the wrong content.
+- `layerx build --platform LIST .` continues to forward `--platform` to
+  the engine's build (the engine governs what is built); the help text
+  now spells out how the build-side flag relates to the top-level
+  `layerx --platform` (which selects an existing image's variant).
+- The TUI header now appends the active `--platform` after the image
+  name (e.g. `layerx │ nginx:latest │ linux/arm64`) so multi-platform
+  images give a visual cue which variant is on screen.
+- `layerx --json` now emits an optional `platform` field alongside
+  `imageRef` whenever `--platform` is set, so a downstream consumer can
+  disambiguate two exports of the same multi-platform image without
+  re-running layerx. JSON schema bumped to **1.0.1** (additive,
+  backwards-compatible).
+
+### Fixed
+- `--platform` mismatch on the containerd image store no longer surfaces as
+  "image not found". The daemon's "no matching manifest for X in the manifest
+  list entries" message contains the substring `manifest for `, which the
+  not-found classifier also matched — so a bad platform was misrouted into
+  the image-not-found path. The platform classifier now runs first; only
+  truly missing image references fall through to the not-found path. Affects
+  Docker daemons running the containerd image store (where every pull goes
+  through the daemon and there is no local short-circuit) most visibly.
+- `ArchiveResolver` rewinds the archive file handle after the
+  `--platform` compatibility check, so a successful platform match no
+  longer trips `parseLayers` into reporting "manifest.json not found"
+  (the platform scan had advanced the file offset past the tar entries).
+
 ## [v1.4.1] - 2026-06-12
 
 `layerx build` thin wrapper plus a Docker-resolver fix for image-digest refs.
