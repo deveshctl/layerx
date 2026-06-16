@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backwards-compatible).
 
 ### Fixed
+- `--platform` mismatch on the containerd image store no longer surfaces as
+  "image not found". The daemon's "no matching manifest for X in the manifest
+  list entries" message contains the substring `manifest for `, which the
+  not-found classifier also matched — so a bad platform was misrouted into
+  the image-not-found path. The platform classifier now runs first; only
+  truly missing image references fall through to the not-found path. Affects
+  Docker daemons running the containerd image store (where every pull goes
+  through the daemon and there is no local short-circuit) most visibly.
 - `--platform` error now disclaims when the "Available platforms" list comes
   from the daemon's locally-cached variant rather than the full manifest
   list. On the legacy Docker image store (the default unless the

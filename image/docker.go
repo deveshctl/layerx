@@ -249,6 +249,16 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
+		// Platform-mismatch must be checked before the image-not-found
+		// classifier: the daemon's "no matching manifest for X in the
+		// manifest list entries" message contains the substring "manifest
+		// for ", which isImageNotFoundMessage also matches. Without this
+		// ordering, a bad --platform on a containerd image store (where
+		// every pull goes through the daemon, no local short-circuit) is
+		// reported as "image not found" instead of "platform not found".
+		if isPlatformPullFailure(err.Error()) {
+			return r.classifyPlatformMissing(ctx, imageRef, err)
+		}
 		if isImageNotFoundMessage(err.Error()) {
 			return r.classifyPullNotFound(ctx, imageRef, err)
 		}
@@ -260,11 +270,11 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
-		if isImageNotFoundMessage(err.Error()) {
-			return r.classifyPullNotFound(ctx, imageRef, err)
-		}
 		if isPlatformPullFailure(err.Error()) {
 			return r.classifyPlatformMissing(ctx, imageRef, err)
+		}
+		if isImageNotFoundMessage(err.Error()) {
+			return r.classifyPullNotFound(ctx, imageRef, err)
 		}
 		return &ErrPullFailed{Ref: imageRef, Cause: err}
 	}

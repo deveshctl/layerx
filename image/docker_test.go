@@ -869,3 +869,62 @@ func TestClassifyPlatformMissing_ManifestListLeavesAvailableSourceEmpty(t *testi
 	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
 	assert.Empty(t, pe.AvailableSource, "manifest-list path must not disclaim a list it can fully enumerate")
 }
+
+// TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotFound
+// regression-locks the bug Gate C surfaced: with the containerd image store
+// enabled, a bad --platform produced "image not found" instead of
+// "platform not found". Root cause was the daemon's "no matching manifest
+// for X in the manifest list entries" message also matching the broader
+// "manifest for " substring used by isImageNotFoundMessage. The platform
+// classifier must run first.
+//
+// The fake here mirrors the cold-pull scenario most clearly: the image is
+// not locally cached, so the platform-less inspect that classifyPullNotFound
+// would consult also fails — meaning the PRE-FIX code path could not have
+// recovered into ErrPlatformNotInImage even via classifyPullNotFound, and
+// would have surfaced ErrImageNotFound. The post-fix path bypasses that
+// branch entirely because isPlatformPullFailure now wins on this message.
+func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotFound(t *testing.T) {
+	plat, err := ParsePlatform("linux/arm64dd")
+	require.NoError(t, err)
+
+	inspectCalls := 0
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			// Verbatim message moby's containerd image store backend emits
+			// for a platform miss (see daemon/containerd/image_pull.go).
+			return nil, errors.New("no matching manifest for linux/arm64dd in the manifest list entries: not found")
+		},
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			inspectCalls++
+			// First inspect call is enumeratePlatforms reading the manifest
+			// list. With containerd image store, that succeeds and returns
+			// the full set of platforms the image carries.
+			result := client.ImageInspectResult{}
+			result.Manifests = []mobyimage.ManifestSummary{
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm64"}}},
+			}
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe, "platform-miss must surface as ErrPlatformNotInImage, not ErrImageNotFound")
+	assert.Equal(t, "linux/arm64dd", pe.Requested)
+	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
+	assert.Empty(t, pe.AvailableSource, "containerd image store returned the full manifest list; no disclaimer needed")
+	// The fix routes straight to classifyPlatformMissing → enumeratePlatforms,
+	// which is one inspect call. The pre-fix code path would have first run
+	// classifyPullNotFound (one inspect to probe existence) and only THEN
+	// classifyPlatformMissing (a second inspect for the manifest list) — so
+	// pinning to exactly one inspect locks the win in.
+	assert.Equal(t, 1, inspectCalls, "platform classifier should reach enumeratePlatforms directly, no probe inspect needed")
+}
