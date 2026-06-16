@@ -745,3 +745,127 @@ func TestEnsureImage_WithoutPlatform_ConsultsImageList(t *testing.T) {
 	assert.Equal(t, 1, imageListCalls)
 	assert.Equal(t, 0, imagePullCalls, "image was already local; no pull should run")
 }
+
+func TestEnumeratePlatforms_ManifestsListAuthoritative(t *testing.T) {
+	// When the daemon's containerd image store populates the Manifests
+	// array, enumeratePlatforms must use it verbatim and report localOnly=false
+	// so callers can render the list without a "may be incomplete" disclaimer.
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Manifests = []mobyimage.ManifestSummary{
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm", Variant: "v7"}}},
+			}
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	got, localOnly := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.False(t, localOnly, "manifest list came back populated; not a local-only fallback")
+	assert.Equal(t, []string{"linux/amd64", "linux/arm64", "linux/arm/v7"}, got)
+}
+
+func TestEnumeratePlatforms_LegacyStoreFallback(t *testing.T) {
+	// On the legacy daemon image store, ImageInspect returns an empty
+	// Manifests array — the only platform layerx can name is whatever single
+	// variant is locally cached. The boolean must signal that so callers
+	// disclaim the partial list to the user.
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Manifests = nil
+			result.Os = "linux"
+			result.Architecture = "amd64"
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	got, localOnly := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.True(t, localOnly, "Manifests was empty; the single-platform fallback fired")
+	assert.Equal(t, []string{"linux/amd64"}, got)
+}
+
+func TestEnumeratePlatforms_InspectFailsReturnsNil(t *testing.T) {
+	// enumeratePlatforms is best-effort context for an error path; if the
+	// inspect itself fails, return (nil, false) and let the caller emit the
+	// terse "platform X not found" message without a list.
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			return client.ImageInspectResult{}, errors.New("daemon hung up")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	got, localOnly := dr.enumeratePlatforms(context.Background(), "nginx:latest")
+	assert.Nil(t, got)
+	assert.False(t, localOnly)
+}
+
+func TestClassifyPlatformMissing_LegacyStoreSetsAvailableSource(t *testing.T) {
+	// End-to-end: when --platform is pinned and the daemon falls back to the
+	// single locally-cached variant, the returned ErrPlatformNotInImage must
+	// carry an AvailableSource explaining the limitation. Without that, a
+	// user who asks for "linux/arm64dd" on a daemon that has only
+	// linux/amd64 cached sees "Available: linux/amd64" and reasonably (but
+	// wrongly) concludes layerx thinks linux/arm64 doesn't exist.
+	plat, err := ParsePlatform("linux/arm64dd")
+	require.NoError(t, err)
+
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Os = "linux"
+			result.Architecture = "amd64"
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.classifyPlatformMissing(context.Background(), "nginx:latest", errors.New("no matching manifest"))
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, "linux/arm64dd", pe.Requested)
+	assert.Equal(t, []string{"linux/amd64"}, pe.Available)
+	assert.NotEmpty(t, pe.AvailableSource, "legacy-store fallback must disclaim the partial list")
+	assert.Contains(t, pe.AvailableSource, "containerd image store")
+}
+
+func TestClassifyPlatformMissing_ManifestListLeavesAvailableSourceEmpty(t *testing.T) {
+	// Sibling of the above: when the manifest list is authoritative,
+	// AvailableSource must stay empty so the rendered error has no
+	// parenthetical caveat — the listed platforms ARE the full set.
+	plat, err := ParsePlatform("linux/ppc64le")
+	require.NoError(t, err)
+
+	fake := &fakeAPIClient{
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			result := client.ImageInspectResult{}
+			result.Manifests = []mobyimage.ManifestSummary{
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "amd64"}}},
+				{ImageData: &mobyimage.ImageProperties{Platform: ocispec.Platform{OS: "linux", Architecture: "arm64"}}},
+			}
+			return result, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.classifyPlatformMissing(context.Background(), "nginx:latest", errors.New("no matching manifest"))
+	var pe *ErrPlatformNotInImage
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
+	assert.Empty(t, pe.AvailableSource, "manifest-list path must not disclaim a list it can fully enumerate")
+}

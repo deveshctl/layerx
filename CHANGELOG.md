@@ -43,6 +43,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backwards-compatible).
 
 ### Fixed
+- `--platform` error now disclaims when the "Available platforms" list comes
+  from the daemon's locally-cached variant rather than the full manifest
+  list. On the legacy Docker image store (the default unless the
+  containerd snapshotter is enabled), `ImageInspect` does not return the
+  manifest list, so layerx fell back to listing whatever single platform
+  was already pulled — and the rendered error implied that was the full
+  set the image carries. The list now reads
+  `Available platforms (locally cached only — enable the daemon's
+  containerd image store to see every platform this image advertises):`
+  in that case, so a typo like `--platform linux/arm64dd` on an
+  amd64-only-cached image no longer misleads the user into thinking the
+  image lacks an arm64 variant.
 - `ArchiveResolver` rewinds the archive file handle after the
   `--platform` compatibility check, so a successful platform match no
   longer trips `parseLayers` into reporting "manifest.json not found"

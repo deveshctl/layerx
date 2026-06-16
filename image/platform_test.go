@@ -115,6 +115,10 @@ func TestErrPlatformNotInImage_Format(t *testing.T) {
 	assert.Contains(t, msg, "linux/amd64")
 	assert.Contains(t, msg, "linux/arm64")
 	assert.Contains(t, msg, "Available platforms")
+	// No source disclaimer when AvailableSource is empty: the list is
+	// authoritative (came from the manifest list) and a parenthetical
+	// would be noise.
+	assert.NotContains(t, msg, "(")
 	// The image ref is intentionally NOT in the rendered message — the user
 	// already typed it on the command line and the goal is a tight, scannable
 	// "X not found / try Y" hint. Field is still readable on the struct.
@@ -125,6 +129,25 @@ func TestErrPlatformNotInImage_Format(t *testing.T) {
 	msg2 := e2.Error()
 	assert.Contains(t, msg2, "platform linux/ppc64le not found")
 	assert.NotContains(t, msg2, "Available platforms")
+
+	// With AvailableSource set (legacy daemon image store fallback), the
+	// header gets a parenthetical disclaimer so the user understands why
+	// the list may be incomplete. Without the disclaimer, a user who asks
+	// for linux/arm64dd on a daemon that has only linux/amd64 cached sees
+	// "Available: linux/amd64" and wrongly concludes linux/arm64 doesn't
+	// exist in the image — when really layerx just couldn't enumerate the
+	// full manifest list.
+	e3 := &ErrPlatformNotInImage{
+		Ref:             "nginx:latest",
+		Requested:       "linux/arm64dd",
+		Available:       []string{"linux/amd64"},
+		AvailableSource: "locally cached only — enable the daemon's containerd image store to see every platform this image advertises",
+	}
+	msg3 := e3.Error()
+	assert.Contains(t, msg3, "platform linux/arm64dd not found")
+	assert.Contains(t, msg3, "Available platforms (locally cached only")
+	assert.Contains(t, msg3, "containerd image store")
+	assert.Contains(t, msg3, "- linux/amd64")
 }
 
 func TestErrPlatformInvalid_Format(t *testing.T) {
