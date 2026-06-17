@@ -716,12 +716,12 @@ func TestRenderFileTreeDoesNotPanic(t *testing.T) {
 	m := setupModel()
 	files := m.displayTree()
 	assert.NotPanics(t, func() {
-		renderFileTree(files, 0, 0, 60, 20, true, false, "", true, nil, 0)
+		renderFileTree(files, 0, 0, 60, 20, true, false, "", true, false, nil, 0)
 	})
 }
 
 func TestRenderFileTreeEmptyShowsPlaceholder(t *testing.T) {
-	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", true, nil, 0)
+	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", true, false, nil, 0)
 	assert.Contains(t, output, "no filesystem changes")
 }
 
@@ -737,7 +737,7 @@ func TestRenderFileTreeCollapsedDirShowsGlyph(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
-	line := renderFileTree(um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, um.treeCollapsed, 0)
+	line := renderFileTree(um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, false, um.treeCollapsed, 0)
 	assert.Contains(t, line, "▸")
 }
 
@@ -809,12 +809,14 @@ func testAnalysisWithDiffs() *image.Analysis {
 	layers[1].Tree.Root.AddChild(etcL1)
 
 	stacked := image.Stack(layers)
+	aggregated := image.BuildAggregatedTrees(layers)
 
 	return &image.Analysis{
-		ImageRef:     "test-diffs:latest",
-		Layers:       layers,
-		StackedTrees: stacked,
-		TotalSize:    15000000,
+		ImageRef:        "test-diffs:latest",
+		Layers:          layers,
+		StackedTrees:    stacked,
+		AggregatedTrees: aggregated,
+		TotalSize:       15000000,
 	}
 }
 
@@ -2185,4 +2187,79 @@ func TestFileContentMsg_ResetsHOffset(t *testing.T) {
 	})
 	um := updated.(model)
 	assert.Equal(t, 0, um.viewHOffset, "opening a new file must reset hOffset")
+}
+
+// --- Aggregated layer view toggle (A) ----------------------------------------
+
+func TestModel_AggregateToggle_FlipsModeAndResetsTreeCursor(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.treeCursor = 5
+	m.treeOffset = 3
+	originalLayer := m.layerCursor
+
+	m = send(m, keyPress('A'))
+
+	assert.True(t, m.aggregated, "A must flip aggregated on")
+	assert.Equal(t, 0, m.treeCursor, "treeCursor must reset on toggle")
+	assert.Equal(t, 0, m.treeOffset, "treeOffset must reset on toggle")
+	assert.Equal(t, originalLayer, m.layerCursor, "layerCursor must survive toggle")
+}
+
+func TestModel_AggregateToggle_RoutesCurrentTreeRoot(t *testing.T) {
+	m := setupModelWithDiffs()
+	require.NotNil(t, m.analysis.AggregatedTrees, "fixture must populate AggregatedTrees")
+
+	stackedRoot := m.analysis.StackedTrees[m.layerCursor].Root
+	aggregatedRoot := m.analysis.AggregatedTrees[m.layerCursor].Root
+	require.NotNil(t, stackedRoot)
+	require.NotNil(t, aggregatedRoot)
+
+	assert.Same(t, stackedRoot, m.currentTreeRoot(), "default mode must point at StackedTrees")
+
+	m = send(m, keyPress('A'))
+	assert.Same(t, aggregatedRoot, m.currentTreeRoot(), "aggregated mode must point at AggregatedTrees")
+}
+
+func TestModel_AggregateToggle_NoOpWhenViewerOpen(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("data"), Size: 4}
+
+	m = send(m, keyPress('A'))
+
+	assert.False(t, m.aggregated, "viewer-open guard must suppress A toggle")
+}
+
+func TestModel_AggregateToggle_FilterInputSwallowsA(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterActive = true
+	m.filterQuery = ""
+
+	m = send(m, keyPress('A'))
+
+	assert.False(t, m.aggregated, "filter-active guard must suppress A toggle")
+	assert.Equal(t, "A", m.filterQuery, "A must be appended to filter query while filter input is active")
+}
+
+func TestModel_AggregateToggle_PreservesFilterQueryAndDiffOnly(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterQuery = "etc"
+	m.diffOnly = true
+	m.sortMode = sortDesc
+
+	m = send(m, keyPress('A'))
+
+	assert.True(t, m.aggregated)
+	assert.Equal(t, "etc", m.filterQuery, "filter query must survive toggle")
+	assert.True(t, m.diffOnly, "diffOnly must survive toggle")
+	assert.Equal(t, sortDesc, m.sortMode, "sortMode must survive toggle")
+}
+
+func TestModel_AggregateRender_NilAggregatedTreesFallsBackGracefully(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.analysis.AggregatedTrees = nil
+	m.aggregated = true
+
+	assert.Nil(t, m.currentTreeRoot(), "nil AggregatedTrees must yield nil root, not panic")
+	assert.Empty(t, m.displayTree(), "nil root must produce an empty display slice")
 }

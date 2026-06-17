@@ -12,7 +12,7 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
-func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, collapsed map[string]bool, currentLayer int) string {
+func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
 	contentHeight := height
 
@@ -69,11 +69,14 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		sb.WriteString(renderFilterBar(filterActive, filterQuery, len(files), contentWidth))
 	}
 
-	title := "File Tree"
+	title := "Current Layer Contents"
+	if aggregated {
+		title = "Aggregated Layer Contents"
+	}
 	if len(files) > 0 {
-		title = fmt.Sprintf("File Tree %d/%d", cursor+1, len(files))
+		title = fmt.Sprintf("%s %d/%d", title, cursor+1, len(files))
 	} else if filterQuery != "" {
-		title = "File Tree 0/0"
+		title = title + " 0/0"
 	}
 
 	hasAbove := offset > 0

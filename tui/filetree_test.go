@@ -27,7 +27,7 @@ func TestRenderFileTree_FilterActiveSuppressesBelowIndicator(t *testing.T) {
 	// (the bar persists until the query is cleared). The filter bar
 	// occupies the panel's last row, where renderPanel would otherwise
 	// paint the ▾ scroll indicator.
-	out := renderFileTree(files, 0, 0, 60, 10, true, false, "f", false, nil, 0)
+	out := renderFileTree(files, 0, 0, 60, 10, true, false, "f", false, false, nil, 0)
 	if strings.Contains(out, "▾") {
 		t.Fatalf("expected no ▾ when filter bar occupies last row; got panel:\n%s", out)
 	}
@@ -35,9 +35,28 @@ func TestRenderFileTree_FilterActiveSuppressesBelowIndicator(t *testing.T) {
 
 func TestRenderFileTree_NoFilterRetainsBelowIndicator(t *testing.T) {
 	files := fakeFiles(50)
-	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, nil, 0)
+	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
 	if !strings.Contains(out, "▾") {
 		t.Fatalf("expected ▾ when overflow exists and filter is not active; got panel:\n%s", out)
+	}
+}
+
+func TestRenderFileTree_TitleSingleLayerMode(t *testing.T) {
+	files := fakeFiles(3)
+	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
+	if !strings.Contains(out, "Current Layer Contents") {
+		t.Fatalf("expected title to contain 'Current Layer Contents' when aggregated=false; got:\n%s", out)
+	}
+	if strings.Contains(out, "Aggregated Layer Contents") {
+		t.Fatalf("aggregated title leaked into single-layer mode")
+	}
+}
+
+func TestRenderFileTree_TitleAggregatedMode(t *testing.T) {
+	files := fakeFiles(3)
+	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, true, nil, 0)
+	if !strings.Contains(out, "Aggregated Layer Contents") {
+		t.Fatalf("expected title to contain 'Aggregated Layer Contents' when aggregated=true; got:\n%s", out)
 	}
 }
 

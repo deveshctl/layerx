@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- TUI: Aggregated layer view, toggled with `A`. The default file tree
+  continues to show only what the current layer changed; `A` switches
+  to the cumulative view that overlays every layer 1..N onto the L0
+  baseline, preserving cumulative provenance labels (a file modified
+  in L1 stays Modified at L7 even if L2..L7 didn't touch it).
+  Matches Dive's Ctrl+A semantics; titles match Dive ("Current Layer
+  Contents" / "Aggregated Layer Contents").
 - CI: race detector (`go test -race`) on the main test job — surfaces data
   races in `image/` (concurrent layer parsing, cache I/O) that the Windows
   dev environment cannot detect locally.

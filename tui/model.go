@@ -190,6 +190,7 @@ type model struct {
 	filterActive bool
 	filterQuery  string
 	diffOnly      bool
+	aggregated    bool
 	sortMode      sortMode
 	treeCollapsed map[string]bool
 	viewState    viewState
@@ -735,6 +736,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.treeOffset = 0
 			return m, nil
 
+		case key.Matches(msg, m.keys.Aggregate):
+			// Tree contents change shape between modes; cursor position and
+			// collapse state are no longer meaningful. m.filterQuery,
+			// m.diffOnly, and m.sortMode are intentionally NOT reset — they
+			// are path/DiffType-level filters that apply identically to both
+			// trees.
+			m.aggregated = !m.aggregated
+			m.treeCursor = 0
+			m.treeOffset = 0
+			m.clearTreeCollapsed()
+			return m, nil
+
 		case key.Matches(msg, m.keys.ExtractFile):
 			if m.focus != focusTree {
 				return m, nil
@@ -1031,10 +1044,14 @@ func (m model) currentTreeRoot() *image.FileNode {
 	if m.analysis == nil {
 		return nil
 	}
-	if m.layerCursor >= len(m.analysis.StackedTrees) {
+	trees := m.analysis.StackedTrees
+	if m.aggregated {
+		trees = m.analysis.AggregatedTrees
+	}
+	if m.layerCursor >= len(trees) {
 		return nil
 	}
-	tree := m.analysis.StackedTrees[m.layerCursor]
+	tree := trees[m.layerCursor]
 	if tree == nil {
 		return nil
 	}
@@ -1369,7 +1386,7 @@ func (m model) viewReady() tea.View {
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
-	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.treeCollapsed, m.layerCursor)
+	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.aggregated, m.treeCollapsed, m.layerCursor)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
@@ -1486,6 +1503,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"s", "sort"},
 			{"c", "copy cmd"},
 			{"w", "wasted"},
+			{"A", "aggregate"},
 			{"?", "help"},
 			{"q", "quit"},
 		}
@@ -1502,6 +1520,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"d", "diff"},
 			{"s", "sort"},
 			{"w", "wasted"},
+			{"A", "aggregate"},
 			{"Enter", enterDesc},
 			{"x", "save"},
 			{"y", "copy path"},
@@ -1544,6 +1563,9 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		}
 		if m.diffOnly {
 			badges += lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Render("[diff]") + " "
+		}
+		if m.aggregated {
+			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[agg]") + " "
 		}
 		switch m.sortMode {
 		case sortDesc:

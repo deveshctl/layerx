@@ -20,6 +20,7 @@ type keyMap struct {
 	Filter       key.Binding
 	DiffOnly     key.Binding
 	Sort         key.Binding
+	Aggregate    key.Binding
 	ExtractFile  key.Binding
 	ViewerSearch key.Binding
 	NextMatch    key.Binding
@@ -89,6 +90,10 @@ func defaultKeys() keyMap {
 		Sort: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "sort size"),
+		),
+		Aggregate: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", "aggregated view"),
 		),
 		ExtractFile: key.NewBinding(
 			key.WithKeys("x"),
