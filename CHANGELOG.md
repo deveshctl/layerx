@@ -66,6 +66,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backwards-compatible).
 
 ### Fixed
+- TUI: removed duplicate `Y` keybinding in the layers panel. `Y` previously
+  copied the highlighted layer's Dockerfile command — exactly the same job
+  as `c` — so two keys were wired to the same action with no documented
+  difference. `Y` is now reserved for the file viewer's "copy file content"
+  action, matching its name and help text. Use `c` to copy the Dockerfile
+  command from the layers panel.
+- TUI: layers-panel footer hints now surface `c copy cmd` so the
+  copy-Dockerfile-command shortcut is discoverable without opening help
+  (`?`). Mirrors how the file-tree footer already advertises `y copy path`.
 - `--platform` mismatch on the containerd image store no longer surfaces as
   "image not found". The daemon's "no matching manifest for X in the manifest
   list entries" message contains the substring `manifest for `, which the

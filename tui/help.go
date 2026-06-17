@@ -49,7 +49,6 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"S", "Cycle size: Change → Stored → both"},
 				{"c", "Copy Dockerfile command"},
-				{"Y", "Copy command (layers panel)"},
 			},
 		},
 		{

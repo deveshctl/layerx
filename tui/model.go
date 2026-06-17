@@ -695,21 +695,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case key.Matches(msg, m.keys.CopyContent):
-			if m.focus == focusLayers {
-				layers := m.layers()
-				if m.layerCursor < len(layers) {
-					m.copyConfirm = true
-					return m, tea.Batch(
-						tea.SetClipboard(layers[m.layerCursor].Command),
-						tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-							return clearCopyMsg{}
-						}),
-					)
-				}
-			}
-			return m, nil
-
 		case key.Matches(msg, m.keys.Filter):
 			if m.focus == focusTree {
 				m.filterActive = true
@@ -1499,6 +1484,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"S", "size"},
 			{"d", "diff"},
 			{"s", "sort"},
+			{"c", "copy cmd"},
 			{"w", "wasted"},
 			{"?", "help"},
 			{"q", "quit"},

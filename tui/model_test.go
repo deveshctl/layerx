@@ -1659,14 +1659,17 @@ func TestCopyContentShiftYInViewer(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
-func TestCopyContentShiftYInLayerPanel(t *testing.T) {
+func TestCopyContentShiftYInLayerPanelIsNoOp(t *testing.T) {
+	// 'Y' must do nothing in the layers panel — that role belongs to 'c'
+	// (copy Dockerfile command). Y is reserved for the file viewer's
+	// copy-content action. See keymap.CopyContent and tui/help.go.
 	m := setupModel()
 	m.focus = focusLayers
 
 	updated, cmd := m.Update(keyPress('Y'))
 	um := updated.(model)
-	assert.True(t, um.copyConfirm)
-	assert.NotNil(t, cmd)
+	assert.False(t, um.copyConfirm)
+	assert.Nil(t, cmd)
 }
 
 // --- Viewer Search (/n/N) ---
