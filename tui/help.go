@@ -49,8 +49,7 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"S", "Cycle size: Change → Stored → both"},
 				{"c", "Copy Dockerfile command"},
-				{"A", "Split view: Layer Δ + Cumulative"},
-				{"Tab", "Cycle layers → Δ → Cumulative (in split)"},
+				{"A", "Toggle split aggregated view"},
 			},
 		},
 		{
@@ -225,13 +224,6 @@ func (m model) overlayHelp() string {
 		"Change = files in the image grew or shrank at this step. " +
 			"Stored = bytes Docker keeps for this layer. " +
 			"Layer 0 Change is the size after the first layer.",
-	))
-	body.WriteString("\n")
-	body.WriteString(" ")
-	body.WriteString(st.note.Render(
-		"Split view (A): top pane shows what this layer changed; " +
-			"bottom pane shows the cumulative state (Modified/Removed " +
-			"labels carry forward across layers that didn't touch the path).",
 	))
 	body.WriteString("\n")
 	body.WriteString(" ")

@@ -2343,8 +2343,11 @@ func TestSplitMode_PaneCursorsAreIndependent(t *testing.T) {
 }
 
 // In split mode the tree-flat-list helper m.displayTree() returns the
-// active pane's slice. Switching focus between panes must change which
-// slice m.displayTree() reports.
+// active pane's slice. The two panes share node *structure* (both show
+// the cumulative filesystem at the layer cursor) but differ in DiffType
+// labels: per-layer Δ marks only what this layer changed, cumulative
+// preserves labels carried forward from earlier layers. The active-pane
+// switch is what changes which labels the user sees.
 func TestSplitMode_DisplayTreeFollowsFocus(t *testing.T) {
 	m := setupModelWithDiffs()
 	m.aggregated = true
@@ -2354,11 +2357,31 @@ func TestSplitMode_DisplayTreeFollowsFocus(t *testing.T) {
 	m.focus = focusTreeAgg
 	botFiles := m.displayTree()
 
-	// The Δ tree at layer 1 contains only what L1 changed; the cumulative
-	// tree at L1 contains everything in L0 plus L1's changes — strictly a
-	// superset, so the slices differ in length.
-	assert.NotEqual(t, len(topFiles), len(botFiles),
-		"split panes show different slices: cumulative is a superset of the Δ at this layer")
+	// Find a path that is Unchanged in the Δ view but Added in the
+	// cumulative view: an L0 file like /etc/passwd. L1 didn't touch it,
+	// so Stack labels it Unchanged; AggregatedTrees carries forward L0's
+	// Added label. Different focus must produce different labels for the
+	// same path.
+	const probe = "/etc/passwd"
+	topLabel := findDiffType(topFiles, probe)
+	botLabel := findDiffType(botFiles, probe)
+	require.NotEqual(t, image.DiffType(-1), topLabel, "probe path must exist in top pane")
+	require.NotEqual(t, image.DiffType(-1), botLabel, "probe path must exist in bottom pane")
+	assert.NotEqual(t, topLabel, botLabel,
+		"split panes show the same path with different DiffTypes: %s top=%v bot=%v",
+		probe, topLabel, botLabel)
+}
+
+// findDiffType returns the DiffType of the named path in files, or -1 if
+// missing. Test helper kept local because the productive callers route
+// node lookup through FindChild on the tree, not the flat slice.
+func findDiffType(files []*image.FileNode, path string) image.DiffType {
+	for _, f := range files {
+		if f.Path == path {
+			return f.DiffType
+		}
+	}
+	return image.DiffType(-1)
 }
 
 // Filter applied while focused on the bottom pane must filter the bottom
