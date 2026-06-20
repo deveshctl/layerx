@@ -6,6 +6,7 @@ Interactive Docker image layer inspector with CI-friendly efficiency checks. Sin
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/deveshctl/layerx/badge)](https://scorecard.dev/viewer/?uri=github.com/deveshctl/layerx)
 ![Layerx demo](assets/layerx-demo.gif)
 
 ---
@@ -154,6 +155,41 @@ sudo rpm -i layerx_linux_arm64.rpm
 ### Direct download
 
 Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.4.1`) in the URLs above.
+
+### Verifying releases
+
+Every release ships with a cosign-signed `checksums.txt`, an SPDX SBOM per archive, and a SLSA provenance attestation. Verifying both proves the archive came out of this repository's release workflow on GitHub-hosted runners.
+
+```bash
+TAG=v1.4.0   # the release you downloaded
+ARCHIVE=layerx_linux_amd64.tar.gz
+BASE="https://github.com/deveshctl/layerx/releases/download/${TAG}"
+
+curl -sLO "${BASE}/${ARCHIVE}"
+curl -sLO "${BASE}/checksums.txt"
+curl -sLO "${BASE}/checksums.txt.sig"
+curl -sLO "${BASE}/checksums.txt.pem"
+curl -sLO "${BASE}/multiple.intoto.jsonl"   # SLSA provenance
+
+# 1) Verify the cosign keyless signature over checksums.txt.
+cosign verify-blob \
+  --certificate checksums.txt.pem \
+  --signature   checksums.txt.sig \
+  --certificate-identity-regexp "^https://github.com/deveshctl/layerx/" \
+  --certificate-oidc-issuer     "https://token.actions.githubusercontent.com" \
+  checksums.txt
+
+# 2) Verify the archive matches its checksum.
+grep "  ${ARCHIVE}$" checksums.txt | sha256sum --check
+
+# 3) (Optional) Verify SLSA provenance with slsa-verifier.
+slsa-verifier verify-artifact "${ARCHIVE}" \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/deveshctl/layerx \
+  --source-tag "${TAG}"
+```
+
+The signature chain is anchored in [Sigstore](https://www.sigstore.dev/)'s public transparency log; no long-lived keys are involved.
 
 ### Build from source
 

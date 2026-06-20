@@ -14,6 +14,7 @@ builds:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    mod_timestamp: '{{ .CommitTimestamp }}'
 
 archives:
   - formats:
@@ -23,6 +24,33 @@ archives:
       - goos: windows
         formats:
           - zip
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Per-archive SBOM in SPDX-JSON via syft. One file per archive,
+# named "<archive>.sbom.json", attached to the GitHub release.
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+
+# Keyless cosign signature over the checksums file. Signing the checksums
+# binds every artifact in the release through one signature; verifiers grab
+# checksums.txt + checksums.txt.sig + checksums.txt.pem and replay the hash.
+# OIDC identity is the GitHub Actions workflow itself.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
 
 nfpms:
   - package_name: layerx

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Release integrity: every tagged release now ships a cosign-signed
+  `checksums.txt` (keyless, GitHub OIDC), an SPDX SBOM per archive, and a
+  SLSA Build Level 3 provenance attestation. Verification recipe is in the
+  README and `SECURITY.md`.
+- OpenSSF Scorecard workflow — weekly analysis published to the public
+  Scorecard API and uploaded as SARIF to GitHub code-scanning. Badge in
+  the README.
+- Renovate configuration (`.github/renovate.json`) — monthly grouped
+  dependency PRs with `vulnerabilityAlerts` opening immediately,
+  auto-merge limited to GitHub Actions digest pin refreshes.
 - TUI: Split-pane view, toggled with `A`. The file-tree panel splits
   horizontally into two synchronized halves at the same layer cursor:
   the **top** pane shows what the current layer changed (per-layer Δ);
@@ -75,6 +85,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disambiguate two exports of the same multi-platform image without
   re-running layerx. JSON schema bumped to **1.0.1** (additive,
   backwards-compatible).
+
+### Changed
+- All workflows now declare `permissions: contents: read` at the
+  workflow level; per-job write scopes are granted only where required
+  (release, Scorecard).
 
 ### Fixed
 - TUI: removed duplicate `Y` keybinding in the layers panel. `Y` previously

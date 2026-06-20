@@ -6,6 +6,9 @@ on:
     - cron: '17 6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   long-fuzz:
     runs-on: ubuntu-latest
