@@ -93,7 +93,7 @@ func defaultKeys() keyMap {
 		),
 		Aggregate: key.NewBinding(
 			key.WithKeys("A"),
-			key.WithHelp("A", "aggregated view"),
+			key.WithHelp("A", "split: layer Δ + cumulative"),
 		),
 		ExtractFile: key.NewBinding(
 			key.WithKeys("x"),

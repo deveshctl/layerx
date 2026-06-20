@@ -2216,8 +2216,16 @@ func TestModel_AggregateToggle_RoutesCurrentTreeRoot(t *testing.T) {
 
 	assert.Same(t, stackedRoot, m.currentTreeRoot(), "default mode must point at StackedTrees")
 
+	// Toggle into split mode. The top sub-pane (Layer Δ) keeps focus, so
+	// currentTreeRoot still points at StackedTrees.
 	m = send(m, keyPress('A'))
-	assert.Same(t, aggregatedRoot, m.currentTreeRoot(), "aggregated mode must point at AggregatedTrees")
+	assert.Same(t, stackedRoot, m.currentTreeRoot(),
+		"split mode with top pane focused: current root is StackedTrees")
+
+	// Tab from layers → top → bottom. Now the cumulative pane is active.
+	m.focus = focusTreeAgg
+	assert.Same(t, aggregatedRoot, m.currentTreeRoot(),
+		"split mode with bottom pane focused: current root is AggregatedTrees")
 }
 
 func TestModel_AggregateToggle_NoOpWhenViewerOpen(t *testing.T) {
@@ -2259,7 +2267,117 @@ func TestModel_AggregateRender_NilAggregatedTreesFallsBackGracefully(t *testing.
 	m := setupModelWithDiffs()
 	m.analysis.AggregatedTrees = nil
 	m.aggregated = true
+	m.focus = focusTreeAgg
 
-	assert.Nil(t, m.currentTreeRoot(), "nil AggregatedTrees must yield nil root, not panic")
+	assert.Nil(t, m.currentTreeRoot(), "nil AggregatedTrees on focused agg pane must yield nil root, not panic")
 	assert.Empty(t, m.displayTree(), "nil root must produce an empty display slice")
+}
+
+// --- Split-pane focus cycling -----------------------------------------------
+
+// Tab cycle in split mode: layers → top tree (Δ) → bottom tree (cumulative)
+// → layers. Without aggregated on, Tab is two-state (layers ↔ tree). The
+// extra step lets the user visit the cumulative pane without a separate
+// keybind.
+func TestSplitMode_TabCyclesThreePanes(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+	m.focus = focusLayers
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusTree, m.focus, "Tab #1: layers → top tree")
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusTreeAgg, m.focus, "Tab #2: top → bottom tree")
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusLayers, m.focus, "Tab #3: bottom → layers")
+}
+
+func TestSplitMode_TabIsTwoStateWhenAggregatedOff(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = false
+	m.focus = focusLayers
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusTree, m.focus)
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusLayers, m.focus, "without split, Tab is just layers ↔ tree")
+}
+
+// Toggling out of split mode while focused on the bottom (agg) sub-panel
+// must not strand focus on a now-invisible pane. The active focus should
+// snap back to the (single) tree pane.
+func TestSplitMode_TogglingOffSnapsFocusBack(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+	m.focus = focusTreeAgg
+
+	m = send(m, keyPress('A'))
+	assert.False(t, m.aggregated)
+	assert.Equal(t, focusTree, m.focus,
+		"toggling off while focused on bottom must move focus to single tree pane")
+}
+
+// Each sub-pane has its own cursor — j on the top pane must not move the
+// bottom pane's cursor and vice versa. Without independent cursors, the
+// split view's value (compare two views without losing your place) is
+// lost.
+func TestSplitMode_PaneCursorsAreIndependent(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+
+	// Move top-pane cursor.
+	m.focus = focusTree
+	m = send(m, keyPress('j'))
+	assert.Equal(t, 1, m.treeCursor)
+	assert.Equal(t, 0, m.aggCursor, "moving top must not touch bottom cursor")
+
+	// Move bottom-pane cursor.
+	m.focus = focusTreeAgg
+	m = send(m, keyPress('j'))
+	m = send(m, keyPress('j'))
+	assert.Equal(t, 2, m.aggCursor)
+	assert.Equal(t, 1, m.treeCursor, "moving bottom must not touch top cursor")
+}
+
+// In split mode the tree-flat-list helper m.displayTree() returns the
+// active pane's slice. Switching focus between panes must change which
+// slice m.displayTree() reports.
+func TestSplitMode_DisplayTreeFollowsFocus(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+
+	m.focus = focusTree
+	topFiles := m.displayTree()
+	m.focus = focusTreeAgg
+	botFiles := m.displayTree()
+
+	// The Δ tree at layer 1 contains only what L1 changed; the cumulative
+	// tree at L1 contains everything in L0 plus L1's changes — strictly a
+	// superset, so the slices differ in length.
+	assert.NotEqual(t, len(topFiles), len(botFiles),
+		"split panes show different slices: cumulative is a superset of the Δ at this layer")
+}
+
+// Filter applied while focused on the bottom pane must filter the bottom
+// pane's slice — not just the top one. Both panes share the query but
+// each pane filters its own files.
+func TestSplitMode_FilterAppliesToBothPanes(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+	m.filterQuery = "nginx"
+
+	m.focus = focusTree
+	topFiltered := m.displayTree()
+	for _, f := range topFiltered {
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
+
+	m.focus = focusTreeAgg
+	botFiltered := m.displayTree()
+	for _, f := range botFiltered {
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
 }

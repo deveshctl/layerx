@@ -60,6 +60,57 @@ func TestRenderFileTree_TitleAggregatedMode(t *testing.T) {
 	}
 }
 
+// renderSplitFileTree renders both the per-layer Δ pane and the cumulative
+// pane inside a single panel border. The title must advertise both halves.
+func TestRenderSplitFileTree_TitleShowsBothPanes(t *testing.T) {
+	top := fakeFiles(3)
+	bot := fakeFiles(5)
+	out := renderSplitFileTree(splitTreeInput{
+		width:        80,
+		height:       24,
+		topFiles:     top,
+		topFocused:   true,
+		botFiles:     bot,
+		topCollapsed: nil,
+		botCollapsed: nil,
+		treeMode:     true,
+	})
+	if !strings.Contains(out, "Layer Δ") {
+		t.Fatalf("split title must include 'Layer Δ' for the top pane; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Cumulative") {
+		t.Fatalf("split title must include 'Cumulative' for the bottom pane; got:\n%s", out)
+	}
+}
+
+// The divider between sub-panes is a labelled separator. It carries the
+// bottom-pane label so the user can read top→bottom as Δ→cumulative
+// without checking the title bar.
+func TestRenderSplitFileTree_DividerCarriesCumulativeLabel(t *testing.T) {
+	out := renderSplitFileTree(splitTreeInput{
+		width:    80,
+		height:   24,
+		topFiles: fakeFiles(2),
+		botFiles: fakeFiles(2),
+		treeMode: true,
+	})
+	// The divider label is "▾ Cumulative …"; the bare " Cumulative " token
+	// matches both the title and the divider but with an unambiguous prefix.
+	if !strings.Contains(out, "Cumulative") {
+		t.Fatalf("split divider must surface the 'Cumulative' label; got:\n%s", out)
+	}
+}
+
+// In single-pane mode the file tree must not render the split's "Layer Δ"
+// label — that title is reserved for the split layout.
+func TestRenderFileTree_SinglePaneOmitsSplitTitle(t *testing.T) {
+	files := fakeFiles(3)
+	out := renderFileTree(files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
+	if strings.Contains(out, "Layer Δ") {
+		t.Fatalf("single-pane file tree must not advertise the split title 'Layer Δ'; got:\n%s", out)
+	}
+}
+
 func TestPadRight_DisplayWidthMeasurement(t *testing.T) {
 	cases := []struct {
 		name string

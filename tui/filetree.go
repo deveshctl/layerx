@@ -14,44 +14,112 @@ import (
 
 func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
-	contentHeight := height
 
-	showFilterBar := filterActive || filterQuery != ""
-	if showFilterBar {
-		contentHeight--
+	body, hasAbove, hasBelow := renderTreeBody(treePaneInput{
+		files:        files,
+		cursor:       cursor,
+		offset:       offset,
+		contentWidth: contentWidth,
+		bodyHeight:   height,
+		showFilterBar: filterActive || filterQuery != "",
+		filterActive: filterActive,
+		filterQuery:  filterQuery,
+		treeMode:     treeMode,
+		collapsed:    collapsed,
+		currentLayer: currentLayer,
+		showHeader:   true,
+	})
+
+	title := "Current Layer Contents"
+	if aggregated {
+		title = "Aggregated Layer Contents"
+	}
+	if len(files) > 0 {
+		title = fmt.Sprintf("%s %d/%d", title, cursor+1, len(files))
+	} else if filterQuery != "" {
+		title = title + " 0/0"
 	}
 
-	contentHeight--
+	return renderPanel(body, title, focused, contentWidth, height, hasAbove, hasBelow)
+}
+
+// treePaneInput collects the parameters for renderTreeBody. Fields mirror
+// the renderFileTree signature; bodyHeight is the number of rows to fill
+// (the outer panel border is added by the caller).
+type treePaneInput struct {
+	files         []*image.FileNode
+	cursor        int
+	offset        int
+	contentWidth  int
+	bodyHeight    int
+	showFilterBar bool
+	filterActive  bool
+	filterQuery   string
+	treeMode      bool
+	collapsed     map[string]bool
+	currentLayer  int
+	// showHeader prepends the column header row when true. The split renderer
+	// shows it on every sub-pane so the metadata columns line up regardless
+	// of which pane has focus.
+	showHeader bool
+	// emptyMsg overrides the default "(no filesystem changes)" placeholder
+	// shown when files is empty. The aggregated sub-pane uses
+	// "(no entries at this layer)" because the cumulative tree at L0 with
+	// nothing yet would otherwise misleadingly read as "no changes".
+	emptyMsg string
+}
+
+// renderTreeBody renders the inner content of a file-tree pane (no border):
+// optional column header, the visible file slice, and an optional filter
+// bar. Returns the rendered body plus the scroll-indicator hints
+// (hasAbove/hasBelow) so the caller can paint them on the panel border.
+func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
+	contentHeight := in.bodyHeight
+	if in.showFilterBar {
+		contentHeight--
+	}
+	if in.showHeader {
+		contentHeight--
+	}
+	if contentHeight < 0 {
+		contentHeight = 0
+	}
 
 	var sb strings.Builder
 
-	sb.WriteString(renderTreeHeader(contentWidth))
-	sb.WriteString("\n")
+	if in.showHeader {
+		sb.WriteString(renderTreeHeader(in.contentWidth))
+		sb.WriteString("\n")
+	}
 
-	if len(files) == 0 {
-		msg := "(no filesystem changes)"
-		if filterQuery != "" {
+	if len(in.files) == 0 {
+		msg := in.emptyMsg
+		if msg == "" {
+			msg = "(no filesystem changes)"
+		}
+		if in.filterQuery != "" {
 			msg = "(no matches)"
 		}
 		pad := ""
-		if contentWidth > len(msg) {
-			pad = strings.Repeat(" ", (contentWidth-len(msg))/2)
+		if in.contentWidth > len(msg) {
+			pad = strings.Repeat(" ", (in.contentWidth-len(msg))/2)
 		}
 		midpoint := contentHeight / 2
 		for i := 0; i < contentHeight; i++ {
 			if i == midpoint {
-				sb.WriteString(pad + styleWithFg(unchangedColor).Render(msg))
+				sb.WriteString(pad)
+				sb.WriteString(styleWithFg(unchangedColor).Render(msg))
 			}
 			if i < contentHeight-1 {
 				sb.WriteString("\n")
 			}
 		}
 	} else {
-		end := min(offset+contentHeight, len(files))
-		visible := files[offset:end]
+		end := max(min(in.offset+contentHeight, len(in.files)), in.offset)
+		visible := in.files[in.offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, offset+i == cursor, contentWidth, treeMode, collapsed, currentLayer, filterQuery)
+			line := formatFileNodeLine(f, in.offset+i == in.cursor, in.contentWidth, in.treeMode, in.collapsed, in.currentLayer, in.filterQuery)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -64,36 +132,171 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		}
 	}
 
-	if showFilterBar {
+	if in.showFilterBar {
 		sb.WriteString("\n")
-		sb.WriteString(renderFilterBar(filterActive, filterQuery, len(files), contentWidth))
+		sb.WriteString(renderFilterBar(in.filterActive, in.filterQuery, len(in.files), in.contentWidth))
 	}
 
-	title := "Current Layer Contents"
-	if aggregated {
-		title = "Aggregated Layer Contents"
-	}
-	if len(files) > 0 {
-		title = fmt.Sprintf("%s %d/%d", title, cursor+1, len(files))
-	} else if filterQuery != "" {
-		title = title + " 0/0"
-	}
-
-	hasAbove := offset > 0
-	end := min(offset+contentHeight, len(files))
-	hasBelow := end < len(files)
-
-	// renderPanel paints the ▾ scroll indicator on the right border at row
-	// height-1. When the filter bar is shown it occupies that row, so the
-	// ▾ would overwrite the filter-bar border. Suppress it; the title's
-	// match-count and natural cursor advancement already signal "more below"
-	// once the user starts navigating.
-	if showFilterBar {
+	hasAbove = in.offset > 0
+	end := min(in.offset+contentHeight, len(in.files))
+	hasBelow = end < len(in.files)
+	if in.showFilterBar {
+		// The filter bar occupies the panel's bottom border row, so a ▾
+		// indicator there would collide with the bar. The title's match
+		// counter signals the rest already.
 		hasBelow = false
 	}
+	return sb.String(), hasAbove, hasBelow
+}
 
-	content := sb.String()
-	return renderPanel(content, title, focused, contentWidth, height, hasAbove, hasBelow)
+// splitTreeInput drives renderSplitFileTree. The two sub-panes share the
+// outer panel chrome (border + title) but otherwise behave like
+// independent file-tree panes: each carries its own files/cursor/offset
+// and renders its own header + filter bar.
+type splitTreeInput struct {
+	width, height int
+	currentLayer  int
+	treeMode      bool
+
+	// Top sub-pane: per-layer Δ from StackedTrees.
+	topFiles    []*image.FileNode
+	topCursor   int
+	topOffset   int
+	topFocused  bool
+	topCollapsed map[string]bool
+
+	// Bottom sub-pane: cumulative provenance from AggregatedTrees.
+	botFiles    []*image.FileNode
+	botCursor   int
+	botOffset   int
+	botFocused  bool
+	botCollapsed map[string]bool
+
+	// Filter is shared across panes (same query applies to both); but the
+	// filter bar is drawn under whichever pane has focus so the user sees
+	// what they're typing without doubling the chrome.
+	filterActive bool
+	filterQuery  string
+}
+
+// renderSplitFileTree paints the file-tree panel in split mode: the top
+// half shows the per-layer Δ tree (StackedTrees), the bottom half shows
+// the cumulative tree (AggregatedTrees). The two halves are separated by
+// a labelled divider so the eye reads top→bottom as "Δ" → "cumulative".
+//
+// The outer panel border is one box; the focused-state border colour
+// follows whichever sub-pane currently owns focus, but only the
+// active-pane content displays the bright accent cursor. The split
+// renderer takes the place of two independent renderFileTree calls
+// stacked by JoinVertical because a single shared border keeps the
+// horizontal alignment with the layers panel and the file viewer
+// pixel-perfect.
+func renderSplitFileTree(in splitTreeInput) string {
+	contentWidth := in.width - 2
+	// in.height is the number of content rows the outer panel exposes
+	// (renderPanel adds the two border rows on top of it). Match the
+	// signature of renderFileTree, which is passed the same value.
+	totalContent := max(in.height, 4)
+
+	topRows, botRows := splitPanelRows(totalContent)
+	// splitPanelRows reserves one row for the divider; the renderer paints
+	// it explicitly between the two sub-pane bodies.
+
+	topBody, topAbove, topBelow := renderTreeBody(treePaneInput{
+		files:         in.topFiles,
+		cursor:        in.topCursor,
+		offset:        in.topOffset,
+		contentWidth:  contentWidth,
+		bodyHeight:    topRows,
+		showFilterBar: (in.filterActive || in.filterQuery != "") && in.topFocused,
+		filterActive:  in.filterActive,
+		filterQuery:   in.filterQuery,
+		treeMode:      in.treeMode,
+		collapsed:     in.topCollapsed,
+		currentLayer:  in.currentLayer,
+		showHeader:    true,
+		emptyMsg:      "(no changes in this layer)",
+	})
+
+	botBody, botAbove, botBelow := renderTreeBody(treePaneInput{
+		files:         in.botFiles,
+		cursor:        in.botCursor,
+		offset:        in.botOffset,
+		contentWidth:  contentWidth,
+		bodyHeight:    botRows,
+		showFilterBar: (in.filterActive || in.filterQuery != "") && in.botFocused,
+		filterActive:  in.filterActive,
+		filterQuery:   in.filterQuery,
+		treeMode:      in.treeMode,
+		collapsed:     in.botCollapsed,
+		currentLayer:  in.currentLayer,
+		showHeader:    true,
+		emptyMsg:      "(no entries at this layer)",
+	})
+
+	divider := renderSplitDivider(in.botFocused, contentWidth, in.botFiles, in.botCursor)
+
+	body := topBody + "\n" + divider + "\n" + botBody
+
+	title := buildSplitTitle(in)
+
+	focused := in.topFocused || in.botFocused
+	hasAbove := topAbove || botAbove
+	hasBelow := topBelow || botBelow
+	return renderPanel(body, title, focused, contentWidth, in.height, hasAbove, hasBelow)
+}
+
+// renderSplitDivider draws the horizontal separator between the two
+// sub-panes. The bottom pane's section label sits in the divider with a
+// match-count and a focus-weight background when that pane has focus.
+// This places the "▾ Cumulative" affordance on a row that would otherwise
+// be wasted whitespace.
+func renderSplitDivider(botFocused bool, contentWidth int, botFiles []*image.FileNode, botCursor int) string {
+	label := " ▾ Cumulative "
+	if botFocused && len(botFiles) > 0 {
+		label = fmt.Sprintf(" ▾ Cumulative %d/%d ", botCursor+1, len(botFiles))
+	} else if len(botFiles) > 0 {
+		label = fmt.Sprintf(" ▾ Cumulative · %d items ", len(botFiles))
+	}
+
+	// Style: dim by default, accent + bold when the bottom pane is focused.
+	labelStyle := lipgloss.NewStyle().Foreground(unchangedColor)
+	lineStyle := lipgloss.NewStyle().Foreground(separatorColor)
+	if botFocused {
+		labelStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+		lineStyle = lipgloss.NewStyle().Foreground(accentColor)
+	}
+
+	rendered := labelStyle.Render(label)
+	labelW := lipgloss.Width(rendered)
+	rest := max(contentWidth-labelW, 0)
+	return rendered + lineStyle.Render(strings.Repeat("─", rest))
+}
+
+// buildSplitTitle assembles "Layer Δ N/M  ·  Cumulative" with the focused
+// half emphasised. The bottom-pane match counter is duplicated in the
+// divider for visibility, but the title's purpose is to advertise the
+// split and let the user see at a glance which view has focus.
+func buildSplitTitle(in splitTreeInput) string {
+	topPart := "Layer Δ"
+	if len(in.topFiles) > 0 {
+		topPart = fmt.Sprintf("Layer Δ %d/%d", in.topCursor+1, len(in.topFiles))
+	} else if in.filterQuery != "" {
+		topPart += " 0/0"
+	}
+	botPart := "Cumulative"
+	if len(in.botFiles) > 0 {
+		botPart = fmt.Sprintf("Cumulative %d/%d", in.botCursor+1, len(in.botFiles))
+	} else if in.filterQuery != "" {
+		botPart += " 0/0"
+	}
+	if in.topFocused {
+		return topPart + "  ·  " + botPart
+	}
+	if in.botFocused {
+		return topPart + "  ·  " + botPart
+	}
+	return topPart + "  ·  " + botPart
 }
 
 func renderTreeHeader(maxWidth int) string {

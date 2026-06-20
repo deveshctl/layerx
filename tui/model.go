@@ -35,6 +35,12 @@ type focus int
 const (
 	focusLayers focus = iota
 	focusTree
+	// focusTreeAgg is reachable only when aggregated mode is on. The tree
+	// panel splits into two stacked sub-panels: focusTree drives the top
+	// (per-layer Δ from StackedTrees), focusTreeAgg drives the bottom
+	// (cumulative provenance from AggregatedTrees). Tab cycles
+	// focusLayers → focusTree → focusTreeAgg → focusLayers in agg mode.
+	focusTreeAgg
 )
 
 type appState int
@@ -193,6 +199,15 @@ type model struct {
 	aggregated    bool
 	sortMode      sortMode
 	treeCollapsed map[string]bool
+	// aggCursor / aggOffset / aggCollapsed mirror treeCursor / treeOffset /
+	// treeCollapsed but drive the bottom (Cumulative) sub-panel when
+	// aggregated mode is on. Kept independent so the two panes can scroll
+	// and collapse separately — the value of the split view is being able to
+	// inspect "what just changed" and "the full carry-forward state" without
+	// losing one's place in either.
+	aggCursor    int
+	aggOffset    int
+	aggCollapsed map[string]bool
 	viewState    viewState
 	viewContent      *image.FileContent
 	viewHighlightedLines []string
@@ -503,12 +518,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterQuery = ""
 				m.treeCursor = 0
 				m.treeOffset = 0
+				m.aggCursor = 0
+				m.aggOffset = 0
 				return m, nil
 			}
 			if m.filterQuery != "" {
 				m.filterQuery = ""
 				m.treeCursor = 0
 				m.treeOffset = 0
+				m.aggCursor = 0
+				m.aggOffset = 0
 				return m, nil
 			}
 			if m.showHelp {
@@ -623,9 +642,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Switch):
-			if m.focus == focusLayers {
+			// Tab cycles panels. When aggregated mode is off the file tree is
+			// a single pane: layers ↔ tree. With aggregated on the tree
+			// panel splits horizontally into two sub-panes (per-layer Δ on
+			// top, cumulative state on bottom), and Tab cycles three states:
+			// layers → tree(top) → tree(bottom) → layers.
+			switch m.focus {
+			case focusLayers:
 				m.focus = focusTree
-			} else {
+			case focusTree:
+				if m.aggregated {
+					m.focus = focusTreeAgg
+				} else {
+					m.focus = focusLayers
+				}
+			case focusTreeAgg:
 				m.focus = focusLayers
 			}
 			return m, nil
@@ -682,12 +713,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.CopyPath):
-			if m.focus == focusTree {
-				files := m.displayTree()
-				if m.treeCursor < len(files) {
+			if m.isTreeFocused() {
+				files := m.displayTreeFor(m.focus)
+				cur := m.treeCursorFor(m.focus)
+				if cur < len(files) {
 					m.copyConfirm = true
 					return m, tea.Batch(
-						tea.SetClipboard(files[m.treeCursor].Path),
+						tea.SetClipboard(files[cur].Path),
 						tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 							return clearCopyMsg{}
 						}),
@@ -697,22 +729,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.Filter):
-			if m.focus == focusTree {
+			if m.isTreeFocused() {
 				m.filterActive = true
 				return m, nil
 			}
 			return m, nil
 
 		case msg.Code == tea.KeyBackspace:
-			if m.focus == focusTree && !m.filterActive && m.filterQuery != "" {
+			if m.isTreeFocused() && !m.filterActive && m.filterQuery != "" {
 				m.filterQuery = ""
 				m.treeCursor = 0
 				m.treeOffset = 0
+				m.aggCursor = 0
+				m.aggOffset = 0
 				return m, nil
 			}
 
 		case msg.Code == tea.KeyEnter:
-			if m.focus == focusTree {
+			if m.isTreeFocused() {
 				return m.tryOpenSelectedFile()
 			}
 			return m, nil
@@ -721,6 +755,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffOnly = !m.diffOnly
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.aggCursor = 0
+			m.aggOffset = 0
 			return m, nil
 
 		case key.Matches(msg, m.keys.Sort):
@@ -734,29 +770,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.aggCursor = 0
+			m.aggOffset = 0
 			return m, nil
 
 		case key.Matches(msg, m.keys.Aggregate):
-			// Tree contents change shape between modes; cursor position and
-			// collapse state are no longer meaningful. m.filterQuery,
+			// Toggle the split-pane aggregated view. m.filterQuery,
 			// m.diffOnly, and m.sortMode are intentionally NOT reset — they
 			// are path/DiffType-level filters that apply identically to both
-			// trees.
+			// trees and the user typically wants them carried across.
+			//
+			// Cursor/collapse state IS reset on each pane: the trees change
+			// shape between the per-layer Δ view and the cumulative view, so
+			// a saved cursor index would land somewhere unexpected.
 			m.aggregated = !m.aggregated
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.aggCursor = 0
+			m.aggOffset = 0
 			m.clearTreeCollapsed()
+			m.clearAggCollapsed()
+			// Turning off aggregated mode while focused on the bottom pane
+			// would leave focus on a now-invisible sub-panel. Snap back to
+			// the (single) tree pane.
+			if !m.aggregated && m.focus == focusTreeAgg {
+				m.focus = focusTree
+			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.ExtractFile):
-			if m.focus != focusTree {
+			if !m.isTreeFocused() {
 				return m, nil
 			}
-			files := m.displayTree()
-			if m.treeCursor >= len(files) {
+			files := m.displayTreeFor(m.focus)
+			cur := m.treeCursorFor(m.focus)
+			if cur >= len(files) {
 				return m, nil
 			}
-			f := files[m.treeCursor]
+			f := files[cur]
 			if f.IsDir {
 				m.setStatus("Cannot extract directory")
 				return m, m.scheduleStatusClear(2 * time.Second)
@@ -794,6 +845,8 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.filterQuery = string(runes[:len(runes)-1])
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.aggCursor = 0
+			m.aggOffset = 0
 		} else {
 			m.filterActive = false
 		}
@@ -812,6 +865,8 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.filterQuery += string(textRunes)
 			m.treeCursor = 0
 			m.treeOffset = 0
+			m.aggCursor = 0
+			m.aggOffset = 0
 		}
 		return m, nil
 	}
@@ -949,14 +1004,20 @@ func (m *model) viewVisibleWidthFor(totalLines int) int {
 }
 
 func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
-	files := m.displayTree()
-	if m.treeCursor >= len(files) {
+	pane := m.activeTreeFocus()
+	files := m.displayTreeFor(pane)
+	cur := m.treeCursorFor(pane)
+	if cur >= len(files) {
 		return m, nil
 	}
-	f := files[m.treeCursor]
+	f := files[cur]
 	if f.IsDir {
 		if m.useTreeCollapse() {
-			m.treeCollapsed = toggleCollapsed(m.treeCollapsed, f.Path)
+			if pane == focusTreeAgg {
+				m.aggCollapsed = toggleCollapsed(m.aggCollapsed, f.Path)
+			} else {
+				m.treeCollapsed = toggleCollapsed(m.treeCollapsed, f.Path)
+			}
 			mp := &m
 			mp.clampCursors()
 			return *mp, nil
@@ -1040,12 +1101,41 @@ func (m model) finalLiveSize() int64 {
 	return total
 }
 
-func (m model) currentTreeRoot() *image.FileNode {
+// isTreeFocused reports whether the focused panel is the file tree (in either
+// single-pane mode or one of the two split-pane sub-panels).
+func (m model) isTreeFocused() bool {
+	return m.focus == focusTree || m.focus == focusTreeAgg
+}
+
+// treeCursorFor returns the cursor index for the given focus. focusTree
+// drives the per-layer-Δ pane (top in split mode, the only pane otherwise);
+// focusTreeAgg drives the cumulative pane (bottom of the split). Any other
+// focus value returns 0 — callers should guard with isTreeFocused first.
+func (m model) treeCursorFor(f focus) int {
+	if f == focusTreeAgg {
+		return m.aggCursor
+	}
+	return m.treeCursor
+}
+
+// treeOffsetFor mirrors treeCursorFor for scroll offsets.
+func (m model) treeOffsetFor(f focus) int {
+	if f == focusTreeAgg {
+		return m.aggOffset
+	}
+	return m.treeOffset
+}
+
+// rootFor returns the FileTree root for the given focus, picking the
+// per-layer-Δ tree (StackedTrees) for focusTree and the cumulative tree
+// (AggregatedTrees) for focusTreeAgg. Single-pane mode (aggregated=false)
+// always uses the per-layer Δ tree because focusTreeAgg is unreachable.
+func (m model) rootFor(f focus) *image.FileNode {
 	if m.analysis == nil {
 		return nil
 	}
 	trees := m.analysis.StackedTrees
-	if m.aggregated {
+	if f == focusTreeAgg {
 		trees = m.analysis.AggregatedTrees
 	}
 	if m.layerCursor >= len(trees) {
@@ -1058,27 +1148,23 @@ func (m model) currentTreeRoot() *image.FileNode {
 	return tree.Root
 }
 
-func (m model) useTreeCollapse() bool {
-	return m.sortMode == sortNone && m.filterQuery == "" && !m.diffOnly
+func (m model) collapsedFor(f focus) map[string]bool {
+	if f == focusTreeAgg {
+		return m.aggCollapsed
+	}
+	return m.treeCollapsed
 }
 
-func (m *model) clearTreeCollapsed() {
-	m.treeCollapsed = nil
-}
-
-func (m *model) resetTreeForLayerChange() {
-	m.treeCursor = 0
-	m.treeOffset = 0
-	m.sortMode = sortNone
-	m.clearTreeCollapsed()
-}
-
-func (m model) displayTree() []*image.FileNode {
+// displayTreeFor flattens, filters, and sorts the tree visible in the given
+// pane. The same composition rules (collapse → diff-only → filter → sort)
+// apply to both panes.
+func (m model) displayTreeFor(f focus) []*image.FileNode {
+	root := m.rootFor(f)
 	var files []*image.FileNode
 	if m.useTreeCollapse() {
-		files = visibleTree(m.currentTreeRoot(), m.treeCollapsed)
+		files = visibleTree(root, m.collapsedFor(f))
 	} else {
-		files = flattenTree(m.currentTreeRoot())
+		files = flattenTree(root)
 	}
 	if m.diffOnly {
 		files = applyDiffFilter(files)
@@ -1088,6 +1174,54 @@ func (m model) displayTree() []*image.FileNode {
 	}
 	files = applySortBySize(files, m.sortMode)
 	return files
+}
+
+func (m model) useTreeCollapse() bool {
+	return m.sortMode == sortNone && m.filterQuery == "" && !m.diffOnly
+}
+
+// currentTreeRoot returns the root for the *active* pane: the focused
+// sub-panel in split mode, otherwise the single tree pane. In single-pane
+// (aggregated=false) mode the result is StackedTrees[layerCursor]; in
+// split-pane mode it follows the focused sub-panel (top vs bottom).
+func (m model) currentTreeRoot() *image.FileNode {
+	return m.rootFor(m.activeTreeFocus())
+}
+
+// activeTreeFocus returns the pane whose state should drive shared
+// operations (path-copy, status bar "tree cursor of N", Enter). When the
+// layers panel itself is focused but aggregated mode is on, defer to the
+// top sub-panel — that is what the user last navigated.
+func (m model) activeTreeFocus() focus {
+	if m.focus == focusTreeAgg {
+		return focusTreeAgg
+	}
+	return focusTree
+}
+
+func (m *model) clearTreeCollapsed() {
+	m.treeCollapsed = nil
+}
+
+func (m *model) clearAggCollapsed() {
+	m.aggCollapsed = nil
+}
+
+func (m *model) resetTreeForLayerChange() {
+	m.treeCursor = 0
+	m.treeOffset = 0
+	m.aggCursor = 0
+	m.aggOffset = 0
+	m.sortMode = sortNone
+	m.clearTreeCollapsed()
+	m.clearAggCollapsed()
+}
+
+// displayTree returns the file slice for the *active* pane. Kept for
+// callers that don't need to specify a pane (status bar, viewer open,
+// existing tests). Internally delegates to displayTreeFor.
+func (m model) displayTree() []*image.FileNode {
+	return m.displayTreeFor(m.activeTreeFocus())
 }
 
 func flattenTree(root *image.FileNode) []*image.FileNode {
@@ -1123,10 +1257,16 @@ func (m *model) moveDown() {
 			m.adjustLayerScroll()
 		}
 	case focusTree:
-		files := m.displayTree()
+		files := m.displayTreeFor(focusTree)
 		if m.treeCursor < len(files)-1 {
 			m.treeCursor++
-			m.adjustTreeScroll()
+			m.adjustTreeScrollFor(focusTree)
+		}
+	case focusTreeAgg:
+		files := m.displayTreeFor(focusTreeAgg)
+		if m.aggCursor < len(files)-1 {
+			m.aggCursor++
+			m.adjustTreeScrollFor(focusTreeAgg)
 		}
 	}
 }
@@ -1142,7 +1282,12 @@ func (m *model) moveUp() {
 	case focusTree:
 		if m.treeCursor > 0 {
 			m.treeCursor--
-			m.adjustTreeScroll()
+			m.adjustTreeScrollFor(focusTree)
+		}
+	case focusTreeAgg:
+		if m.aggCursor > 0 {
+			m.aggCursor--
+			m.adjustTreeScrollFor(focusTreeAgg)
 		}
 	}
 }
@@ -1156,6 +1301,9 @@ func (m *model) moveToTop() {
 	case focusTree:
 		m.treeCursor = 0
 		m.treeOffset = 0
+	case focusTreeAgg:
+		m.aggCursor = 0
+		m.aggOffset = 0
 	}
 }
 
@@ -1169,25 +1317,49 @@ func (m *model) moveToBottom() {
 			m.adjustLayerScroll()
 		}
 	case focusTree:
-		files := m.displayTree()
+		files := m.displayTreeFor(focusTree)
 		if len(files) > 0 {
 			m.treeCursor = len(files) - 1
-			m.adjustTreeScroll()
+			m.adjustTreeScrollFor(focusTree)
+		}
+	case focusTreeAgg:
+		files := m.displayTreeFor(focusTreeAgg)
+		if len(files) > 0 {
+			m.aggCursor = len(files) - 1
+			m.adjustTreeScrollFor(focusTreeAgg)
 		}
 	}
 }
 
-func (m *model) adjustTreeScroll() {
-	visibleHeight := m.treeVisibleHeight()
+// adjustTreeScrollFor brings the cursor of the named pane into its visible
+// window. The visible window itself depends on whether the panel is split:
+// in single-pane mode the tree gets the full content rows; in split mode
+// each sub-panel gets roughly half (treeVisibleHeightFor handles that).
+func (m *model) adjustTreeScrollFor(f focus) {
+	visibleHeight := m.treeVisibleHeightFor(f)
 	if visibleHeight <= 0 {
 		return
 	}
-	if m.treeCursor < m.treeOffset {
-		m.treeOffset = m.treeCursor
+	cur := m.treeCursorFor(f)
+	off := m.treeOffsetFor(f)
+	if cur < off {
+		off = cur
 	}
-	if m.treeCursor >= m.treeOffset+visibleHeight {
-		m.treeOffset = m.treeCursor - visibleHeight + 1
+	if cur >= off+visibleHeight {
+		off = cur - visibleHeight + 1
 	}
+	if f == focusTreeAgg {
+		m.aggOffset = off
+	} else {
+		m.treeOffset = off
+	}
+}
+
+// adjustTreeScroll is a thin wrapper around adjustTreeScrollFor for the
+// active pane. Kept so existing callers (mouse wheel, file open) need not
+// know about the split.
+func (m *model) adjustTreeScroll() {
+	m.adjustTreeScrollFor(m.activeTreeFocus())
 }
 
 func (m *model) adjustLayerScroll() {
@@ -1208,12 +1380,52 @@ func (m *model) layerVisibleHeight() int {
 	return m.height - 8
 }
 
-func (m *model) treeVisibleHeight() int {
-	h := m.height - 8 - 1 // -1 for column header
-	if m.filterQuery != "" || m.filterActive {
+// treeVisibleHeightFor returns the visible content rows for the given
+// pane. In single-pane mode (aggregated=false) every focus value returns
+// the full panel; in split mode each sub-panel takes roughly half, with
+// the column-header and filter-bar overhead subtracted from each.
+func (m *model) treeVisibleHeightFor(f focus) int {
+	totalContent := m.height - 8 // chrome rows excluded; matches viewReady
+	if !m.aggregated {
+		// Single pane: one column header, plus filter bar when present.
+		h := totalContent - 1
+		if m.filterQuery != "" || m.filterActive {
+			h--
+		}
+		return h
+	}
+	// Split: top pane gets ceil(half), bottom gets floor(half), minus a
+	// 1-row horizontal divider between them. Each half pays its own
+	// column-header (1 row); the filter bar belongs only to the focused
+	// half so the un-focused half keeps an extra row of content.
+	topHalf, bottomHalf := splitPanelRows(totalContent)
+	if f == focusTreeAgg {
+		h := bottomHalf - 1 // column header
+		if (m.filterQuery != "" || m.filterActive) && m.focus == focusTreeAgg {
+			h--
+		}
+		return h
+	}
+	h := topHalf - 1
+	if (m.filterQuery != "" || m.filterActive) && m.focus != focusTreeAgg {
 		h--
 	}
 	return h
+}
+
+// splitPanelRows divides total content rows between top and bottom
+// sub-panels with a 1-row divider between them. The top half is given any
+// odd extra row so a 9-row panel yields 4-1-4 (top, divider, bottom).
+func splitPanelRows(total int) (top, bottom int) {
+	if total < 4 {
+		// Below 4 rows the split is meaningless; let both panes render
+		// a degenerate single line and let the renderer clamp.
+		return total, 0
+	}
+	usable := total - 1 // reserve one row for the divider
+	top = (usable + 1) / 2
+	bottom = usable - top
+	return top, bottom
 }
 
 func (m *model) clampCursors() {
@@ -1228,19 +1440,37 @@ func (m *model) clampCursors() {
 		m.layerCursor = 0
 	}
 	m.adjustLayerScroll()
-	files := m.displayTree()
+	m.clampTreeCursor(focusTree)
+	if m.aggregated {
+		m.clampTreeCursor(focusTreeAgg)
+	}
+}
+
+func (m *model) clampTreeCursor(f focus) {
+	files := m.displayTreeFor(f)
 	if len(files) == 0 {
-		m.treeCursor = 0
-		m.treeOffset = 0
+		if f == focusTreeAgg {
+			m.aggCursor = 0
+			m.aggOffset = 0
+		} else {
+			m.treeCursor = 0
+			m.treeOffset = 0
+		}
 		return
 	}
-	if m.treeCursor >= len(files) {
-		m.treeCursor = len(files) - 1
+	cur := m.treeCursorFor(f)
+	if cur >= len(files) {
+		cur = len(files) - 1
 	}
-	if m.treeCursor < 0 {
-		m.treeCursor = 0
+	if cur < 0 {
+		cur = 0
 	}
-	m.adjustTreeScroll()
+	if f == focusTreeAgg {
+		m.aggCursor = cur
+	} else {
+		m.treeCursor = cur
+	}
+	m.adjustTreeScrollFor(f)
 }
 
 func (m model) View() tea.View {
@@ -1356,6 +1586,40 @@ func (m model) viewLoading() tea.View {
 	return finalizeView(tea.NewView(content))
 }
 
+// renderRightPanel paints the file-tree side of the screen. In single-pane
+// (aggregated=false) mode it delegates to renderFileTree; in split-pane
+// (aggregated=true) mode it renders both StackedTrees and AggregatedTrees
+// stacked vertically inside one panel border.
+func (m model) renderRightPanel(width, height int) string {
+	if !m.aggregated {
+		treeFiles := m.displayTreeFor(focusTree)
+		return renderFileTree(treeFiles, m.treeCursor, m.treeOffset,
+			width, height, m.focus == focusTree, m.filterActive,
+			m.filterQuery, m.useTreeCollapse(), false,
+			m.treeCollapsed, m.layerCursor)
+	}
+	topFiles := m.displayTreeFor(focusTree)
+	botFiles := m.displayTreeFor(focusTreeAgg)
+	return renderSplitFileTree(splitTreeInput{
+		width:        width,
+		height:       height,
+		currentLayer: m.layerCursor,
+		treeMode:     m.useTreeCollapse(),
+		topFiles:     topFiles,
+		topCursor:    m.treeCursor,
+		topOffset:    m.treeOffset,
+		topFocused:   m.focus == focusTree,
+		topCollapsed: m.treeCollapsed,
+		botFiles:     botFiles,
+		botCursor:    m.aggCursor,
+		botOffset:    m.aggOffset,
+		botFocused:   m.focus == focusTreeAgg,
+		botCollapsed: m.aggCollapsed,
+		filterActive: m.filterActive,
+		filterQuery:  m.filterQuery,
+	})
+}
+
 func (m model) viewError() tea.View {
 	errStyle := lipgloss.NewStyle().Foreground(removedColor).Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
@@ -1386,7 +1650,7 @@ func (m model) viewReady() tea.View {
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
-	right := renderFileTree(treeFiles, m.treeCursor, m.treeOffset, rightWidth, panelHeight, m.focus == focusTree, m.filterActive, m.filterQuery, m.useTreeCollapse(), m.aggregated, m.treeCollapsed, m.layerCursor)
+	right := m.renderRightPanel(rightWidth, panelHeight)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
@@ -1503,7 +1767,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"s", "sort"},
 			{"c", "copy cmd"},
 			{"w", "wasted"},
-			{"A", "aggregate"},
+			{"A", "split"},
 			{"?", "help"},
 			{"q", "quit"},
 		}
@@ -1520,7 +1784,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"d", "diff"},
 			{"s", "sort"},
 			{"w", "wasted"},
-			{"A", "aggregate"},
+			{"A", "split"},
 			{"Enter", enterDesc},
 			{"x", "save"},
 			{"y", "copy path"},
@@ -1565,7 +1829,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			badges += lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Render("[diff]") + " "
 		}
 		if m.aggregated {
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[agg]") + " "
+			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[split]") + " "
 		}
 		switch m.sortMode {
 		case sortDesc:
