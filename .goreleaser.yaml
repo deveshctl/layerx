@@ -38,21 +38,25 @@ sboms:
 
 # Keyless cosign signature over the checksums file. Signing the checksums
 # binds every artifact in the release through one signature; verifiers grab
-# checksums.txt + checksums.txt.sig + checksums.txt.pem and replay the hash.
+# checksums.txt + checksums.txt.sigstore.json and replay the hash.
 # OIDC identity is the GitHub Actions workflow itself.
+#
+# The bundle file (.sigstore.json) carries both the signature and the
+# signing certificate in Sigstore's bundle format — cosign v3+ deprecated
+# the separate --output-signature / --output-certificate flags in favour
+# of --bundle, and the legacy flags are silently ignored when the new
+# bundle format is in effect (the default since cosign v2.5+).
 signs:
   - cmd: cosign
     artifacts: checksum
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.sigstore.json"
     # Surface cosign's stdout/stderr in the release log even without
     # --verbose, so a signing failure is diagnosable from the Actions run.
     output: true
     args:
       - sign-blob
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--bundle=${signature}"
       - "${artifact}"
 
 nfpms:
