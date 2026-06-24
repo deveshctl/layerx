@@ -2,11 +2,15 @@
 
 Interactive Docker image layer inspector with CI-friendly efficiency checks. Single binary; no daemon required when reading saved image archives.
 
-![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)](https://github.com/deveshctl/layerx/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/deveshctl/layerx?sort=semver)](https://github.com/deveshctl/layerx/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/deveshctl/layerx.svg)](https://pkg.go.dev/github.com/deveshctl/layerx)
+[![Go Report Card](https://goreportcard.com/badge/github.com/deveshctl/layerx)](https://goreportcard.com/report/github.com/deveshctl/layerx)
+[![codecov](https://codecov.io/gh/deveshctl/layerx/branch/main/graph/badge.svg)](https://codecov.io/gh/deveshctl/layerx)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/deveshctl/layerx/badge)](https://scorecard.dev/viewer/?uri=github.com/deveshctl/layerx)
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/deveshctl/layerx/badge)](https://scorecard.dev/viewer/?uri=github.com/deveshctl/layerx)
 ![Layerx demo](assets/layerx-demo.gif)
 
 ---
