@@ -8,10 +8,11 @@ import (
 
 // Analysis holds the complete result of inspecting an image.
 type Analysis struct {
-	ImageRef     string
-	Layers       []Layer
-	StackedTrees []*FileTree
-	TotalSize    int64
+	ImageRef        string
+	Layers          []Layer
+	StackedTrees    []*FileTree // Dive's CompareSingleLayer view: per-layer changes only.
+	AggregatedTrees []*FileTree // Dive's CompareAllLayers view: cumulative provenance from L0.
+	TotalSize       int64
 }
 
 // AnalyzeOptions controls the analyze pipeline. Zero value is valid: caching
@@ -132,6 +133,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	}
 
 	stacked := Stack(layers)
+	aggregated := BuildAggregatedTrees(layers)
 	assignNetDeltas(layers, stacked)
 
 	var totalSize int64
@@ -140,10 +142,11 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	}
 
 	return &Analysis{
-		ImageRef:     imageRef,
-		Layers:       layers,
-		StackedTrees: stacked,
-		TotalSize:    totalSize,
+		ImageRef:        imageRef,
+		Layers:          layers,
+		StackedTrees:    stacked,
+		AggregatedTrees: aggregated,
+		TotalSize:       totalSize,
 	}, nil
 }
 

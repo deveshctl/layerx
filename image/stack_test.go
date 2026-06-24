@@ -697,3 +697,213 @@ func TestStack_PreservesHardlinkMetadata(t *testing.T) {
 	assert.True(t, r2ls.IsHardlink, "IsHardlink must propagate through Modified branch")
 	assert.Equal(t, "/bin/busybox", r2ls.Linkname, "Linkname must propagate through Modified branch")
 }
+
+// findChildPath walks down a node by Name segments. Test helper for the
+// aggregated-walker tests below, which need to assert DiffType at nested
+// paths without re-typing FindChild chains.
+func findChildPath(t *testing.T, root *FileNode, names ...string) *FileNode {
+	t.Helper()
+	cur := root
+	for _, name := range names {
+		require.NotNil(t, cur, "intermediate node nil while looking for %v", names)
+		cur = cur.FindChild(name)
+	}
+	return cur
+}
+
+// aggregateThreeLayerFixture is the spec's Worked Example:
+//
+//	L0: adds /a (size 10)
+//	L1: modifies /a (size 20), adds /b
+//	L2: adds /c (does not touch /a or /b)
+//
+// Used by both TestBuildAggregatedTrees_PreservesPriorDiffTypeAcrossUntouchedLayers
+// and TestStack_StillCompareSingleLayer to lock the divergent semantics of
+// the two walkers on identical input.
+func aggregateThreeLayerFixture() []Layer {
+	layer0 := makeTree(makeFile("a", "/a", 10))
+	layer1 := makeTree(
+		makeFile("a", "/a", 20),
+		makeFile("b", "/b", 30),
+	)
+	layer2 := makeTree(makeFile("c", "/c", 40))
+	return []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+		{Index: 2, Tree: layer2},
+	}
+}
+
+func TestBuildAggregatedTrees_LengthMatchesLayers(t *testing.T) {
+	layers := aggregateThreeLayerFixture()
+	got := BuildAggregatedTrees(layers)
+	require.Len(t, got, len(layers))
+	for i, tree := range got {
+		require.NotNilf(t, tree, "result[%d] must not be nil for non-empty fixture", i)
+		require.NotNilf(t, tree.Root, "result[%d].Root must not be nil", i)
+	}
+}
+
+func TestBuildAggregatedTrees_AtL0_EqualsStack(t *testing.T) {
+	layers := aggregateThreeLayerFixture()
+	stacked := Stack(layers)
+	aggregated := BuildAggregatedTrees(layers)
+
+	require.NotNil(t, stacked[0])
+	require.NotNil(t, aggregated[0])
+
+	// Walk both trees in parallel and assert path+DiffType equivalence.
+	var walk func(a, b *FileNode)
+	walk = func(a, b *FileNode) {
+		require.Equalf(t, a.Path, b.Path, "path mismatch at L0")
+		require.Equalf(t, a.DiffType, b.DiffType, "DiffType mismatch at L0 for %s", a.Path)
+		require.Equalf(t, len(a.Children), len(b.Children), "child count mismatch at %s", a.Path)
+		for i := range a.Children {
+			walk(a.Children[i], b.Children[i])
+		}
+	}
+	walk(stacked[0].Root, aggregated[0].Root)
+}
+
+func TestBuildAggregatedTrees_PreservesPriorDiffTypeAcrossUntouchedLayers(t *testing.T) {
+	layers := aggregateThreeLayerFixture()
+	aggregated := BuildAggregatedTrees(layers)
+	require.Len(t, aggregated, 3)
+
+	r2 := aggregated[2].Root
+	a := findChildPath(t, r2, "a")
+	require.NotNil(t, a, "/a must survive untouched L2 in aggregated view")
+	assert.Equal(t, Modified, a.DiffType, "/a was Modified in L1; aggregated view must carry forward through L2")
+
+	b := findChildPath(t, r2, "b")
+	require.NotNil(t, b, "/b must survive untouched L2 in aggregated view")
+	assert.Equal(t, Added, b.DiffType, "/b was Added in L1; aggregated view must carry forward through L2")
+
+	c := findChildPath(t, r2, "c")
+	require.NotNil(t, c)
+	assert.Equal(t, Added, c.DiffType, "/c added in L2")
+}
+
+func TestStack_StillCompareSingleLayer(t *testing.T) {
+	// Regression guard: the same fixture as the aggregated test above must
+	// still produce CompareSingleLayer semantics under Stack, with prior
+	// DiffType labels stripped at every iteration. This locks Stack's
+	// behaviour against accidental drift from the mergeLayerWith refactor.
+	layers := aggregateThreeLayerFixture()
+	stacked := Stack(layers)
+	require.Len(t, stacked, 3)
+
+	r2 := stacked[2].Root
+	a := findChildPath(t, r2, "a")
+	require.NotNil(t, a)
+	assert.Equal(t, Unchanged, a.DiffType, "Stack[2] must show /a Unchanged — L2 didn't touch it")
+
+	b := findChildPath(t, r2, "b")
+	require.NotNil(t, b)
+	assert.Equal(t, Unchanged, b.DiffType, "Stack[2] must show /b Unchanged — L2 didn't touch it")
+
+	c := findChildPath(t, r2, "c")
+	require.NotNil(t, c)
+	assert.Equal(t, Added, c.DiffType)
+}
+
+func TestBuildAggregatedTrees_RemovedCarriesForward(t *testing.T) {
+	// L0 adds /x; L1 whiteouts /x; L2 adds /y (does not touch /x).
+	// Aggregated[2] must retain /x as Removed — L1's tombstone propagates.
+	layer0 := makeTree(makeFile("x", "/x", 100))
+	layer1 := makeTree(makeFile(".wh.x", "/.wh.x", 0))
+	layer2 := makeTree(makeFile("y", "/y", 50))
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+		{Index: 2, Tree: layer2},
+	}
+
+	aggregated := BuildAggregatedTrees(layers)
+	require.Len(t, aggregated, 3)
+
+	r2 := aggregated[2].Root
+	x := findChildPath(t, r2, "x")
+	require.NotNil(t, x, "/x must remain visible as Removed at L2")
+	assert.Equal(t, Removed, x.DiffType)
+
+	y := findChildPath(t, r2, "y")
+	require.NotNil(t, y)
+	assert.Equal(t, Added, y.DiffType)
+}
+
+func TestBuildAggregatedTrees_OpaqueWhiteoutAtMidLayer(t *testing.T) {
+	// L0 creates /cache containing /cache/old.
+	// L1 emits an opaque whiteout in /cache and adds /cache/new.
+	// L2 adds /other (does not touch /cache).
+	// Aggregated[2] must show /cache/old Removed — the recursion-propagation
+	// fix in mergeLayerWith is what carries the Removed child forward
+	// through L2's untouched-directory merge.
+	layer0 := makeTree(
+		makeDir("cache", "/cache",
+			makeFile("old", "/cache/old", 100),
+		),
+	)
+	layer1 := makeTree(
+		makeDir("cache", "/cache",
+			makeFile(".wh..wh..opq", "/cache/.wh..wh..opq", 0),
+			makeFile("new", "/cache/new", 50),
+		),
+	)
+	layer2 := makeTree(makeFile("other", "/other", 25))
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+		{Index: 2, Tree: layer2},
+	}
+
+	aggregated := BuildAggregatedTrees(layers)
+	require.Len(t, aggregated, 3)
+
+	r2 := aggregated[2].Root
+	cache := findChildPath(t, r2, "cache")
+	require.NotNil(t, cache)
+	assert.Equal(t, Modified, cache.DiffType)
+
+	old := findChildPath(t, r2, "cache", "old")
+	require.NotNil(t, old, "/cache/old Removed must carry through L2's untouched merge")
+	assert.Equal(t, Removed, old.DiffType)
+
+	newF := findChildPath(t, r2, "cache", "new")
+	require.NotNil(t, newF)
+	assert.Equal(t, Added, newF.DiffType)
+
+	other := findChildPath(t, r2, "other")
+	require.NotNil(t, other)
+	assert.Equal(t, Added, other.DiffType)
+}
+
+func TestBuildAggregatedTrees_EmptyLayerSnapshotsBaseline(t *testing.T) {
+	// L0 adds /a; L1 has nil tree; L2 adds /b. Mirrors Stack's empty-layer
+	// handling: result[1] is a snapshot of the post-L0 baseline.
+	layer0 := makeTree(makeFile("a", "/a", 10))
+	layer2 := makeTree(makeFile("b", "/b", 20))
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: nil},
+		{Index: 2, Tree: layer2},
+	}
+
+	aggregated := BuildAggregatedTrees(layers)
+	require.Len(t, aggregated, 3)
+
+	r1 := aggregated[1].Root
+	require.NotNil(t, r1)
+	a1 := findChildPath(t, r1, "a")
+	require.NotNil(t, a1, "empty L1 must snapshot baseline; /a from L0 must remain")
+	assert.Equal(t, Added, a1.DiffType)
+	assert.Nil(t, r1.FindChild("b"), "/b not yet introduced at index 1")
+
+	r2 := aggregated[2].Root
+	a2 := findChildPath(t, r2, "a")
+	require.NotNil(t, a2)
+	assert.Equal(t, Added, a2.DiffType)
+	b2 := findChildPath(t, r2, "b")
+	require.NotNil(t, b2)
+	assert.Equal(t, Added, b2.DiffType)
+}

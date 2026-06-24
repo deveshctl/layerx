@@ -74,6 +74,8 @@ func TestAnalyze_Success(t *testing.T) {
 	assert.Equal(t, "test:latest", result.ImageRef)
 	assert.Len(t, result.Layers, 2)
 	assert.Len(t, result.StackedTrees, 2)
+	assert.Len(t, result.AggregatedTrees, 2, "AggregatedTrees length must match Layers")
+	assert.NotNil(t, result.AggregatedTrees[0])
 	assert.Equal(t, int64(1500), result.TotalSize)
 
 	bin := result.StackedTrees[0].Root.FindChild("bin")

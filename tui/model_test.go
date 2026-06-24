@@ -716,12 +716,12 @@ func TestRenderFileTreeDoesNotPanic(t *testing.T) {
 	m := setupModel()
 	files := m.displayTree()
 	assert.NotPanics(t, func() {
-		renderFileTree(files, 0, 0, 60, 20, true, false, "", true, nil, 0)
+		renderFileTree(files, 0, 0, 60, 20, true, false, "", true, false, nil, 0)
 	})
 }
 
 func TestRenderFileTreeEmptyShowsPlaceholder(t *testing.T) {
-	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", true, nil, 0)
+	output := renderFileTree(nil, 0, 0, 60, 20, false, false, "", true, false, nil, 0)
 	assert.Contains(t, output, "no filesystem changes")
 }
 
@@ -737,7 +737,7 @@ func TestRenderFileTreeCollapsedDirShowsGlyph(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
-	line := renderFileTree(um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, um.treeCollapsed, 0)
+	line := renderFileTree(um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, false, um.treeCollapsed, 0)
 	assert.Contains(t, line, "▸")
 }
 
@@ -809,12 +809,14 @@ func testAnalysisWithDiffs() *image.Analysis {
 	layers[1].Tree.Root.AddChild(etcL1)
 
 	stacked := image.Stack(layers)
+	aggregated := image.BuildAggregatedTrees(layers)
 
 	return &image.Analysis{
-		ImageRef:     "test-diffs:latest",
-		Layers:       layers,
-		StackedTrees: stacked,
-		TotalSize:    15000000,
+		ImageRef:        "test-diffs:latest",
+		Layers:          layers,
+		StackedTrees:    stacked,
+		AggregatedTrees: aggregated,
+		TotalSize:       15000000,
 	}
 }
 
@@ -2185,4 +2187,220 @@ func TestFileContentMsg_ResetsHOffset(t *testing.T) {
 	})
 	um := updated.(model)
 	assert.Equal(t, 0, um.viewHOffset, "opening a new file must reset hOffset")
+}
+
+// --- Aggregated layer view toggle (A) ----------------------------------------
+
+func TestModel_AggregateToggle_FlipsModeAndResetsTreeCursor(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.treeCursor = 5
+	m.treeOffset = 3
+	originalLayer := m.layerCursor
+
+	m = send(m, keyPress('A'))
+
+	assert.True(t, m.aggregated, "A must flip aggregated on")
+	assert.Equal(t, 0, m.treeCursor, "treeCursor must reset on toggle")
+	assert.Equal(t, 0, m.treeOffset, "treeOffset must reset on toggle")
+	assert.Equal(t, originalLayer, m.layerCursor, "layerCursor must survive toggle")
+}
+
+func TestModel_AggregateToggle_RoutesCurrentTreeRoot(t *testing.T) {
+	m := setupModelWithDiffs()
+	require.NotNil(t, m.analysis.AggregatedTrees, "fixture must populate AggregatedTrees")
+
+	stackedRoot := m.analysis.StackedTrees[m.layerCursor].Root
+	aggregatedRoot := m.analysis.AggregatedTrees[m.layerCursor].Root
+	require.NotNil(t, stackedRoot)
+	require.NotNil(t, aggregatedRoot)
+
+	assert.Same(t, stackedRoot, m.currentTreeRoot(), "default mode must point at StackedTrees")
+
+	// Toggle into split mode. The top sub-pane (Layer Δ) keeps focus, so
+	// currentTreeRoot still points at StackedTrees.
+	m = send(m, keyPress('A'))
+	assert.Same(t, stackedRoot, m.currentTreeRoot(),
+		"split mode with top pane focused: current root is StackedTrees")
+
+	// Tab from layers → top → bottom. Now the cumulative pane is active.
+	m.focus = focusTreeAgg
+	assert.Same(t, aggregatedRoot, m.currentTreeRoot(),
+		"split mode with bottom pane focused: current root is AggregatedTrees")
+}
+
+func TestModel_AggregateToggle_NoOpWhenViewerOpen(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.viewState = viewReady
+	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("data"), Size: 4}
+
+	m = send(m, keyPress('A'))
+
+	assert.False(t, m.aggregated, "viewer-open guard must suppress A toggle")
+}
+
+func TestModel_AggregateToggle_FilterInputSwallowsA(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterActive = true
+	m.filterQuery = ""
+
+	m = send(m, keyPress('A'))
+
+	assert.False(t, m.aggregated, "filter-active guard must suppress A toggle")
+	assert.Equal(t, "A", m.filterQuery, "A must be appended to filter query while filter input is active")
+}
+
+func TestModel_AggregateToggle_PreservesFilterQueryAndDiffOnly(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.filterQuery = "etc"
+	m.diffOnly = true
+	m.sortMode = sortDesc
+
+	m = send(m, keyPress('A'))
+
+	assert.True(t, m.aggregated)
+	assert.Equal(t, "etc", m.filterQuery, "filter query must survive toggle")
+	assert.True(t, m.diffOnly, "diffOnly must survive toggle")
+	assert.Equal(t, sortDesc, m.sortMode, "sortMode must survive toggle")
+}
+
+func TestModel_AggregateRender_NilAggregatedTreesFallsBackGracefully(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.analysis.AggregatedTrees = nil
+	m.aggregated = true
+	m.focus = focusTreeAgg
+
+	assert.Nil(t, m.currentTreeRoot(), "nil AggregatedTrees on focused agg pane must yield nil root, not panic")
+	assert.Empty(t, m.displayTree(), "nil root must produce an empty display slice")
+}
+
+// --- Split-pane focus cycling -----------------------------------------------
+
+// Tab cycle in split mode: layers → top tree (Δ) → bottom tree (cumulative)
+// → layers. Without aggregated on, Tab is two-state (layers ↔ tree). The
+// extra step lets the user visit the cumulative pane without a separate
+// keybind.
+func TestSplitMode_TabCyclesThreePanes(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+	m.focus = focusLayers
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusTree, m.focus, "Tab #1: layers → top tree")
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusTreeAgg, m.focus, "Tab #2: top → bottom tree")
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusLayers, m.focus, "Tab #3: bottom → layers")
+}
+
+func TestSplitMode_TabIsTwoStateWhenAggregatedOff(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = false
+	m.focus = focusLayers
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusTree, m.focus)
+
+	m = send(m, keyPressSpecial(tea.KeyTab))
+	assert.Equal(t, focusLayers, m.focus, "without split, Tab is just layers ↔ tree")
+}
+
+// Toggling out of split mode while focused on the bottom (agg) sub-panel
+// must not strand focus on a now-invisible pane. The active focus should
+// snap back to the (single) tree pane.
+func TestSplitMode_TogglingOffSnapsFocusBack(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+	m.focus = focusTreeAgg
+
+	m = send(m, keyPress('A'))
+	assert.False(t, m.aggregated)
+	assert.Equal(t, focusTree, m.focus,
+		"toggling off while focused on bottom must move focus to single tree pane")
+}
+
+// Each sub-pane has its own cursor — j on the top pane must not move the
+// bottom pane's cursor and vice versa. Without independent cursors, the
+// split view's value (compare two views without losing your place) is
+// lost.
+func TestSplitMode_PaneCursorsAreIndependent(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+
+	// Move top-pane cursor.
+	m.focus = focusTree
+	m = send(m, keyPress('j'))
+	assert.Equal(t, 1, m.treeCursor)
+	assert.Equal(t, 0, m.aggCursor, "moving top must not touch bottom cursor")
+
+	// Move bottom-pane cursor.
+	m.focus = focusTreeAgg
+	m = send(m, keyPress('j'))
+	m = send(m, keyPress('j'))
+	assert.Equal(t, 2, m.aggCursor)
+	assert.Equal(t, 1, m.treeCursor, "moving bottom must not touch top cursor")
+}
+
+// In split mode the tree-flat-list helper m.displayTree() returns the
+// active pane's slice. The two panes share node *structure* (both show
+// the cumulative filesystem at the layer cursor) but differ in DiffType
+// labels: per-layer Δ marks only what this layer changed, cumulative
+// preserves labels carried forward from earlier layers. The active-pane
+// switch is what changes which labels the user sees.
+func TestSplitMode_DisplayTreeFollowsFocus(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+
+	m.focus = focusTree
+	topFiles := m.displayTree()
+	m.focus = focusTreeAgg
+	botFiles := m.displayTree()
+
+	// Find a path that is Unchanged in the Δ view but Added in the
+	// cumulative view: an L0 file like /etc/passwd. L1 didn't touch it,
+	// so Stack labels it Unchanged; AggregatedTrees carries forward L0's
+	// Added label. Different focus must produce different labels for the
+	// same path.
+	const probe = "/etc/passwd"
+	topLabel := findDiffType(topFiles, probe)
+	botLabel := findDiffType(botFiles, probe)
+	require.NotEqual(t, image.DiffType(-1), topLabel, "probe path must exist in top pane")
+	require.NotEqual(t, image.DiffType(-1), botLabel, "probe path must exist in bottom pane")
+	assert.NotEqual(t, topLabel, botLabel,
+		"split panes show the same path with different DiffTypes: %s top=%v bot=%v",
+		probe, topLabel, botLabel)
+}
+
+// findDiffType returns the DiffType of the named path in files, or -1 if
+// missing. Test helper kept local because the productive callers route
+// node lookup through FindChild on the tree, not the flat slice.
+func findDiffType(files []*image.FileNode, path string) image.DiffType {
+	for _, f := range files {
+		if f.Path == path {
+			return f.DiffType
+		}
+	}
+	return image.DiffType(-1)
+}
+
+// Filter applied while focused on the bottom pane must filter the bottom
+// pane's slice — not just the top one. Both panes share the query but
+// each pane filters its own files.
+func TestSplitMode_FilterAppliesToBothPanes(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+	m.filterQuery = "nginx"
+
+	m.focus = focusTree
+	topFiltered := m.displayTree()
+	for _, f := range topFiltered {
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
+
+	m.focus = focusTreeAgg
+	botFiltered := m.displayTree()
+	for _, f := range botFiltered {
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
 }

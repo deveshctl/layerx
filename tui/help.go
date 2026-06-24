@@ -49,6 +49,7 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"S", "Cycle size: Change → Stored → both"},
 				{"c", "Copy Dockerfile command"},
+				{"A", "Toggle split aggregated view"},
 			},
 		},
 		{

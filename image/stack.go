@@ -34,7 +34,22 @@ func Stack(layers []Layer) []*FileTree {
 	return result
 }
 
+// carryForward names the function used to clone a cumulative-side node when
+// the current layer does not touch it. Stack passes cloneAsUnchanged so prior
+// DiffType labels are stripped (CompareSingleLayer semantics);
+// BuildAggregatedTrees passes cloneWithDiffType so labels accumulate
+// (CompareAllLayers semantics).
+type carryForward func(*FileNode) *FileNode
+
 func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
+	return mergeLayerWith(cumulative, layerRoot, layerIdx, cloneAsUnchanged)
+}
+
+func aggregateMerge(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
+	return mergeLayerWith(cumulative, layerRoot, layerIdx, cloneWithDiffType)
+}
+
+func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryForward) *FileNode {
 	merged := &FileNode{
 		Name:              cumulative.Name,
 		Path:              cumulative.Path,
@@ -101,13 +116,12 @@ func mergeLayer(cumulative, layerRoot *FileNode, layerIdx int) *FileNode {
 
 			lChild := layerRoot.FindChild(cChild.Name)
 			if lChild == nil {
-				unchanged := cloneAsUnchanged(cChild)
-				merged.AddChild(unchanged)
+				merged.AddChild(carry(cChild))
 				continue
 			}
 
 			if cChild.IsDir && lChild.IsDir {
-				mergedChild := mergeLayer(cChild, lChild, layerIdx)
+				mergedChild := mergeLayerWith(cChild, lChild, layerIdx, carry)
 				merged.AddChild(mergedChild)
 			} else {
 				if cChild.IsDir && !lChild.IsDir {
@@ -274,6 +288,73 @@ func cloneStructure(node *FileNode) *FileNode {
 		clone.AddChild(cloneStructure(child))
 	}
 	return clone
+}
+
+// cloneWithDiffType deep-clones a node, preserving DiffType (and Removed
+// children). Used by BuildAggregatedTrees as the carry-forward for paths
+// the current layer does not touch — Dive's CompareAllLayers shows files
+// that earlier layers Modified or Removed at every cursor past the layer
+// that touched them, so labels and tombstones must propagate.
+func cloneWithDiffType(node *FileNode) *FileNode {
+	clone := &FileNode{
+		Name:              node.Name,
+		Path:              node.Path,
+		Linkname:          node.Linkname,
+		Size:              node.Size,
+		IsDir:             node.IsDir,
+		IsHardlink:        node.IsHardlink,
+		DiffType:          node.DiffType,
+		Mode:              node.Mode,
+		UID:               node.UID,
+		GID:               node.GID,
+		IntroducedInLayer: node.IntroducedInLayer,
+	}
+	for _, child := range node.Children {
+		clone.AddChild(cloneWithDiffType(child))
+	}
+	return clone
+}
+
+// BuildAggregatedTrees returns one FileTree per input layer, where result[i]
+// is Dive's CompareAllLayers view at index i: a tree anchored at layer 0
+// (everything Added against the empty baseline) with every layer 1..i
+// overlaid in order, preserving DiffType labels accumulated across iterations.
+//
+// Contrast with Stack(layers), which produces the CompareSingleLayer view:
+// result[i] there shows only what layer i changed against the cumulative
+// state of layers 0..i-1, with prior labels stripped.
+//
+// Memory bound: peak heap during the call is one mutable baseline tree (the
+// cumulative state at the latest layer processed) plus the returned slice
+// of one snapshot per layer. For an N-layer image, total ≈ 2× the final
+// tree size (baseline + final snapshot) plus ΣN intermediate snapshots,
+// comparable to Stack(layers)'s footprint.
+func BuildAggregatedTrees(layers []Layer) []*FileTree {
+	result := make([]*FileTree, len(layers))
+	if len(layers) == 0 {
+		return result
+	}
+
+	var baseline *FileNode
+	first := layers[0]
+	if first.Tree == nil || first.Tree.Root == nil || len(first.Tree.Root.Children) == 0 {
+		baseline = &FileNode{Name: "/", Path: "/", IsDir: true}
+	} else {
+		baseline = cloneAsAdded(first.Tree.Root, 0)
+	}
+	result[0] = &FileTree{Root: cloneWithDiffType(baseline)}
+
+	for i := 1; i < len(layers); i++ {
+		layer := layers[i]
+		if layer.Tree == nil || layer.Tree.Root == nil || len(layer.Tree.Root.Children) == 0 {
+			result[i] = &FileTree{Root: cloneWithDiffType(baseline)}
+			continue
+		}
+		baseline = aggregateMerge(baseline, layer.Tree.Root, i)
+		result[i] = &FileTree{Root: cloneWithDiffType(baseline)}
+	}
+
+	return result
 }
 
 func hasChangedChildren(node *FileNode) bool {
