@@ -45,6 +45,9 @@ signs:
     artifacts: checksum
     signature: "${artifact}.sig"
     certificate: "${artifact}.pem"
+    # Surface cosign's stdout/stderr in the release log even without
+    # --verbose, so a signing failure is diagnosable from the Actions run.
+    output: true
     args:
       - sign-blob
       - "--yes"
