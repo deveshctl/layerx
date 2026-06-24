@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "UTC",
+  "schedule": [
+    "before 6am on the first day of the month"
+  ],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 1,
+  "rebaseWhen": "conflicted",
+  "labels": ["dependencies"],
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "security"],
+    "schedule": "at any time",
+    "minimumReleaseAge": null
+  },
+  "lockFileMaintenance": {
+    "enabled": false
+  },
+  "packageRules": [
+    {
+      "description": "Group all Go module updates into one monthly PR.",
+      "matchManagers": ["gomod"],
+      "groupName": "go modules",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Group all GitHub Actions version bumps into one monthly PR.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "groupName": "github actions",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Auto-merge GitHub Actions digest pin refreshes — same version, refreshed SHA. Required for Scorecard's Pinned-Dependencies check to stay green over time.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "pin", "pinDigest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "groupName": "github actions digests",
+      "schedule": ["before 6am on the first day of the month"]
+    }
+  ],
+  "postUpdateOptions": ["gomodTidy"]
+}

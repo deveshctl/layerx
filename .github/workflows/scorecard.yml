@@ -1,0 +1,58 @@
+# OpenSSF Scorecard analysis. Runs weekly + on pushes to main + on branch
+# protection rule edits, publishes results to the public Scorecard API so
+# the project earns a badge, and uploads SARIF to GitHub code-scanning.
+#
+# Pinned by full commit SHA per Scorecard's own Pinned-Dependencies check.
+# Renovate's digest updater keeps the SHAs current.
+
+name: Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    # 06:13 UTC every Monday — off-the-hour to avoid GH Actions queue spikes.
+    - cron: '13 6 * * 1'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Upload findings to GitHub code-scanning.
+      security-events: write
+      # Mint OIDC token for Sigstore-signed publishing of results.
+      id-token: write
+      # Read non-public Scorecard signals (branch protection, webhook config).
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2 # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishing makes the score public and unlocks the README badge.
+          publish_results: true
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload SARIF to code-scanning
+        uses: github/codeql-action/upload-sarif@b0c4fd77f6c559021d78430ec4d0d169ae74a4eb # v3
+        with:
+          sarif_file: results.sarif
