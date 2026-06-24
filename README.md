@@ -158,14 +158,14 @@ sudo rpm -i layerx_linux_arm64.rpm
 
 ### Direct download
 
-Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.4.1`) in the URLs above.
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.5.0`) in the URLs above.
 
 ### Verifying releases
 
 Every release ships with a cosign-signed `checksums.txt`, an SPDX SBOM per archive, and a SLSA provenance attestation. Verifying both proves the archive came out of this repository's release workflow on GitHub-hosted runners.
 
 ```bash
-TAG=v1.4.0   # the release you downloaded
+TAG=v1.5.0   # the release you downloaded
 ARCHIVE=layerx_linux_amd64.tar.gz
 BASE="https://github.com/deveshctl/layerx/releases/download/${TAG}"
 

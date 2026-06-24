@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.5.0] - 2026-06-24
+
+Multi-platform image support, an aggregated split-pane layer view in the
+TUI, and a supply-chain hardening pass: signed releases with SBOM and
+SLSA Build Level 3 provenance, OpenSSF Scorecard, and an expanded CI
+matrix (race, coverage, lint, govulncheck, fuzz).
+
 ### Added
 - Release integrity: every tagged release now ships a cosign-signed
   `checksums.txt` (keyless, GitHub OIDC), an SPDX SBOM per archive, and a
