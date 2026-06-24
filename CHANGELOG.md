@@ -16,9 +16,11 @@ matrix (race, coverage, lint, govulncheck, fuzz).
 
 ### Added
 - Release integrity: every tagged release now ships a cosign-signed
-  `checksums.txt` (keyless, GitHub OIDC), an SPDX SBOM per archive, and a
-  SLSA Build Level 3 provenance attestation. Verification recipe is in the
-  README and `SECURITY.md`.
+  `checksums.txt` (keyless, GitHub OIDC) packaged in Sigstore's bundle
+  format (`checksums.txt.sigstore.json`, signature + signing certificate
+  in one file), an SPDX SBOM per archive, and a SLSA Build Level 3
+  provenance attestation. Verification recipe is in the README and
+  `SECURITY.md`.
 - OpenSSF Scorecard workflow — weekly analysis published to the public
   Scorecard API and uploaded as SARIF to GitHub code-scanning. Badge in
   the README.

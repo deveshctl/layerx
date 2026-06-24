@@ -171,14 +171,12 @@ BASE="https://github.com/deveshctl/layerx/releases/download/${TAG}"
 
 curl -sLO "${BASE}/${ARCHIVE}"
 curl -sLO "${BASE}/checksums.txt"
-curl -sLO "${BASE}/checksums.txt.sig"
-curl -sLO "${BASE}/checksums.txt.pem"
+curl -sLO "${BASE}/checksums.txt.sigstore.json"
 curl -sLO "${BASE}/multiple.intoto.jsonl"   # SLSA provenance
 
 # 1) Verify the cosign keyless signature over checksums.txt.
 cosign verify-blob \
-  --certificate checksums.txt.pem \
-  --signature   checksums.txt.sig \
+  --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp "^https://github.com/deveshctl/layerx/" \
   --certificate-oidc-issuer     "https://token.actions.githubusercontent.com" \
   checksums.txt
