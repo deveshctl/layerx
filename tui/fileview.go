@@ -44,7 +44,7 @@ func renderFileView(p viewerParams) string {
 		extractGlyph := phaseGlyph(image.PhaseExporting)
 		dim := styleWithFg(statusDimColor)
 
-		first := frame + " " + extractGlyph + " Extracting"
+		var first string
 		if p.loadingPath != "" {
 			path := truncateMidPath(p.loadingPath, max(contentWidth-len(" Extracting ")-4, 8))
 			first = frame + " " + extractGlyph + " Extracting " + path
