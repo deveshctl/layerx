@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- TUI loading screen: content is now horizontally centered inside the
+  panel (titles, stepper, hints all aligned to the panel midline) rather
+  than indented with a fixed two-space rail that left the layout flush
+  against the left border. The pull phase additionally shows a
+  multi-line layer log — completed layers stay visible (dimmed, full
+  bar) above the in-flight layer (accent, live progress) so a 12-layer
+  pull reads as a running history instead of one perpetually-restarting
+  line. The log caps at five rows to keep the panel within the terminal.
 - TUI loading screen: now shows an `elapsed M:SS` timer below the
   per-phase detail and a `Pull ── Export ── Parse` stepper rail, so a
   multi-GB pull is visibly making progress instead of looking stuck.
@@ -19,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loading screen, with a recovery hint when one is obvious — e.g. when
   the Docker daemon is unreachable, the panel now suggests passing a
   saved archive path instead. The same hint is appended to the CLI's
-  daemon-down message and to "no container engine found".
+  daemon-down message and to "no container engine found". Panel
+  contents (title, error body, hint, exit line) center on the panel
+  midline rather than sitting flush against the left border.
 - TUI file viewer: while a file is extracting, the panel shows the
   target path (mid-truncated for long paths), the elapsed time, and an
   `Press Esc to close` hint instead of a bare spinner. Binary and empty

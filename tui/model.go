@@ -117,6 +117,17 @@ type progressMsg struct {
 	event image.ProgressEvent
 }
 
+// pullLayerSnapshot is a single line in pullLayerLog — one completed pull
+// layer, captured at the moment LayersDone incremented past it. bytesCurr
+// and bytesMax are aggregate values (the daemon does not split bytes per
+// layer); they are stored as-of-snapshot so the rendered log shows the
+// progress totals at completion rather than the live totals.
+type pullLayerSnapshot struct {
+	layerNum  int
+	bytesCurr int64
+	bytesMax  int64
+}
+
 // spinnerTickMsg triggers a spinner frame advance.
 type spinnerTickMsg struct{}
 
@@ -221,6 +232,14 @@ type model struct {
 	pullTotal    int
 	pullBytes    int64
 	pullBytesMax int64
+	// pullLayerLog accumulates one snapshot per completed pull layer so the
+	// loading panel can render a multi-line history of finished blobs while
+	// the live layer keeps streaming. Appended only when LayersDone
+	// increases — the daemon does not break bytes down per layer, so the
+	// snapshot captures the aggregate (BytesCurr / BytesTotal) at the
+	// moment the layer transitioned to done. Reset on every new loading
+	// session via beginLoadingSession.
+	pullLayerLog []pullLayerSnapshot
 	progressCh   chan image.ProgressEvent
 	copyConfirm  bool
 	statusMsg    string
@@ -393,6 +412,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cache path) leave the original timestamp intact.
 		if msg.event.Phase == image.PhaseCacheLoad && m.cacheHitAt.IsZero() {
 			m.cacheHitAt = time.Now()
+		}
+		// Snapshot any newly-completed layers so the panel can render a
+		// running history. Daemon byte fields are aggregate, not per-layer,
+		// so each snapshot captures the totals at completion — good enough
+		// for a visible "Layer N done" trail without inventing per-blob
+		// numbers that aren't reported. m.pullLayers stores the highest
+		// LayersDone observed so far; on an upward transition, every
+		// layer index in (prev, new] becomes a completed snapshot.
+		if msg.event.Phase == image.PhasePulling && msg.event.LayersDone > m.pullLayers {
+			for n := m.pullLayers + 1; n <= msg.event.LayersDone; n++ {
+				m.pullLayerLog = append(m.pullLayerLog, pullLayerSnapshot{
+					layerNum:  n,
+					bytesCurr: msg.event.BytesCurr,
+					bytesMax:  msg.event.BytesTotal,
+				})
+			}
 		}
 		m.pullLayers = msg.event.LayersDone
 		m.pullTotal = msg.event.LayersTotal
@@ -1692,6 +1727,27 @@ func centerOver(dot, label string) string {
 	return strings.Repeat(" ", left) + dot + strings.Repeat(" ", right)
 }
 
+// centerLine pads s with leading spaces so it appears horizontally centered
+// inside a panel of contentWidth display columns. Display-width aware via
+// lipgloss.Width — leading ANSI escapes and wide runes do not skew the
+// padding. Safe on narrow widths: if s is already wider than the budget,
+// the original string is returned untouched (renderPanel clips anything
+// that overshoots).
+func centerLine(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	w := lipgloss.Width(line)
+	if w >= width {
+		return line
+	}
+	pad := (width - w) / 2
+	if pad <= 0 {
+		return line
+	}
+	return strings.Repeat(" ", pad) + line
+}
+
 func (m model) viewLoading() tea.View {
 	if m.width > 0 && m.width < 10 {
 		return finalizeView(tea.NewView("loading…"))
@@ -1702,72 +1758,103 @@ func (m model) viewLoading() tea.View {
 
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("◆ layerx"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("◆ layerx"))
 	lines = append(lines, "")
 
 	switch m.loadPhase {
 	case image.PhasePulling:
-		lines = append(lines, fmt.Sprintf("  %s %s Pulling %s …", frame, glyph, m.imageRef))
-		if m.pullTotal > 0 {
-			detail := fmt.Sprintf("    Layer %d/%d", m.pullLayers, m.pullTotal)
-			if m.pullBytesMax > 0 {
-				pct := min(int(m.pullBytes*100/m.pullBytesMax), 100)
-				bytesText := fmt.Sprintf("  %s / %s",
-					image.FormatBytes(m.pullBytes),
-					image.FormatBytes(m.pullBytesMax))
-				// Budget reserves 2 inner-padding cells (m.width - 6 instead
-				// of m.width - 4) so the bytes total never butts up against
-				// the right border when boxWidth is clamped to m.width - 2.
-				barWidth := 20
-				if m.width > 0 {
-					budget := m.width - 6 - lipgloss.Width(detail) - len("  []") - lipgloss.Width(bytesText)
-					if budget < barWidth {
-						barWidth = budget
-					}
-				}
-				if barWidth >= 4 {
-					filled := barWidth * pct / 100
-					bar := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", filled)) +
-						lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", barWidth-filled))
-					detail += fmt.Sprintf("  [%s]%s", bar, bytesText)
-				} else {
-					detail += bytesText
+		lines = append(lines, fmt.Sprintf("%s %s Pulling %s …", frame, glyph, m.imageRef))
+		// Render the running history of completed layers (dimmed) followed
+		// by the in-flight layer (accent). Capped at maxPullLayerRows
+		// so a 200-layer pull cannot push the panel past the terminal
+		// height — the live layer always stays visible by trimming the
+		// oldest completed rows first.
+		const maxPullLayerRows = 5
+		barBudget := 20
+		liveBarMax := m.pullBytesMax
+		if liveBarMax > 0 {
+			// Reserve panel width for the longest possible layer-log line
+			// shape: "Layer NN/NN  [bar]  X.X / Y.Y GB". Mirror the
+			// approach used for the existing progress detail line below.
+			sample := fmt.Sprintf("Layer %d/%d  []  %s / %s",
+				max(m.pullTotal, 1), max(m.pullTotal, 1),
+				image.FormatBytes(liveBarMax), image.FormatBytes(liveBarMax))
+			if m.width > 0 {
+				budget := m.width - 6 - lipgloss.Width(sample)
+				if budget < barBudget {
+					barBudget = budget
 				}
 			}
-			lines = append(lines, detail)
+		}
+		liveLayer := m.pullLayers
+		if liveLayer < 1 {
+			liveLayer = 1
+		}
+		if m.pullTotal > 0 && liveLayer > m.pullTotal {
+			liveLayer = m.pullTotal
+		}
+
+		log := m.pullLayerLog
+		// Keep the most recent completed rows when capped: budget reserves
+		// one slot for the in-flight layer line.
+		if len(log) > maxPullLayerRows-1 {
+			log = log[len(log)-(maxPullLayerRows-1):]
+		}
+		for _, snap := range log {
+			line := renderPullLayerLine(snap.layerNum, m.pullTotal, snap.bytesCurr, snap.bytesMax, barBudget, true)
+			lines = append(lines, dimStyle.Render(line))
+		}
+		if m.pullTotal > 0 {
+			liveLine := renderPullLayerLine(liveLayer, m.pullTotal, m.pullBytes, m.pullBytesMax, barBudget, false)
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentColor).Render(liveLine))
 		}
 	case image.PhaseExporting:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
-		lines = append(lines, "    Exporting layers…")
+		lines = append(lines, fmt.Sprintf("%s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
+		lines = append(lines, "Exporting layers…")
 	case image.PhaseParsing:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
-		lines = append(lines, "    Parsing layers…")
+		lines = append(lines, fmt.Sprintf("%s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
+		lines = append(lines, "Parsing layers…")
 	case image.PhaseCacheLoad:
 		// No spinner during cache-hit — the glyph alone signals "done,
 		// just confirming". Held for ~300ms by the analysisMsg shortcut
 		// so the user actually sees it on a hot-cache run.
 		successStyle := lipgloss.NewStyle().Foreground(addedColor).Bold(true)
-		lines = append(lines, "  "+successStyle.Render(glyph+" "+m.imageRef+" — loaded from cache"))
+		lines = append(lines, successStyle.Render(glyph+" "+m.imageRef+" — loaded from cache"))
 	default:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
+		lines = append(lines, fmt.Sprintf("%s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
 	}
 
 	lines = append(lines, "")
 	stepper := renderPhaseStepper(m.loadPhase)
-	for _, sl := range strings.Split(stepper, "\n") {
-		lines = append(lines, "  "+sl)
+	stepperLines := strings.Split(stepper, "\n")
+	stepperWidth := 0
+	for _, sl := range stepperLines {
+		if w := lipgloss.Width(sl); w > stepperWidth {
+			stepperWidth = w
+		}
+	}
+	// The stepper is a two-row rail (labels + dots) that must remain
+	// vertically aligned. Centre it as a single visual unit so column
+	// positions inside the rail stay consistent with each other.
+	for _, sl := range stepperLines {
+		// Left-pad each row to the stepper's max line width so dots line
+		// up beneath their labels even after centering.
+		if w := lipgloss.Width(sl); w < stepperWidth {
+			sl += strings.Repeat(" ", stepperWidth-w)
+		}
+		lines = append(lines, sl)
 	}
 	lines = append(lines, "")
 
@@ -1786,11 +1873,10 @@ func (m model) viewLoading() tea.View {
 		} else {
 			timeLine = "elapsed " + formatElapsed(elapsed)
 		}
-		lines = append(lines, "  "+dimStyle.Render(timeLine))
+		lines = append(lines, dimStyle.Render(timeLine))
 	}
 
-	lines = append(lines, "  "+dimStyle.Render("Press q or Esc to exit."))
-	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("Press q or Esc to exit."))
 
 	boxWidth := 52
 	for _, ln := range lines {
@@ -1801,21 +1887,57 @@ func (m model) viewLoading() tea.View {
 	if m.width > 0 && m.width-2 < boxWidth {
 		boxWidth = m.width - 2
 	}
-	boxHeight := len(lines)
-	// Floor bumped to 12 (from 7) to accommodate the stepper + elapsed
-	// lines without pad-popping the panel as content lengths shift across
-	// the pull / export / parse / cache-load phases.
-	if boxHeight < 12 {
-		for len(lines) < 12 {
-			lines = append(lines, "")
-		}
-		boxHeight = 12
-	}
 
-	body := strings.Join(lines, "\n")
+	contentWidth := boxWidth
+	centered := make([]string, 0, len(lines)+2)
+	centered = append(centered, "")
+	for _, ln := range lines {
+		centered = append(centered, centerLine(ln, contentWidth))
+	}
+	centered = append(centered, "")
+
+	boxHeight := len(centered)
+	body := strings.Join(centered, "\n")
 	panel := renderPanel(body, "Loading", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	return finalizeView(tea.NewView(content))
+}
+
+// renderPullLayerLine formats one row of the pull-layer log. When totals
+// are unknown (bytesMax == 0) the bar and bytes text are dropped — only
+// the "Layer N/M" counter survives, which matches the existing fallback
+// the loading panel uses on opaque registries that never report sizes.
+// completed flips the bar-fill style to "all filled" so a finished
+// layer always shows a full rail regardless of bar width rounding.
+func renderPullLayerLine(layerNum, layerTotal int, bytesCurr, bytesMax int64, barWidth int, completed bool) string {
+	total := layerTotal
+	if total < 1 {
+		total = 1
+	}
+	if layerNum < 1 {
+		layerNum = 1
+	}
+	counter := fmt.Sprintf("Layer %d/%d", layerNum, total)
+	if bytesMax <= 0 {
+		return counter
+	}
+	pct := 100
+	if !completed {
+		pct = min(int(bytesCurr*100/bytesMax), 100)
+	}
+	bytesText := fmt.Sprintf("  %s / %s", image.FormatBytes(bytesCurr), image.FormatBytes(bytesMax))
+	if completed {
+		bytesText = fmt.Sprintf("  %s / %s", image.FormatBytes(bytesMax), image.FormatBytes(bytesMax))
+	}
+	if barWidth < 4 {
+		return counter + bytesText
+	}
+	filled := barWidth * pct / 100
+	if completed {
+		filled = barWidth
+	}
+	bar := strings.Repeat("━", filled) + strings.Repeat("─", barWidth-filled)
+	return fmt.Sprintf("%s  [%s]%s", counter, bar, bytesText)
 }
 
 // renderRightPanel paints the file-tree side of the screen. In single-pane
@@ -1861,19 +1983,15 @@ func (m model) viewError() tea.View {
 	hintStyle := lipgloss.NewStyle().Foreground(modifiedColor)
 
 	var lines []string
+	lines = append(lines, errStyle.Render("✕ Error"))
 	lines = append(lines, "")
-	lines = append(lines, "  "+errStyle.Render("✕ Error"))
-	lines = append(lines, "")
-	for _, ln := range strings.Split(m.errMsg, "\n") {
-		lines = append(lines, "  "+ln)
-	}
+	lines = append(lines, strings.Split(m.errMsg, "\n")...)
 	if m.errHint != "" {
 		lines = append(lines, "")
-		lines = append(lines, "  "+hintStyle.Render(m.errHint))
+		lines = append(lines, hintStyle.Render(m.errHint))
 	}
 	lines = append(lines, "")
-	lines = append(lines, "  "+dimStyle.Render("Press q or Esc to exit."))
-	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("Press q or Esc to exit."))
 
 	boxWidth := 52
 	for _, ln := range lines {
@@ -1884,15 +2002,16 @@ func (m model) viewError() tea.View {
 	if m.width > 0 && m.width-2 < boxWidth {
 		boxWidth = m.width - 2
 	}
-	boxHeight := len(lines)
-	if boxHeight < 9 {
-		for len(lines) < 9 {
-			lines = append(lines, "")
-		}
-		boxHeight = 9
-	}
 
-	body := strings.Join(lines, "\n")
+	centered := make([]string, 0, len(lines)+2)
+	centered = append(centered, "")
+	for _, ln := range lines {
+		centered = append(centered, centerLine(ln, boxWidth))
+	}
+	centered = append(centered, "")
+
+	boxHeight := len(centered)
+	body := strings.Join(centered, "\n")
 	panel := renderPanel(body, "Error", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	return finalizeView(tea.NewView(content))

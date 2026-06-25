@@ -2600,3 +2600,113 @@ func stripANSI(s string) string {
 	}
 	return out.String()
 }
+
+// --- loading layer log (multi-line pull history) ------------------------------
+
+// TestViewLoadingLayerLogShowsMultipleLines asserts that completed-layer
+// snapshots accumulate in the loading panel and the in-flight layer is
+// rendered alongside them — restoring the multi-line pull log that earlier
+// premium-polish work collapsed to a single line.
+func TestViewLoadingLayerLogShowsMultipleLines(t *testing.T) {
+	m := NewModel(Config{ImageRef: "node:latest"})
+	m.width = 120
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	m.pullTotal = 12
+	m.pullBytesMax = 5 * 1024 * 1024 * 1024
+	m.pullBytes = 1500 * 1024 * 1024
+	m.pullLayers = 4
+	m.pullLayerLog = []pullLayerSnapshot{
+		{layerNum: 1, bytesCurr: 400 * 1024 * 1024, bytesMax: 5 * 1024 * 1024 * 1024},
+		{layerNum: 2, bytesCurr: 900 * 1024 * 1024, bytesMax: 5 * 1024 * 1024 * 1024},
+		{layerNum: 3, bytesCurr: 1200 * 1024 * 1024, bytesMax: 5 * 1024 * 1024 * 1024},
+	}
+
+	content := viewContent(m.View())
+	assert.Contains(t, content, "Layer 1/")
+	assert.Contains(t, content, "Layer 2/")
+	assert.Contains(t, content, "Layer 3/")
+	assert.Contains(t, content, "Layer 4/", "in-flight layer rendered alongside completed log")
+}
+
+// TestViewLoadingContentCentered checks that the loading title row has
+// meaningful leading padding rather than sitting flush-left in the panel.
+func TestViewLoadingContentCentered(t *testing.T) {
+	m := NewModel(Config{ImageRef: "alpine:3.20"})
+	m.width = 80
+	m.height = 30
+	m.loadPhase = image.PhasePulling
+
+	content := viewContent(m.View())
+	titleRow := ""
+	for _, ln := range strings.Split(content, "\n") {
+		plain := stripANSI(ln)
+		if strings.Contains(plain, "◆ layerx") {
+			titleRow = plain
+			break
+		}
+	}
+	require.NotEmpty(t, titleRow, "loading title row not found")
+	idx := strings.Index(titleRow, "◆")
+	require.Greater(t, idx, 4,
+		"title must have leading padding (centered), not flush-left; got idx=%d", idx)
+}
+
+// TestPullLayerLogAppendsOnLayersDoneIncrease drives progressMsg updates and
+// asserts that each upward step in LayersDone appends a snapshot.
+func TestPullLayerLogAppendsOnLayersDoneIncrease(t *testing.T) {
+	m := NewModel(Config{ImageRef: "node:latest"})
+	m.width = 120
+	m.height = 40
+
+	// First progress event: 0 layers done — no completed snapshots yet.
+	mm := send(m, progressMsg{event: image.ProgressEvent{
+		Phase: image.PhasePulling, LayersDone: 0, LayersTotal: 5,
+		BytesCurr: 100, BytesTotal: 1000,
+	}})
+	require.Empty(t, mm.pullLayerLog, "no completed layers yet")
+
+	// LayersDone steps to 1 — one snapshot appended.
+	mm = send(mm, progressMsg{event: image.ProgressEvent{
+		Phase: image.PhasePulling, LayersDone: 1, LayersTotal: 5,
+		BytesCurr: 300, BytesTotal: 1000,
+	}})
+	require.Len(t, mm.pullLayerLog, 1)
+	assert.Equal(t, 1, mm.pullLayerLog[0].layerNum)
+
+	// LayersDone jumps from 1 to 3 — two snapshots appended in order.
+	mm = send(mm, progressMsg{event: image.ProgressEvent{
+		Phase: image.PhasePulling, LayersDone: 3, LayersTotal: 5,
+		BytesCurr: 700, BytesTotal: 1000,
+	}})
+	require.Len(t, mm.pullLayerLog, 3)
+	assert.Equal(t, 2, mm.pullLayerLog[1].layerNum)
+	assert.Equal(t, 3, mm.pullLayerLog[2].layerNum)
+}
+
+// --- error panel centering ---------------------------------------------------
+
+// TestViewErrorContentCentered mirrors TestViewLoadingContentCentered for
+// the error panel: the title row must have leading padding from centering,
+// not sit flush-left.
+func TestViewErrorContentCentered(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.width = 80
+	m.height = 30
+	m.state = stateError
+	m.errMsg = "Docker is not running."
+
+	content := viewContent(m.View())
+	titleRow := ""
+	for _, ln := range strings.Split(content, "\n") {
+		plain := stripANSI(ln)
+		if strings.Contains(plain, "✕ Error") {
+			titleRow = plain
+			break
+		}
+	}
+	require.NotEmpty(t, titleRow, "error title row not found")
+	idx := strings.Index(titleRow, "✕")
+	require.Greater(t, idx, 4,
+		"error title must have leading padding (centered), not flush-left; got idx=%d", idx)
+}
