@@ -20,7 +20,7 @@ func friendlyCLIError(err error) string {
 		return "timed out"
 	}
 	if _, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
-		return "Docker daemon is not reachable. Is Docker running?"
+		return "Docker daemon is not reachable. Start Docker, or pass a saved archive path instead (no daemon needed)."
 	}
 	if e, ok := errors.AsType[*image.ErrImageNotFound](err); ok {
 		return fmt.Sprintf("image %q not found", e.Ref)
@@ -45,8 +45,8 @@ func friendlyCLIError(err error) string {
 			"(see `podman system connection list`)", e.Platform)
 	}
 	if e, ok := errors.AsType[*image.ErrNoEngineFound](err); ok {
-		return fmt.Sprintf("no container engine found; tried: %s "+
-			"(start Docker or Podman, or set DOCKER_HOST)",
+		return fmt.Sprintf("no container engine found; tried: %s. "+
+			"Start Docker or Podman, set DOCKER_HOST, or pass a saved archive path instead (no daemon needed).",
 			strings.Join(e.Tried, ", "))
 	}
 	if e, ok := errors.AsType[*image.ErrPlatformInvalid](err); ok {

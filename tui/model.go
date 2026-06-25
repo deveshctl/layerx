@@ -120,6 +120,15 @@ type progressMsg struct {
 // spinnerTickMsg triggers a spinner frame advance.
 type spinnerTickMsg struct{}
 
+// cacheHitDoneMsg fires after the cache-hit min-visibility hold elapses.
+// Carries the pending analysis (or error) captured when analysisMsg
+// arrived mid-hold; the Update handler then transitions to
+// stateReady/stateError.
+type cacheHitDoneMsg struct {
+	analysis *image.Analysis
+	err      error
+}
+
 // clearCopyMsg clears the "Copied!" confirmation after a timeout.
 type clearCopyMsg struct{}
 
@@ -129,10 +138,33 @@ type clearCopyMsg struct{}
 // a newer message that overwrote the original mid-window.
 type clearStatusMsg struct{ gen uint64 }
 
+// statusKind classifies a transient status-bar message so the renderer
+// can colour it consistently: success transients (Copied, Saved, Jumped)
+// in addedColor; failures (extraction errors, save errors) in removedColor;
+// neutral progress notes (Extracting…, "File removed in this layer") in
+// modifiedColor.
+type statusKind int
+
+const (
+	statusInfo statusKind = iota
+	statusOK
+	statusErr
+)
+
 // setStatus assigns msg to the status bar and bumps statusGen so any
 // previously-scheduled clearStatusMsg ticks become stale and no-ops.
+// Defaults to the neutral colour (statusInfo); callers that want
+// success/error tinting use setStatusKind.
 func (m *model) setStatus(msg string) {
 	m.statusMsg = msg
+	m.statusKind = statusInfo
+	m.statusGen++
+}
+
+// setStatusKind is the kind-aware variant of setStatus.
+func (m *model) setStatusKind(msg string, kind statusKind) {
+	m.statusMsg = msg
+	m.statusKind = kind
 	m.statusGen++
 }
 
@@ -179,6 +211,7 @@ type model struct {
 	treeCursor   int
 	treeOffset   int
 	errMsg       string
+	errHint      string
 	quitting     bool
 	resolver     image.Resolver
 	spinnerFrame int
@@ -191,7 +224,22 @@ type model struct {
 	progressCh   chan image.ProgressEvent
 	copyConfirm  bool
 	statusMsg    string
+	statusKind   statusKind
 	statusGen    uint64
+	// loadStartedAt is stamped in NewModel and drives the elapsed-time line
+	// on the loading screen. Spinner ticks redraw the panel; each redraw
+	// recomputes time.Since.
+	loadStartedAt time.Time
+	// cacheHitAt is stamped the first time progressMsg{PhaseCacheLoad}
+	// arrives. Zero value means "no cache hit yet". The analysisMsg handler
+	// uses it to hold the cache-hit success line on screen for a brief
+	// minimum window so a hot-cache load is visibly cached rather than
+	// instantaneous.
+	cacheHitAt time.Time
+	// viewLoadStartedAt is stamped on every viewState transition into
+	// viewLoading (file-extract loading). Reset on every new open so
+	// successive file opens start fresh.
+	viewLoadStartedAt time.Time
 	showHelp     bool
 	filterActive bool
 	filterQuery  string
@@ -246,17 +294,18 @@ func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
 	return model{
-		state:       stateLoading,
-		imageRef:    cfg.ImageRef,
-		platform:    cfg.Platform,
-		resolver:    cfg.Resolver,
-		progressCh:  ch,
-		writeFile:   atomicWriteFile,
-		statFile:    os.Stat,
-		keys:        defaultKeys(),
-		noCache:     cfg.NoCache,
-		fetchCtx:    ctx,
-		fetchCancel: cancel,
+		state:         stateLoading,
+		imageRef:      cfg.ImageRef,
+		platform:      cfg.Platform,
+		resolver:      cfg.Resolver,
+		progressCh:    ch,
+		writeFile:     atomicWriteFile,
+		statFile:      os.Stat,
+		keys:          defaultKeys(),
+		noCache:       cfg.NoCache,
+		fetchCtx:      ctx,
+		fetchCancel:   cancel,
+		loadStartedAt: time.Now(),
 	}
 }
 
@@ -338,6 +387,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 		m.loadPhase = msg.event.Phase
+		// Stamp cacheHitAt the first time we see PhaseCacheLoad so the
+		// analysisMsg handler can hold the success line on screen for a
+		// brief minimum window. Subsequent events (none expected in the
+		// cache path) leave the original timestamp intact.
+		if msg.event.Phase == image.PhaseCacheLoad && m.cacheHitAt.IsZero() {
+			m.cacheHitAt = time.Now()
+		}
 		m.pullLayers = msg.event.LayersDone
 		m.pullTotal = msg.event.LayersTotal
 		m.pullBytes = msg.event.BytesCurr
@@ -345,9 +401,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listenForProgress(m.progressCh)
 
 	case analysisMsg:
+		// Cache-hit min-visibility hold: when PhaseCacheLoad arrived less
+		// than 300ms ago, keep the loading panel visible for the
+		// remainder of the window so the "loaded from cache" line is
+		// legible. The analysis is already complete; we are only
+		// deferring the View() switch.
+		if !m.cacheHitAt.IsZero() {
+			remaining := 300*time.Millisecond - time.Since(m.cacheHitAt)
+			if remaining > 0 {
+				analysis := msg.analysis
+				err := msg.err
+				return m, tea.Tick(remaining, func(time.Time) tea.Msg {
+					return cacheHitDoneMsg{analysis: analysis, err: err}
+				})
+			}
+		}
 		if msg.err != nil {
 			m.state = stateError
 			m.errMsg = friendlyError(msg.err)
+			m.errHint = errorHint(msg.err)
+			return m, nil
+		}
+		m.state = stateReady
+		m.analysis = msg.analysis
+		m.efficiency = image.EfficiencyFromAnalysis(msg.analysis)
+		if src, ok := m.resolver.(image.ExtractorSource); ok {
+			m.extractor = src.NewExtractor()
+		}
+		m.clampCursors()
+		return m, nil
+
+	case cacheHitDoneMsg:
+		if msg.err != nil {
+			m.state = stateError
+			m.errMsg = friendlyError(msg.err)
+			m.errHint = errorHint(msg.err)
 			return m, nil
 		}
 		m.state = stateReady
@@ -404,7 +492,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.viewState = viewNone
-			m.setStatus("Error: " + msg.err.Error())
+			m.setStatusKind("Error: "+msg.err.Error(), statusErr)
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		m.viewState = viewReady
@@ -443,7 +531,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveCancel = nil
 		}
 		if msg.err != nil {
-			m.setStatus("Error: " + msg.err.Error())
+			m.setStatusKind("Error: "+msg.err.Error(), statusErr)
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		// Run stat + write off-thread so a slow disk (network mount, encrypted
@@ -459,13 +547,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.setStatus("Error: " + msg.err.Error())
+			m.setStatusKind("Error: "+msg.err.Error(), statusErr)
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		if msg.target != msg.original {
-			m.setStatus(fmt.Sprintf("Saved: %s (existed → wrote %s)", msg.original, msg.target))
+			m.setStatusKind(fmt.Sprintf("Saved: %s (existed → wrote %s)", msg.original, msg.target), statusOK)
 		} else {
-			m.setStatus("Saved: " + msg.target)
+			m.setStatusKind("Saved: "+msg.target, statusOK)
 		}
 		return m, m.scheduleStatusClear(2 * time.Second)
 
@@ -1043,6 +1131,7 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	m.viewState = viewLoading
+	m.viewLoadStartedAt = time.Now()
 	m.viewOriginLayer = f.IntroducedInLayer
 	layers := m.layers()
 	if f.IntroducedInLayer < len(layers) {
@@ -1492,11 +1581,124 @@ func (m model) View() tea.View {
 	}
 }
 
+// formatElapsed renders d as "m:ss" for the loading panel timer line.
+// Capped at 999:59 so a forgotten background pull does not widen the
+// panel by an unbounded amount.
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d / time.Second)
+	mins := total / 60
+	secs := total % 60
+	if mins > 999 {
+		mins = 999
+		secs = 59
+	}
+	return fmt.Sprintf("%d:%02d", mins, secs)
+}
+
+// phaseGlyph returns the per-phase indicator used inline with the
+// progress detail line. The set is intentionally tiny — one character
+// per phase keeps the loading panel from getting noisier as more
+// phases land.
+func phaseGlyph(p image.ProgressPhase) string {
+	switch p {
+	case image.PhasePulling:
+		return "↓"
+	case image.PhaseExporting:
+		return "▣"
+	case image.PhaseParsing:
+		return "≡"
+	case image.PhaseCacheLoad:
+		return "✓"
+	default:
+		return "…"
+	}
+}
+
+// renderPhaseStepper draws a two-line "Pull ── Export ── Parse" rail
+// above three dots. The active step is rendered in accentColor; reached
+// steps in statusDimColor; not-yet-reached steps also in statusDimColor.
+// PhaseCacheLoad collapses all three dots to ✓ in accent — the cache
+// hit supersedes the live pipeline.
+func renderPhaseStepper(active image.ProgressPhase) string {
+	labels := []string{"Pull", "Export", "Parse"}
+	phases := []image.ProgressPhase{image.PhasePulling, image.PhaseExporting, image.PhaseParsing}
+
+	accent := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(statusDimColor)
+
+	// Cache-hit stepper: three ✓ dots in accent, labels dim.
+	if active == image.PhaseCacheLoad {
+		var labelRow, dotRow strings.Builder
+		for i, label := range labels {
+			if i > 0 {
+				labelRow.WriteString(dim.Render(" ── "))
+				dotRow.WriteString("    ")
+			}
+			labelRow.WriteString(dim.Render(label))
+			dotRow.WriteString(centerOver(accent.Render("✓"), label))
+		}
+		return labelRow.String() + "\n" + dotRow.String()
+	}
+
+	activeIdx := -1
+	for i, p := range phases {
+		if p == active {
+			activeIdx = i
+			break
+		}
+	}
+	// Pre-first-event default: treat Pull as active.
+	if activeIdx < 0 {
+		activeIdx = 0
+	}
+
+	var labelRow, dotRow strings.Builder
+	for i, label := range labels {
+		if i > 0 {
+			labelRow.WriteString(dim.Render(" ── "))
+			dotRow.WriteString("    ")
+		}
+		var labelRendered, dotRendered string
+		switch {
+		case i < activeIdx:
+			labelRendered = dim.Render(label)
+			dotRendered = dim.Render("●")
+		case i == activeIdx:
+			labelRendered = accent.Render(label)
+			dotRendered = accent.Render("●")
+		default:
+			labelRendered = dim.Render(label)
+			dotRendered = dim.Render("○")
+		}
+		labelRow.WriteString(labelRendered)
+		dotRow.WriteString(centerOver(dotRendered, label))
+	}
+	return labelRow.String() + "\n" + dotRow.String()
+}
+
+// centerOver returns dot padded with spaces so it visually centers
+// beneath an unstyled label of the given text. Display-width aware.
+func centerOver(dot, label string) string {
+	labelW := lipgloss.Width(label)
+	dotW := lipgloss.Width(dot)
+	if labelW <= dotW {
+		return dot
+	}
+	left := (labelW - dotW) / 2
+	right := labelW - dotW - left
+	return strings.Repeat(" ", left) + dot + strings.Repeat(" ", right)
+}
+
 func (m model) viewLoading() tea.View {
 	if m.width > 0 && m.width < 10 {
 		return finalizeView(tea.NewView("loading…"))
 	}
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	glyph := phaseGlyph(m.loadPhase)
+	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
 
 	var lines []string
 	lines = append(lines, "")
@@ -1505,7 +1707,7 @@ func (m model) viewLoading() tea.View {
 
 	switch m.loadPhase {
 	case image.PhasePulling:
-		lines = append(lines, fmt.Sprintf("  %s Pulling %s …", frame, m.imageRef))
+		lines = append(lines, fmt.Sprintf("  %s %s Pulling %s …", frame, glyph, m.imageRef))
 		if m.pullTotal > 0 {
 			detail := fmt.Sprintf("    Layer %d/%d", m.pullLayers, m.pullTotal)
 			if m.pullBytesMax > 0 {
@@ -1539,28 +1741,55 @@ func (m model) viewLoading() tea.View {
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
+		lines = append(lines, fmt.Sprintf("  %s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
 		lines = append(lines, "    Exporting layers…")
 	case image.PhaseParsing:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
+		lines = append(lines, fmt.Sprintf("  %s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
 		lines = append(lines, "    Parsing layers…")
 	case image.PhaseCacheLoad:
-		lines = append(lines, fmt.Sprintf("  %s %s — loaded from cache", frame, m.imageRef))
+		// No spinner during cache-hit — the glyph alone signals "done,
+		// just confirming". Held for ~300ms by the analysisMsg shortcut
+		// so the user actually sees it on a hot-cache run.
+		successStyle := lipgloss.NewStyle().Foreground(addedColor).Bold(true)
+		lines = append(lines, "  "+successStyle.Render(glyph+" "+m.imageRef+" — loaded from cache"))
 	default:
 		sizeInfo := ""
 		if m.imageSize > 0 {
 			sizeInfo = " (" + image.FormatBytes(m.imageSize) + ")"
 		}
-		lines = append(lines, fmt.Sprintf("  %s Loading %s%s …", frame, m.imageRef, sizeInfo))
+		lines = append(lines, fmt.Sprintf("  %s %s Loading %s%s …", frame, glyph, m.imageRef, sizeInfo))
 	}
 
 	lines = append(lines, "")
-	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
-	lines = append(lines, "  "+hintStyle.Render("Press q or Esc to exit."))
+	stepper := renderPhaseStepper(m.loadPhase)
+	for _, sl := range strings.Split(stepper, "\n") {
+		lines = append(lines, "  "+sl)
+	}
+	lines = append(lines, "")
+
+	if !m.loadStartedAt.IsZero() {
+		elapsed := time.Since(m.loadStartedAt)
+		var timeLine string
+		if m.loadPhase == image.PhaseCacheLoad {
+			// Cache hit completes fast; show ready-in seconds with one
+			// decimal so a 0.3s hold reads as "ready in 0.3s" rather
+			// than rounding to 0:00.
+			secs := elapsed.Seconds()
+			if secs < 0 {
+				secs = 0
+			}
+			timeLine = fmt.Sprintf("ready in %.1fs", secs)
+		} else {
+			timeLine = "elapsed " + formatElapsed(elapsed)
+		}
+		lines = append(lines, "  "+dimStyle.Render(timeLine))
+	}
+
+	lines = append(lines, "  "+dimStyle.Render("Press q or Esc to exit."))
 	lines = append(lines, "")
 
 	boxWidth := 52
@@ -1573,11 +1802,14 @@ func (m model) viewLoading() tea.View {
 		boxWidth = m.width - 2
 	}
 	boxHeight := len(lines)
-	if boxHeight < 7 {
-		for len(lines) < 7 {
+	// Floor bumped to 12 (from 7) to accommodate the stepper + elapsed
+	// lines without pad-popping the panel as content lengths shift across
+	// the pull / export / parse / cache-load phases.
+	if boxHeight < 12 {
+		for len(lines) < 12 {
 			lines = append(lines, "")
 		}
-		boxHeight = 7
+		boxHeight = 12
 	}
 
 	body := strings.Join(lines, "\n")
@@ -1621,10 +1853,48 @@ func (m model) renderRightPanel(width, height int) string {
 }
 
 func (m model) viewError() tea.View {
+	if m.width > 0 && m.width < 10 {
+		return finalizeView(tea.NewView("error"))
+	}
 	errStyle := lipgloss.NewStyle().Foreground(removedColor).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
-	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
-	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	hintStyle := lipgloss.NewStyle().Foreground(modifiedColor)
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, "  "+errStyle.Render("✕ Error"))
+	lines = append(lines, "")
+	for _, ln := range strings.Split(m.errMsg, "\n") {
+		lines = append(lines, "  "+ln)
+	}
+	if m.errHint != "" {
+		lines = append(lines, "")
+		lines = append(lines, "  "+hintStyle.Render(m.errHint))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "  "+dimStyle.Render("Press q or Esc to exit."))
+	lines = append(lines, "")
+
+	boxWidth := 52
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w+2 > boxWidth {
+			boxWidth = w + 2
+		}
+	}
+	if m.width > 0 && m.width-2 < boxWidth {
+		boxWidth = m.width - 2
+	}
+	boxHeight := len(lines)
+	if boxHeight < 9 {
+		for len(lines) < 9 {
+			lines = append(lines, "")
+		}
+		boxHeight = 9
+	}
+
+	body := strings.Join(lines, "\n")
+	panel := renderPanel(body, "Error", true, boxWidth, boxHeight, false, false)
+	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	return finalizeView(tea.NewView(content))
 }
 
@@ -1655,6 +1925,18 @@ func (m model) viewReady() tea.View {
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
 	if m.viewState != viewNone {
+		var loadingPath string
+		var elapsed time.Duration
+		if m.viewState == viewLoading {
+			files := m.displayTreeFor(m.activeTreeFocus())
+			cur := m.treeCursorFor(m.activeTreeFocus())
+			if cur < len(files) {
+				loadingPath = files[cur].Path
+			}
+			if !m.viewLoadStartedAt.IsZero() {
+				elapsed = time.Since(m.viewLoadStartedAt)
+			}
+		}
 		viewer := renderFileView(viewerParams{
 			content:       m.viewContent,
 			offset:        m.viewOffset,
@@ -1663,6 +1945,8 @@ func (m model) viewReady() tea.View {
 			width:         m.width,
 			height:        panelHeight,
 			loading:       m.viewState == viewLoading,
+			loadingPath:   loadingPath,
+			elapsed:       elapsed,
 			spinnerFrame:  m.spinnerFrame,
 			originLayer:   m.viewOriginLayer,
 			originCmd:     m.viewOriginCmd,
@@ -1757,6 +2041,8 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 
 	compact := m.width < 90
 
+	// `?` is pinned to the rightmost slot of the hint cluster — see
+	// renderHelpHint below. The lists here are everything *but* help.
 	if m.focus == focusLayers {
 		hints = []hint{
 			{"Tab", "switch"},
@@ -1768,7 +2054,6 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"c", "copy cmd"},
 			{"w", "wasted"},
 			{"A", "split"},
-			{"?", "help"},
 			{"q", "quit"},
 		}
 	} else {
@@ -1788,9 +2073,10 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"Enter", enterDesc},
 			{"x", "save"},
 			{"y", "copy path"},
-			{"?", "help"},
 		}
 	}
+
+	helpHint := keyStyle.Render("?") + " " + descStyle.Render("help")
 
 	var hintStr string
 	if compact {
@@ -1798,19 +2084,31 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		for i, h := range hints {
 			parts[i] = keyStyle.Render(h.key)
 		}
-		hintStr = " " + strings.Join(parts, " ")
+		// Compact mode shows keys only for the main hints, but keeps the
+		// `? help` desc so a user new to the TUI can still discover the
+		// help overlay. If even that won't fit, the gap calculation
+		// below will collapse the helpHint to keys only.
+		hintStr = " " + strings.Join(parts, " ") + " " + sepStyle.Render("│") + " " + helpHint
 	} else {
 		var parts []string
 		for _, h := range hints {
 			parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
 		}
-		hintStr = " " + strings.Join(parts, " "+sepStyle.Render("│")+" ")
+		hintStr = " " + strings.Join(parts, " "+sepStyle.Render("│")+" ") +
+			" " + sepStyle.Render("│") + " " + helpHint
 	}
 
 	layers := m.layers()
 	var right string
 	if m.statusMsg != "" {
-		msgStyle := lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Bold(true)
+		var color = modifiedColor
+		switch m.statusKind {
+		case statusOK:
+			color = addedColor
+		case statusErr:
+			color = removedColor
+		}
+		msgStyle := lipgloss.NewStyle().Foreground(color).Background(statusBgColor).Bold(true)
 		right = msgStyle.Render(m.statusMsg) + " "
 	} else if m.copyConfirm {
 		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
@@ -1856,6 +2154,16 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		}
 		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor).Render("/" + layerTotal + " · " + sizeLabel)
 		right = badges + rightHighlight + rightDim + " "
+	}
+
+	// When `?` help still wouldn't fit alongside everything else, fall
+	// back to the bare key so the discoverability hint never disappears
+	// entirely. The minus-1 keeps a single space between the hint cluster
+	// and the right-side status block.
+	if lipgloss.Width(hintStr)+lipgloss.Width(right) > m.width-1 {
+		// Strip the description from the help hint.
+		hintStr = strings.TrimSuffix(hintStr, " "+sepStyle.Render("│")+" "+helpHint)
+		hintStr += " " + sepStyle.Render("│") + " " + keyStyle.Render("?")
 	}
 
 	gap := max(m.width-lipgloss.Width(hintStr)-lipgloss.Width(right), 0)
@@ -2180,6 +2488,19 @@ func friendlyError(err error) string {
 		return pErr.Error()
 	}
 	return err.Error()
+}
+
+// errorHint returns a short follow-up sentence for errors with an
+// obvious next action (e.g. daemon unreachable → suggest archive mode).
+// Returns "" for errors with no clearly correct hint.
+func errorHint(err error) string {
+	if _, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
+		return "Start Docker, or pass a saved archive path instead (no daemon needed)."
+	}
+	if _, ok := errors.AsType[*image.ErrNoEngineFound](err); ok {
+		return "Start Docker or Podman, or pass a saved archive path instead (no daemon needed)."
+	}
+	return ""
 }
 
 // Run starts the TUI program with the given configuration.

@@ -200,6 +200,7 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 	}
 
 	var status string
+	kind := statusInfo
 	switch {
 	case !jumped:
 		mp.treeCursor = 0
@@ -210,9 +211,10 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 	default:
 		mp.treeCursor = found
 		status = fmt.Sprintf("Jumped → L%d %s", row.IntroLayer+1, row.Path)
+		kind = statusOK
 	}
 	mp.adjustTreeScroll()
-	mp.setStatus(status)
+	mp.setStatusKind(status, kind)
 	mp.closeWaste()
 	return *mp, mp.scheduleStatusClear(2 * time.Second)
 }

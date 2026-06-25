@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- TUI loading screen: now shows an `elapsed M:SS` timer below the
+  per-phase detail and a `Pull ── Export ── Parse` stepper rail, so a
+  multi-GB pull is visibly making progress instead of looking stuck.
+  Cache hits hold a `✓ <ref> — loaded from cache` line for ~300 ms with
+  a `ready in 0.3s` readout so warm runs are visibly cached rather than
+  blinking past. Per-phase inline glyphs (`↓` pull, `▣` export, `≡`
+  parse, `✓` cache) label the active step.
+- TUI error screen: rendered inside a bordered panel matching the
+  loading screen, with a recovery hint when one is obvious — e.g. when
+  the Docker daemon is unreachable, the panel now suggests passing a
+  saved archive path instead. The same hint is appended to the CLI's
+  daemon-down message and to "no container engine found".
+- TUI file viewer: while a file is extracting, the panel shows the
+  target path (mid-truncated for long paths), the elapsed time, and an
+  `Press Esc to close` hint instead of a bare spinner. Binary and empty
+  file states now lead with a glyph (`◧` / `◯`) and a consistent close
+  hint.
+- TUI status bar: `?` help hint is pinned to the rightmost slot in
+  every focus mode and collapses to its key alone when the rest of the
+  hint cluster would otherwise overflow. Transient status messages now
+  colour-code by outcome — green for success (`Copied!`, `Saved:`,
+  `Jumped →`), red for errors.
+- README Quick Start: one-line nudge pointing new users at `?` for
+  TUI keybindings.
+
 ## [v1.5.0] - 2026-06-24
 
 Multi-platform image support, an aggregated split-pane layer view in the

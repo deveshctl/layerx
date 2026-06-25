@@ -40,6 +40,8 @@ layerx nginx:latest
 layerx ./build/app.tar
 ```
 
+Inside the TUI, press `?` for keybindings.
+
 Other platforms: see [Install](#install).
 
 ---

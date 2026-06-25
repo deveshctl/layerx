@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -18,6 +19,8 @@ type viewerParams struct {
 	width        int
 	height       int
 	loading      bool
+	loadingPath  string
+	elapsed      time.Duration
 	spinnerFrame int
 	originLayer  int
 	originCmd    string
@@ -38,8 +41,20 @@ func renderFileView(p viewerParams) string {
 
 	if p.loading {
 		frame := spinnerFrames[p.spinnerFrame%len(spinnerFrames)]
-		msg := frame + " Extracting file…"
-		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center, msg)
+		extractGlyph := phaseGlyph(image.PhaseExporting)
+		dim := styleWithFg(statusDimColor)
+
+		first := frame + " " + extractGlyph + " Extracting"
+		if p.loadingPath != "" {
+			path := truncateMidPath(p.loadingPath, max(contentWidth-len(" Extracting ")-4, 8))
+			first = frame + " " + extractGlyph + " Extracting " + path
+		} else {
+			first = frame + " " + extractGlyph + " Extracting file…"
+		}
+		second := dim.Render("elapsed " + formatElapsed(p.elapsed))
+		third := dim.Render("Press Esc to close")
+		stack := first + "\n" + second + "\n" + third
+		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center, stack)
 		return renderPanel(body, "File Viewer", true, contentWidth, p.height, false, false)
 	}
 
@@ -57,18 +72,20 @@ func renderFileView(p viewerParams) string {
 	}
 
 	if p.content.Binary {
+		glyph := styleWithFg(removedColor).Render("◧")
 		msg := fmt.Sprintf("Binary file (%s) — cannot display", image.FormatBytes(p.content.Size))
-		hint := "Press Esc to return"
+		hint := "Press Esc to close"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
-			styleWithFg(removedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
+			glyph+"\n\n"+styleWithFg(removedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
 		return renderPanel(body, title, true, contentWidth, p.height, false, false)
 	}
 
 	if len(p.content.Data) == 0 {
+		glyph := styleWithFg(unchangedColor).Render("◯")
 		msg := "Empty file (0 bytes)"
-		hint := "Press Esc to return"
+		hint := "Press Esc to close"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
-			styleWithFg(unchangedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
+			glyph+"\n\n"+styleWithFg(unchangedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
 		return renderPanel(body, title, true, contentWidth, p.height, false, false)
 	}
 
@@ -171,7 +188,43 @@ func renderFileView(p viewerParams) string {
 	return renderPanel(sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
 }
 
-// overlayCursor paints a reverse-video block at display column `col` of a
+// truncateMidPath shortens a path so it fits within width display
+// columns, preserving the filename and top-level prefix and elliding
+// the middle segments with "…". Falls back to a right-truncate when
+// even the head+tail won't fit. Used by the file-viewer loading line
+// where the full path is informative but cannot widen the panel.
+func truncateMidPath(path string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(path) <= width {
+		return path
+	}
+	if width < 3 {
+		return ansi.Truncate(path, width, "")
+	}
+
+	parts := strings.Split(path, "/")
+	if len(parts) <= 2 {
+		return ansi.Truncate(path, width, "…")
+	}
+
+	// Always keep filename (last segment) and the leading "/segment" or
+	// segment so context is preserved. Build "<head>/…/<tail>" and grow
+	// the head while it fits.
+	tail := parts[len(parts)-1]
+	head := parts[0]
+	if head == "" && len(parts) > 1 {
+		head = "/" + parts[1]
+	}
+	candidate := head + "/…/" + tail
+	if lipgloss.Width(candidate) > width {
+		return ansi.Truncate(path, width, "…")
+	}
+	return candidate
+}
+
+
 // styled line. ansi.Cut is grapheme- and escape-aware, so slicing the line
 // into [pre | cell | post] keeps chroma colors and search highlights intact.
 // When the cursor is past the end of the rendered line (cursor on a short

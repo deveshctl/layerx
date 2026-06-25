@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
@@ -264,4 +265,81 @@ func TestRenderFileView_HOffset_PreservesChromaOutput(t *testing.T) {
 	for ln := range strings.SplitSeq(body, "\n") {
 		require.LessOrEqual(t, ansi.StringWidth(ln), 80)
 	}
+}
+
+// --- file viewer loading state -----------------------------------------------
+
+func TestRenderFileViewLoadingShowsPathElapsedAndCloseHint(t *testing.T) {
+	body := renderFileView(viewerParams{
+		loading:     true,
+		loadingPath: "/etc/nginx/nginx.conf",
+		elapsed:     1500 * time.Millisecond,
+		width:       80,
+		height:      20,
+	})
+	assert.Contains(t, body, "Extracting", "loading panel mentions Extracting")
+	assert.Contains(t, body, "nginx.conf", "loading panel includes the filename")
+	assert.Contains(t, body, "0:01", "elapsed time rendered")
+	assert.Contains(t, body, "Press Esc to close", "close hint visible")
+}
+
+func TestRenderFileViewLoadingTruncatesLongPath(t *testing.T) {
+	long := "/very/deeply/nested/path/with/many/segments/here/that/exceeds/panel/width/file.conf"
+	body := renderFileView(viewerParams{
+		loading:     true,
+		loadingPath: long,
+		elapsed:     0,
+		width:       40,
+		height:      20,
+	})
+	for ln := range strings.SplitSeq(body, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(ln), 40,
+			"loading panel must not exceed terminal width")
+	}
+	assert.Contains(t, body, "file.conf", "filename preserved even after mid-truncate")
+}
+
+// --- binary / empty file empty states ---------------------------------------
+
+func TestRenderFileViewBinaryFileShowsGlyphAndCloseHint(t *testing.T) {
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path:   "/bin/sh",
+			Binary: true,
+			Size:   1234,
+		},
+		width:  80,
+		height: 20,
+	})
+	assert.Contains(t, body, "◧", "binary empty state glyph rendered")
+	assert.Contains(t, body, "Binary file")
+	assert.Contains(t, body, "Press Esc to close")
+}
+
+func TestRenderFileViewEmptyFileShowsGlyphAndCloseHint(t *testing.T) {
+	body := renderFileView(viewerParams{
+		content: &image.FileContent{
+			Path: "/tmp/empty",
+			Data: []byte{},
+		},
+		width:  80,
+		height: 20,
+	})
+	assert.Contains(t, body, "◯", "empty file glyph rendered")
+	assert.Contains(t, body, "Empty file")
+	assert.Contains(t, body, "Press Esc to close")
+}
+
+// --- truncateMidPath ---------------------------------------------------------
+
+func TestTruncateMidPath(t *testing.T) {
+	// Short path: returned verbatim.
+	assert.Equal(t, "/a/b", truncateMidPath("/a/b", 20))
+	// Long path: filename + leading segment preserved with mid-elision.
+	got := truncateMidPath("/very/deep/nested/path/here/file.conf", 25)
+	assert.Contains(t, got, "file.conf", "filename always kept")
+	assert.Contains(t, got, "…", "mid-truncate marker present")
+	// Degenerate path with no separators: tail-truncate fallback.
+	got2 := truncateMidPath("singleword.long.filename.txt", 10)
+	assert.LessOrEqual(t, len(got2), 12, "truncated within budget")
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -2403,4 +2404,199 @@ func TestSplitMode_FilterAppliesToBothPanes(t *testing.T) {
 	for _, f := range botFiltered {
 		assert.Contains(t, strings.ToLower(f.Path), "nginx")
 	}
+}
+
+// --- formatElapsed -----------------------------------------------------------
+
+func TestFormatElapsed(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0:00"},
+		{500 * time.Millisecond, "0:00"},
+		{1 * time.Second, "0:01"},
+		{42 * time.Second, "0:42"},
+		{67 * time.Second, "1:07"},
+		{12*time.Minute + 34*time.Second, "12:34"},
+		{1000 * time.Hour, "999:59"}, // capped
+		{-1 * time.Second, "0:00"},   // negative clamps to 0
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, formatElapsed(tc.d), "d=%v", tc.d)
+	}
+}
+
+// --- phaseGlyph --------------------------------------------------------------
+
+func TestPhaseGlyph(t *testing.T) {
+	cases := []struct {
+		p    image.ProgressPhase
+		want string
+	}{
+		{image.PhasePulling, "↓"},
+		{image.PhaseExporting, "▣"},
+		{image.PhaseParsing, "≡"},
+		{image.PhaseCacheLoad, "✓"},
+		{image.PhaseUnknown, "…"},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, phaseGlyph(tc.p), "phase=%v", tc.p)
+	}
+}
+
+// --- renderPhaseStepper -------------------------------------------------------
+
+func TestRenderPhaseStepper_AllPhasesPresent(t *testing.T) {
+	out := renderPhaseStepper(image.PhasePulling)
+	assert.Contains(t, out, "Pull")
+	assert.Contains(t, out, "Export")
+	assert.Contains(t, out, "Parse")
+	assert.Contains(t, out, "●", "active dot rendered as solid")
+	assert.Contains(t, out, "○", "pending dot rendered as open")
+}
+
+func TestRenderPhaseStepper_CacheHitMarksAllDone(t *testing.T) {
+	out := renderPhaseStepper(image.PhaseCacheLoad)
+	assert.Contains(t, out, "Pull")
+	assert.Contains(t, out, "Export")
+	assert.Contains(t, out, "Parse")
+	assert.GreaterOrEqual(t, strings.Count(out, "✓"), 3,
+		"cache-hit stepper renders ✓ for every step")
+}
+
+func TestRenderPhaseStepper_DefaultPhaseTreatsPullAsActive(t *testing.T) {
+	out := renderPhaseStepper(image.PhaseUnknown)
+	assert.Contains(t, out, "Pull")
+	assert.Contains(t, out, "●")
+	assert.Contains(t, out, "○")
+}
+
+// --- viewLoading content -----------------------------------------------------
+
+func TestViewLoadingShowsElapsedAndStepper(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.width = 120
+	m.height = 40
+	m.loadPhase = image.PhasePulling
+	// Backdate loadStartedAt so elapsed renders something deterministic.
+	m.loadStartedAt = time.Now().Add(-42 * time.Second)
+
+	content := viewContent(m.View())
+	assert.Contains(t, content, "elapsed", "loading panel shows elapsed line")
+	assert.Contains(t, content, "Pull", "stepper rail visible")
+	assert.Contains(t, content, "Export")
+	assert.Contains(t, content, "Parse")
+}
+
+func TestViewLoadingCacheHitShowsReadyAndSuccessLine(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.width = 120
+	m.height = 40
+	m.loadPhase = image.PhaseCacheLoad
+
+	content := viewContent(m.View())
+	assert.Contains(t, content, "loaded from cache")
+	assert.Contains(t, content, "ready in", "cache-hit replaces elapsed with ready-in")
+}
+
+// --- cache-hit min-visibility hold -------------------------------------------
+
+func TestUpdateAnalysisMsg_CacheHitDefersTransition(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.cacheHitAt = time.Now()
+	m2, cmd := m.Update(analysisMsg{analysis: &image.Analysis{}})
+	mm := m2.(model)
+	assert.Equal(t, stateLoading, mm.state)
+	require.NotNil(t, cmd, "Update returns a tea.Tick for the remaining hold")
+}
+
+func TestUpdateAnalysisMsg_StaleCacheHitTransitionsImmediately(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.cacheHitAt = time.Now().Add(-1 * time.Second)
+	m2, _ := m.Update(analysisMsg{analysis: &image.Analysis{}})
+	mm := m2.(model)
+	assert.Equal(t, stateReady, mm.state, "stale cache hit takes the normal path")
+}
+
+func TestUpdateCacheHitDoneMsg_TransitionsToReady(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.state = stateLoading
+	m2, _ := m.Update(cacheHitDoneMsg{analysis: &image.Analysis{}})
+	mm := m2.(model)
+	assert.Equal(t, stateReady, mm.state)
+}
+
+func TestUpdateCacheHitDoneMsg_TransitionsToErrorOnErr(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.state = stateLoading
+	m2, _ := m.Update(cacheHitDoneMsg{err: errors.New("decode failed")})
+	mm := m2.(model)
+	assert.Equal(t, stateError, mm.state)
+	assert.Contains(t, mm.errMsg, "decode failed")
+}
+
+// --- errorHint --------------------------------------------------------------
+
+func TestErrorHint_DaemonNotRunning(t *testing.T) {
+	err := &image.ErrDaemonNotRunning{Cause: errors.New("connection refused")}
+	hint := errorHint(err)
+	assert.Contains(t, hint, "archive", "daemon-down suggests archive mode")
+}
+
+func TestErrorHint_GenericReturnsEmpty(t *testing.T) {
+	err := errors.New("totally unexpected")
+	assert.Equal(t, "", errorHint(err))
+}
+
+// --- viewError shows hint when applicable ------------------------------------
+
+func TestViewErrorPanelIncludesHint(t *testing.T) {
+	m := NewModel(Config{ImageRef: "nginx:latest"})
+	m.width = 120
+	m.height = 40
+	m.state = stateError
+	m.errMsg = "Docker is not running. Please start Docker and try again."
+	m.errHint = "Start Docker, or pass a saved archive path instead (no daemon needed)."
+
+	content := viewContent(m.View())
+	assert.Contains(t, content, "Docker is not running")
+	assert.Contains(t, content, "saved archive path")
+	assert.Contains(t, content, "Press q or Esc to exit")
+}
+
+// --- status bar pins ? to the right -----------------------------------------
+
+func TestStatusBarPinsHelpHintToRight(t *testing.T) {
+	m := setupModel()
+	bar := m.renderStatusBar(m.displayTree())
+	plain := stripANSI(bar)
+	idxQ := strings.LastIndex(plain, "?")
+	require.GreaterOrEqual(t, idxQ, 0, "status bar must include ? hint")
+	// Help marker should appear AFTER every non-help key hint and BEFORE
+	// the right-side status block. We assert by ordering against another
+	// recognizable hint label that must sit to its left.
+	idxQuit := strings.Index(plain, "quit")
+	if idxQuit >= 0 {
+		assert.Less(t, idxQuit, idxQ, "? should follow quit")
+	}
+}
+
+// stripANSI removes ANSI escape sequences for substring assertions.
+func stripANSI(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) {
+				i = j
+			}
+			continue
+		}
+		out.WriteByte(s[i])
+	}
+	return out.String()
 }
