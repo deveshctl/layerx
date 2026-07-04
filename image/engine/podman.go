@@ -130,8 +130,8 @@ func (r *PodmanResolver) loadConnections() (map[string]string, string, string, e
 // IsMachine, Default farm entries) that we ignore.
 type podmanConnectionsFile struct {
 	Connection struct {
-		Default     string                             `json:"Default"`
-		Connections map[string]podmanConnectionsEntry  `json:"Connections"`
+		Default     string                            `json:"Default"`
+		Connections map[string]podmanConnectionsEntry `json:"Connections"`
 	} `json:"Connection"`
 }
 

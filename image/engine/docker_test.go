@@ -23,7 +23,7 @@ func newMemFS(home, cfg string) *memFS {
 	return &memFS{files: map[string][]byte{}, home: home, cfg: cfg}
 }
 
-func (m *memFS) put(path string, data []byte)  { m.files[filepath.Clean(path)] = data }
+func (m *memFS) put(path string, data []byte) { m.files[filepath.Clean(path)] = data }
 func (m *memFS) putStr(path string, s string) { m.put(path, []byte(s)) }
 
 func (m *memFS) readFile(path string) ([]byte, error) {
@@ -94,8 +94,8 @@ type memInfo struct {
 	dir  bool
 }
 
-func (i *memInfo) Name() string       { return i.name }
-func (i *memInfo) Size() int64        { return i.size }
+func (i *memInfo) Name() string { return i.name }
+func (i *memInfo) Size() int64  { return i.size }
 func (i *memInfo) Mode() fs.FileMode {
 	if i.dir {
 		return fs.ModeDir | 0o755
