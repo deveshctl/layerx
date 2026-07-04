@@ -47,7 +47,10 @@ bare form behave as "layerx ci" with config-file (or default) thresholds.
 Cache: results are cached per image digest. Use --no-cache to bypass for
 a single run; "layerx cache list" inspects entries and "layerx cache prune"
 evicts them (see "layerx cache --help" for full details).
-Engines: layerx auto-detects Docker or Podman; pass --engine to override.
+Engines: layerx honours the active Docker context ("docker context use ...")
+and the active Podman connection ("podman system connection default ...")
+so it talks to the same daemon your engine's own CLI would. DOCKER_HOST /
+CONTAINER_HOST still override. Pass --engine to force one engine.
 Platforms: pass --platform OS/ARCH (e.g. linux/arm64) to inspect a specific
 variant of a multi-platform image; layerx pulls and exports only that
 variant. Without --platform, the daemon's default platform is used.`,
@@ -90,7 +93,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
-		`container engine to use: "docker", "podman", or "auto"`)
+		`container engine to use: "docker", "podman", or "auto". Each engine honours its own active context/connection ("docker context use", "podman system connection default"); DOCKER_HOST / CONTAINER_HOST env vars still override`)
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",
 		`target platform for multi-platform images (e.g. "linux/amd64", "linux/arm64", "linux/arm64/v8")`)
 	_ = rootCmd.RegisterFlagCompletionFunc("platform", completePlatform)

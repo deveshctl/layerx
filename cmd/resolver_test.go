@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/image/engine"
 )
 
 type fakeProber struct{ present map[string]bool }
@@ -27,6 +28,37 @@ func swapProber(fp *fakeProber) func() {
 	return func() { socketProberImpl = prev }
 }
 
+// fakeEndpointResolver is a test double for engineEndpointResolver so unit
+// tests never touch the real ~/.docker/ or ~/.config/containers/ trees.
+// Every socket-probing test path silences both resolvers by installing
+// fakes that report "no active endpoint" (Endpoint{}, nil), preserving
+// the original probe-based test expectations.
+type fakeEndpointResolver struct {
+	name string
+	ep   engine.Endpoint
+	err  error
+}
+
+func (f *fakeEndpointResolver) Name() string { return f.name }
+
+func (f *fakeEndpointResolver) Resolve() (engine.Endpoint, error) {
+	return f.ep, f.err
+}
+
+// swapEndpointResolvers installs empty-endpoint fakes for both docker and
+// podman so the socket-probing paths run in isolation. Returns a restorer
+// the caller defers.
+func swapEndpointResolvers() func() {
+	prevDocker := dockerEndpointResolver
+	prevPodman := podmanEndpointResolver
+	dockerEndpointResolver = &fakeEndpointResolver{name: "docker"}
+	podmanEndpointResolver = &fakeEndpointResolver{name: "podman"}
+	return func() {
+		dockerEndpointResolver = prevDocker
+		podmanEndpointResolver = prevPodman
+	}
+}
+
 var osCreate = os.Create
 
 func writeEmptyFile(path string) error {
@@ -42,6 +74,9 @@ func TestSelectDockerLikeResolver_PodmanLinux(t *testing.T) {
 		t.Skip("linux-only path")
 	}
 	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+	defer swapEndpointResolvers()()
 
 	rootless := podmanRootlessSocketPath()
 	rootful := "/run/podman/podman.sock"
@@ -73,6 +108,9 @@ func TestSelectDockerLikeResolver_PodmanLinuxNoSocket(t *testing.T) {
 		t.Skip("linux-only path")
 	}
 	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+	defer swapEndpointResolvers()()
 	defer swapProber(newFakeProber())()
 
 	_, err := podmanHost()
@@ -93,6 +131,9 @@ func TestSelectDockerLikeResolver_PodmanNonLinux(t *testing.T) {
 		t.Skip("non-linux path")
 	}
 	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+	defer swapEndpointResolvers()()
 
 	_, err := podmanHost()
 	if err == nil {
@@ -109,6 +150,7 @@ func TestSelectDockerLikeResolver_PodmanNonLinux(t *testing.T) {
 
 func TestSelectDockerLikeResolver_PodmanRespectsEnv(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://example.invalid:2375")
+	t.Setenv("CONTAINER_HOST", "")
 
 	host, err := podmanHost()
 	if err != nil {
@@ -121,6 +163,9 @@ func TestSelectDockerLikeResolver_PodmanRespectsEnv(t *testing.T) {
 
 func TestSelectDockerLikeResolver_AutoEnvWins(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://example.invalid:2375")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
 	defer swapProber(newFakeProber())()
 
 	host, err := autoEngineHost()
@@ -137,6 +182,10 @@ func TestSelectDockerLikeResolver_AutoFallback(t *testing.T) {
 		t.Skip("linux-only fallback chain")
 	}
 	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+	defer swapEndpointResolvers()()
 
 	docker := "/var/run/docker.sock"
 	podmanRootless := podmanRootlessSocketPath()
@@ -169,6 +218,10 @@ func TestSelectDockerLikeResolver_AutoNoneFound(t *testing.T) {
 		t.Skip("linux-only fallback chain")
 	}
 	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+	defer swapEndpointResolvers()()
 	defer swapProber(newFakeProber())()
 
 	_, err := autoEngineHost()
@@ -241,5 +294,193 @@ func TestSelectResolverDefault_ValidPlatformPassesThrough(t *testing.T) {
 	}
 	if r == nil {
 		t.Fatal("nil resolver")
+	}
+}
+
+func TestDockerHost_HonoursActiveContext(t *testing.T) {
+	// When a Docker context is active the resolver reports its Host, and
+	// dockerHost() returns it verbatim so selectDockerLikeResolver builds
+	// a moby client pointed at that URL. Env is empty in this test — a
+	// dockerHost() call that returned "" here would silently fall through
+	// to the platform default socket, exactly the bug this feature fixes.
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+
+	prev := dockerEndpointResolver
+	dockerEndpointResolver = &fakeEndpointResolver{
+		name: "docker",
+		ep: engine.Endpoint{
+			Host:   "tcp://remote.example:2376",
+			Source: "docker-context:remote",
+		},
+	}
+	t.Cleanup(func() { dockerEndpointResolver = prev })
+
+	host, err := dockerHost()
+	if err != nil {
+		t.Fatalf("dockerHost() error: %v", err)
+	}
+	if host != "tcp://remote.example:2376" {
+		t.Fatalf("host = %q, want tcp://remote.example:2376", host)
+	}
+}
+
+func TestDockerHost_EnvOverrideStillWins(t *testing.T) {
+	// DOCKER_HOST must beat any active Docker context. The resolver
+	// itself returns the env value; we verify dockerHost() passes it
+	// through unchanged and does NOT consult the context path.
+	t.Setenv("DOCKER_HOST", "tcp://scripted-override:2376")
+
+	prev := dockerEndpointResolver
+	dockerEndpointResolver = &fakeEndpointResolver{
+		name: "docker",
+		ep: engine.Endpoint{
+			Host:   "tcp://scripted-override:2376",
+			Source: "env:DOCKER_HOST",
+		},
+	}
+	t.Cleanup(func() { dockerEndpointResolver = prev })
+
+	host, err := dockerHost()
+	if err != nil {
+		t.Fatalf("dockerHost() error: %v", err)
+	}
+	if host != "tcp://scripted-override:2376" {
+		t.Fatalf("host = %q, want env passthrough", host)
+	}
+}
+
+func TestDockerHost_NoContextReturnsEmpty(t *testing.T) {
+	// A user who has never run `docker context use` must see the historic
+	// behaviour: dockerHost() returns "", and the caller lets the moby
+	// client fall back to the platform default socket.
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+
+	prev := dockerEndpointResolver
+	dockerEndpointResolver = &fakeEndpointResolver{name: "docker"}
+	t.Cleanup(func() { dockerEndpointResolver = prev })
+
+	host, err := dockerHost()
+	if err != nil {
+		t.Fatalf("dockerHost() error: %v", err)
+	}
+	if host != "" {
+		t.Fatalf("host = %q, want empty for no-context fallback", host)
+	}
+}
+
+func TestPodmanHost_HonoursActiveConnection(t *testing.T) {
+	// The whole point of the change: `podman system connection default X`
+	// must be enough — no DOCKER_HOST workaround required. podmanHost()
+	// returns the resolver's Endpoint.Host verbatim.
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+
+	prev := podmanEndpointResolver
+	podmanEndpointResolver = &fakeEndpointResolver{
+		name: "podman",
+		ep: engine.Endpoint{
+			Host:   "unix:///run/user/1000/podman/podman.sock",
+			Source: "podman-connection:staging",
+		},
+	}
+	t.Cleanup(func() { podmanEndpointResolver = prev })
+
+	host, err := podmanHost()
+	if err != nil {
+		t.Fatalf("podmanHost() error: %v", err)
+	}
+	if host != "unix:///run/user/1000/podman/podman.sock" {
+		t.Fatalf("host = %q, want resolver value", host)
+	}
+}
+
+func TestPodmanHost_ResolverErrorSurfaces(t *testing.T) {
+	// A malformed podman-connections.json must not be silently swallowed;
+	// the user sees the resolver's error rather than a confusing "no
+	// container engine found".
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+
+	sentinel := errors.New("podman-connections.json: unexpected EOF")
+	prev := podmanEndpointResolver
+	podmanEndpointResolver = &fakeEndpointResolver{name: "podman", err: sentinel}
+	t.Cleanup(func() { podmanEndpointResolver = prev })
+
+	_, err := podmanHost()
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want sentinel", err)
+	}
+}
+
+func TestAutoEngineHost_ContextTakesPrecedenceOverSocket(t *testing.T) {
+	// Auto mode must not silently fall through to the local Docker socket
+	// when a Docker context points at a remote daemon. This is the exact
+	// scenario the dive bug (#490) hit before it was fixed there.
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_HOST", "")
+
+	prevDocker := dockerEndpointResolver
+	prevPodman := podmanEndpointResolver
+	dockerEndpointResolver = &fakeEndpointResolver{
+		name: "docker",
+		ep: engine.Endpoint{
+			Host:   "tcp://remote.example:2376",
+			Source: "docker-context:remote",
+		},
+	}
+	podmanEndpointResolver = &fakeEndpointResolver{name: "podman"}
+	t.Cleanup(func() {
+		dockerEndpointResolver = prevDocker
+		podmanEndpointResolver = prevPodman
+	})
+	// Even with a local Docker socket "available", the context wins.
+	defer swapProber(newFakeProber("/var/run/docker.sock"))()
+
+	host, err := autoEngineHost()
+	if err != nil {
+		t.Fatalf("autoEngineHost() error: %v", err)
+	}
+	if host != "tcp://remote.example:2376" {
+		t.Fatalf("host = %q, want tcp://remote.example:2376 (context wins)", host)
+	}
+}
+
+func TestAutoEngineHost_PodmanConnectionUsedWhenDockerAbsent(t *testing.T) {
+	// A machine with only Podman configured (no docker context, no
+	// DOCKER_HOST) must pick the Podman connection over the local Podman
+	// socket probe — the connection is more specific than the socket.
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "")
+
+	prevDocker := dockerEndpointResolver
+	prevPodman := podmanEndpointResolver
+	dockerEndpointResolver = &fakeEndpointResolver{name: "docker"}
+	podmanEndpointResolver = &fakeEndpointResolver{
+		name: "podman",
+		ep: engine.Endpoint{
+			Host:   "ssh://user@dev-host/run/user/1000/podman/podman.sock",
+			Source: "podman-connection:dev",
+		},
+	}
+	t.Cleanup(func() {
+		dockerEndpointResolver = prevDocker
+		podmanEndpointResolver = prevPodman
+	})
+	// A local socket is present but the connection is more specific.
+	defer swapProber(newFakeProber("/run/user/1000/podman/podman.sock"))()
+
+	host, err := autoEngineHost()
+	if err != nil {
+		t.Fatalf("autoEngineHost() error: %v", err)
+	}
+	if host != "ssh://user@dev-host/run/user/1000/podman/podman.sock" {
+		t.Fatalf("host = %q, want connection URI", host)
 	}
 }

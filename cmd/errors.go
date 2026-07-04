@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/image/engine"
 )
 
 // friendlyCLIError converts an analyze/resolve error into a one-line
@@ -41,18 +42,30 @@ func friendlyCLIError(err error) string {
 		return fmt.Sprintf("could not %s: %v (free up disk space or set TMPDIR)", e.Op, e.Cause)
 	}
 	if e, ok := errors.AsType[*image.ErrPodmanSocketNotSet](err); ok {
-		return fmt.Sprintf("--engine podman on %s requires DOCKER_HOST to be set "+
-			"(see `podman system connection list`)", e.Platform)
+		return fmt.Sprintf("--engine podman on %s: no Podman connection configured "+
+			"(run `podman system connection add <name> <uri>` and "+
+			"`podman system connection default <name>`, or set CONTAINER_HOST)",
+			e.Platform)
 	}
 	if e, ok := errors.AsType[*image.ErrNoEngineFound](err); ok {
 		return fmt.Sprintf("no container engine found; tried: %s "+
-			"(start Docker or Podman, or set DOCKER_HOST)",
+			"(start Docker or Podman, run `docker context use` / "+
+			"`podman system connection default`, or set DOCKER_HOST / CONTAINER_HOST)",
 			strings.Join(e.Tried, ", "))
 	}
 	if e, ok := errors.AsType[*image.ErrPlatformInvalid](err); ok {
 		return e.Error()
 	}
 	if e, ok := errors.AsType[*image.ErrPlatformNotInImage](err); ok {
+		return e.Error()
+	}
+	if e, ok := errors.AsType[*engine.ErrConnectionNotFound](err); ok {
+		// The typed error already renders a helpful multi-line list of
+		// available names; surface it verbatim rather than the generic
+		// err.Error() catch-all which prefixes "Error:" twice.
+		return e.Error()
+	}
+	if e, ok := errors.AsType[*engine.ErrConfigMalformed](err); ok {
 		return e.Error()
 	}
 	return err.Error()

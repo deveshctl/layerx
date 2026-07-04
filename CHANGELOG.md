@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- LayerX now honours the active Docker context and the active Podman
+  connection, so it talks to the same daemon the engine's own CLI would.
+  Once you've run `docker context use my-remote` or
+  `podman system connection default staging`, `layerx nginx:latest` (or
+  `layerx --engine podman nginx:latest`) resolves against that endpoint
+  automatically — no `DOCKER_HOST=$(podman system connection list ...)`
+  shim required.
+
+  Resolution precedence, matching each engine's own CLI:
+  - **Docker:** `DOCKER_HOST` → `DOCKER_CONTEXT` → active context in
+    `~/.docker/config.json` → platform default socket.
+  - **Podman:** `CONTAINER_HOST` → `DOCKER_HOST` (back-compat) →
+    `CONTAINER_CONNECTION` → active default in
+    `~/.config/containers/podman-connections.json` (Podman 4.4+) or
+    `~/.config/containers/containers.conf` → Linux socket probe.
+
+  Users who have never touched contexts or connections see no behaviour
+  change: the socket-probe fallback still runs when nothing is configured.
+  Explicit env-variable overrides still win. Archive mode
+  (`layerx ./file.tar`) is entirely unaffected — it never consults any
+  engine config.
+- New typed errors `engine.ErrConnectionNotFound` and
+  `engine.ErrConfigMalformed` surface a missing context/connection name
+  or an unparseable config file with the file path and (for the
+  not-found case) the names that do exist, instead of a generic
+  connection-refused message.
+
 ### Changed
 - CLI help text (`layerx --help`, `layerx ci --help`, `layerx compare --help`)
   and README now describe LayerX as a container image layer explorer that
@@ -17,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section promoted to real H3s, added FAQ block with question-shaped
   headings (dive comparison, Podman support, daemonless usage, CI gating,
   Windows, safety, maintenance status).
+- `--engine podman` on macOS/Windows now points the user at
+  `podman system connection add` / `podman system connection default`
+  when no connection is configured, instead of asking for
+  `DOCKER_HOST` and `podman system connection list`. The
+  `DOCKER_HOST` / `CONTAINER_HOST` env vars still work for scripted
+  overrides.
+- `no container engine found` error now also mentions
+  `docker context use` and `podman system connection default` alongside
+  the env-variable escape hatch.
 
 ## [v1.5.0] - 2026-06-24
 

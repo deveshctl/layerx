@@ -63,15 +63,15 @@ func TestFriendlyCLIError_PodmanSocketNotSet_Darwin(t *testing.T) {
 	err := &image.ErrPodmanSocketNotSet{Platform: "darwin"}
 	msg := friendlyCLIError(err)
 	assert.Contains(t, msg, "--engine podman on darwin")
-	assert.Contains(t, msg, "DOCKER_HOST")
-	assert.Contains(t, msg, "podman system connection list")
+	assert.Contains(t, msg, "podman system connection add")
+	assert.Contains(t, msg, "CONTAINER_HOST")
 }
 
 func TestFriendlyCLIError_PodmanSocketNotSet_Windows(t *testing.T) {
 	err := &image.ErrPodmanSocketNotSet{Platform: "windows"}
 	msg := friendlyCLIError(err)
 	assert.Contains(t, msg, "--engine podman on windows")
-	assert.Contains(t, msg, "DOCKER_HOST")
+	assert.Contains(t, msg, "podman system connection add")
 }
 
 func TestFriendlyCLIError_NoEngineFound(t *testing.T) {
