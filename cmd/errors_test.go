@@ -13,8 +13,16 @@ import (
 )
 
 func TestFriendlyCLIError_DaemonNotRunning(t *testing.T) {
+	// An untagged ErrDaemonNotRunning (no Engine, no Host) is engine-
+	// agnostic — the renderer must NOT invent a "Docker daemon" wording
+	// out of thin air. This is the behaviour the Podman path relied on
+	// before Engine tagging existed; keeping it as the fallback lets any
+	// caller construct the error without extra plumbing.
 	err := &image.ErrDaemonNotRunning{Cause: errors.New("connection refused")}
-	assert.Contains(t, friendlyCLIError(err), "Docker daemon is not reachable")
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "Container engine is not reachable")
+	assert.NotContains(t, msg, "Docker")
+	assert.NotContains(t, msg, "Podman")
 }
 
 func TestFriendlyCLIError_DaemonNotRunning_PodmanEngine(t *testing.T) {
@@ -136,7 +144,13 @@ func TestFriendlyCLIError_FallsBackToErrorString(t *testing.T) {
 
 func TestPresentCLIError_WritesAndReturnsErr(t *testing.T) {
 	var buf bytes.Buffer
-	original := &image.ErrDaemonNotRunning{Cause: errors.New("x")}
+	// Use a docker-tagged error so the output has a specific expected
+	// wording — the zero-Engine fallback ("Container engine …") is
+	// covered by TestFriendlyCLIError_DaemonNotRunning directly.
+	original := &image.ErrDaemonNotRunning{
+		Engine: "docker",
+		Cause:  errors.New("x"),
+	}
 
 	out := presentCLIError(&buf, original)
 

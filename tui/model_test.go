@@ -671,7 +671,23 @@ func TestNodeIndent(t *testing.T) {
 // --- friendlyError -----------------------------------------------------------
 
 func TestFriendlyErrorDaemonNotRunning(t *testing.T) {
+	// Untagged ErrDaemonNotRunning renders engine-agnostic — the tui
+	// must NOT hardcode "Docker" for an error whose engine is unknown.
 	err := &image.ErrDaemonNotRunning{Cause: errors.New("connection refused")}
+	msg := friendlyError(err)
+	assert.Contains(t, msg, "Container engine is not reachable")
+	assert.NotContains(t, msg, "Docker")
+	assert.NotContains(t, msg, "Podman")
+}
+
+func TestFriendlyErrorDaemonNotRunning_DockerEngine(t *testing.T) {
+	// A docker-tagged error keeps the Docker-specific wording. This is
+	// the path most users hit today; verifying it lets the untagged
+	// branch stay generic without regressing docker's loading screen.
+	err := &image.ErrDaemonNotRunning{
+		Engine: "docker",
+		Cause:  errors.New("connection refused"),
+	}
 	msg := friendlyError(err)
 	assert.Contains(t, msg, "Docker is not running")
 }
