@@ -72,9 +72,9 @@ jobs:
       # Short PR-time fuzz smoke. Each fuzz target gets 30s; the nightly
       # workflow runs longer budgets. The matrix expands as new Fuzz* targets
       # are added — keep this list in sync with image/*_fuzz_test.go.
-      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=30s ./image/...
-      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=30s ./image/...
-      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=30s ./image/...
+      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=30s ./image
+      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=30s ./image
+      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=30s ./image
 
   test-podman:
     runs-on: ubuntu-latest
