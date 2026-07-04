@@ -5,12 +5,40 @@ import (
 	"strings"
 )
 
+// ErrDaemonNotRunning signals that the container engine's daemon socket /
+// endpoint could not be reached. Engine and Host are best-effort context
+// used by friendly renderers:
+//   - Engine is the layerx --engine label ("docker", "podman", "") that
+//     was in effect when the failure happened. Empty means the resolver
+//     did not know its engine name (test fakes, or a resolver constructed
+//     via the FromEnv path with no cmd-level tag). Callers that render
+//     user-facing text must treat empty Engine as "container engine",
+//     never as "docker".
+//   - Host is the URL the client was pointed at ("tcp://…", "unix://…",
+//     "ssh://…"), when the resolver knew it up front. NewDockerResolver
+//     via FromEnv leaves this empty because the client resolves the host
+//     from DOCKER_HOST internally; NewDockerResolverWithHost fills it in.
+//
+// Never use fmt.Sprintf("Docker daemon …") in code that consumes this
+// error — the engine may be Podman.
 type ErrDaemonNotRunning struct {
-	Cause error
+	Engine string
+	Host   string
+	Cause  error
 }
 
 func (e *ErrDaemonNotRunning) Error() string {
-	return fmt.Sprintf("cannot connect to Docker daemon: is Docker running? (%v)", e.Cause)
+	engine := e.Engine
+	if engine == "" {
+		engine = "container engine"
+	}
+	// Cause carries the underlying moby-client transport message, which
+	// on a broken active context / connection already includes the
+	// target address ("Cannot connect to the Docker daemon at
+	// tcp://…"). We do NOT re-render Host here because that would
+	// duplicate the address the cause already prints; friendly
+	// renderers that suppress the cause read Host directly.
+	return fmt.Sprintf("cannot connect to %s: %v", engine, e.Cause)
 }
 
 func (e *ErrDaemonNotRunning) Unwrap() error { return e.Cause }

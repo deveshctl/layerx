@@ -676,6 +676,20 @@ func TestFriendlyErrorDaemonNotRunning(t *testing.T) {
 	assert.Contains(t, msg, "Docker is not running")
 }
 
+func TestFriendlyErrorDaemonNotRunning_PodmanEngine(t *testing.T) {
+	// TUI variant of the same regression: the loading screen must not
+	// tell a Podman user to check on Docker.
+	err := &image.ErrDaemonNotRunning{
+		Engine: "podman",
+		Host:   "ssh://user@host/run/podman.sock",
+		Cause:  errors.New("connect: connection refused"),
+	}
+	msg := friendlyError(err)
+	assert.Contains(t, msg, "Podman")
+	assert.Contains(t, msg, "ssh://user@host/run/podman.sock")
+	assert.NotContains(t, msg, "Docker is not running")
+}
+
 func TestFriendlyErrorPullFailed(t *testing.T) {
 	err := &image.ErrPullFailed{Ref: "badimage:latest", Cause: errors.New("404")}
 	msg := friendlyError(err)

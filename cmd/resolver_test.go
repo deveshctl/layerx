@@ -168,12 +168,15 @@ func TestSelectDockerLikeResolver_AutoEnvWins(t *testing.T) {
 	t.Setenv("CONTAINER_CONNECTION", "")
 	defer swapProber(newFakeProber())()
 
-	host, err := autoEngineHost()
+	engineName, host, err := autoEngineHost()
 	if err != nil {
 		t.Fatalf("autoEngineHost() error: %v", err)
 	}
 	if host != "" {
 		t.Fatalf("host = %q, want empty (env-driven)", host)
+	}
+	if engineName != "docker" {
+		t.Fatalf("engine = %q, want docker (DOCKER_HOST is Docker's env)", engineName)
 	}
 }
 
@@ -191,23 +194,27 @@ func TestSelectDockerLikeResolver_AutoFallback(t *testing.T) {
 	podmanRootless := podmanRootlessSocketPath()
 
 	cases := []struct {
-		name     string
-		present  []string
-		wantHost string
+		name       string
+		present    []string
+		wantHost   string
+		wantEngine string
 	}{
-		{"docker present", []string{docker}, "unix://" + docker},
-		{"docker missing, podman present", []string{podmanRootless}, "unix://" + podmanRootless},
-		{"both present, docker wins", []string{docker, podmanRootless}, "unix://" + docker},
+		{"docker present", []string{docker}, "unix://" + docker, "docker"},
+		{"docker missing, podman present", []string{podmanRootless}, "unix://" + podmanRootless, "podman"},
+		{"both present, docker wins", []string{docker, podmanRootless}, "unix://" + docker, "docker"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			defer swapProber(newFakeProber(tc.present...))()
-			host, err := autoEngineHost()
+			engineName, host, err := autoEngineHost()
 			if err != nil {
 				t.Fatalf("autoEngineHost() error: %v", err)
 			}
 			if host != tc.wantHost {
 				t.Fatalf("host = %q, want %q", host, tc.wantHost)
+			}
+			if engineName != tc.wantEngine {
+				t.Fatalf("engine = %q, want %q", engineName, tc.wantEngine)
 			}
 		})
 	}
@@ -224,7 +231,7 @@ func TestSelectDockerLikeResolver_AutoNoneFound(t *testing.T) {
 	defer swapEndpointResolvers()()
 	defer swapProber(newFakeProber())()
 
-	_, err := autoEngineHost()
+	_, _, err := autoEngineHost()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -441,12 +448,15 @@ func TestAutoEngineHost_ContextTakesPrecedenceOverSocket(t *testing.T) {
 	// Even with a local Docker socket "available", the context wins.
 	defer swapProber(newFakeProber("/var/run/docker.sock"))()
 
-	host, err := autoEngineHost()
+	engineName, host, err := autoEngineHost()
 	if err != nil {
 		t.Fatalf("autoEngineHost() error: %v", err)
 	}
 	if host != "tcp://remote.example:2376" {
 		t.Fatalf("host = %q, want tcp://remote.example:2376 (context wins)", host)
+	}
+	if engineName != "docker" {
+		t.Fatalf("engine = %q, want docker", engineName)
 	}
 }
 
@@ -476,11 +486,14 @@ func TestAutoEngineHost_PodmanConnectionUsedWhenDockerAbsent(t *testing.T) {
 	// A local socket is present but the connection is more specific.
 	defer swapProber(newFakeProber("/run/user/1000/podman/podman.sock"))()
 
-	host, err := autoEngineHost()
+	engineName, host, err := autoEngineHost()
 	if err != nil {
 		t.Fatalf("autoEngineHost() error: %v", err)
 	}
 	if host != "ssh://user@dev-host/run/user/1000/podman/podman.sock" {
 		t.Fatalf("host = %q, want connection URI", host)
+	}
+	if engineName != "podman" {
+		t.Fatalf("engine = %q, want podman (so ErrDaemonNotRunning is tagged correctly)", engineName)
 	}
 }

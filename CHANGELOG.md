@@ -55,6 +55,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docker context use` and `podman system connection default` alongside
   the env-variable escape hatch.
 
+### Fixed
+- Daemon-unreachable errors on `--engine podman` no longer render as
+  "Docker daemon is not reachable. Is Docker running?" — a broken
+  Podman connection now surfaces as "Podman connection at <URI> is not
+  reachable" and points the user at `podman system connection list` /
+  `podman info`. `ErrDaemonNotRunning` gained optional `Engine` and
+  `Host` fields (populated by the resolver via new `WithEngineTag` /
+  `WithHostTag` options); CLI and TUI renderers switch on the engine
+  tag so failures on `--engine docker`, `--engine podman`, and
+  `--engine auto` (which now returns the picked engine name alongside
+  the host) each get a message that reflects the engine that actually
+  failed. Resolvers with no engine tag still fall back to the historic
+  "Docker daemon" wording — kept for a small number of test doubles
+  and any caller constructing the error directly.
+
 ## [v1.5.0] - 2026-06-24
 
 Multi-platform image support, an aggregated split-pane layer view in the

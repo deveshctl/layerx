@@ -20,8 +20,8 @@ func friendlyCLIError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timed out"
 	}
-	if _, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
-		return "Docker daemon is not reachable. Is Docker running?"
+	if e, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
+		return daemonNotRunningLine(e)
 	}
 	if e, ok := errors.AsType[*image.ErrImageNotFound](err); ok {
 		return fmt.Sprintf("image %q not found", e.Ref)
@@ -79,4 +79,30 @@ func presentCLIError(w io.Writer, err error) error {
 	}
 	fmt.Fprintf(w, "Error: %s\n", friendlyCLIError(err))
 	return err
+}
+
+// daemonNotRunningLine renders a one-line stderr message for an
+// ErrDaemonNotRunning, using the engine and host tags the resolver
+// attached. Falls back to a generic "container engine" phrasing when
+// the resolver did not know its engine name, so a test double or a
+// FromEnv-only resolver still produces a sensible message.
+func daemonNotRunningLine(e *image.ErrDaemonNotRunning) string {
+	engine := e.Engine
+	switch engine {
+	case "docker":
+		if e.Host != "" {
+			return fmt.Sprintf("Docker daemon at %s is not reachable. Is Docker running there?", e.Host)
+		}
+		return "Docker daemon is not reachable. Is Docker running?"
+	case "podman":
+		if e.Host != "" {
+			return fmt.Sprintf("Podman connection at %s is not reachable. Check the connection with `podman system connection list` / `podman info`.", e.Host)
+		}
+		return "Podman is not reachable. Check the connection with `podman system connection list` / `podman info`."
+	default:
+		if e.Host != "" {
+			return fmt.Sprintf("Container engine at %s is not reachable.", e.Host)
+		}
+		return "Container engine is not reachable."
+	}
 }

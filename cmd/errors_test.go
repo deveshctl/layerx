@@ -17,6 +17,49 @@ func TestFriendlyCLIError_DaemonNotRunning(t *testing.T) {
 	assert.Contains(t, friendlyCLIError(err), "Docker daemon is not reachable")
 }
 
+func TestFriendlyCLIError_DaemonNotRunning_PodmanEngine(t *testing.T) {
+	// Regression: a broken Podman connection used to render as
+	// "Docker daemon is not reachable. Is Docker running?" — the
+	// message must reflect the engine the user actually asked for so
+	// they don't chase Docker when Podman is what failed.
+	err := &image.ErrDaemonNotRunning{
+		Engine: "podman",
+		Host:   "ssh://user@host/run/podman.sock",
+		Cause:  errors.New("connect: connection refused"),
+	}
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "Podman")
+	assert.Contains(t, msg, "ssh://user@host/run/podman.sock")
+	assert.NotContains(t, msg, "Docker daemon")
+	assert.NotContains(t, msg, "Is Docker running")
+}
+
+func TestFriendlyCLIError_DaemonNotRunning_DockerEngineWithHost(t *testing.T) {
+	// When the resolver knows the target URL (active context / explicit
+	// DOCKER_HOST) the friendly line surfaces it so users see where the
+	// tool tried to connect — matching what `docker` itself prints.
+	err := &image.ErrDaemonNotRunning{
+		Engine: "docker",
+		Host:   "tcp://remote.example:2376",
+		Cause:  errors.New("dial tcp: i/o timeout"),
+	}
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "Docker daemon at tcp://remote.example:2376")
+}
+
+func TestFriendlyCLIError_DaemonNotRunning_UnknownEngine(t *testing.T) {
+	// A resolver constructed without an engine tag must never render as
+	// "Docker …" — the message stays engine-agnostic.
+	err := &image.ErrDaemonNotRunning{
+		Host:  "tcp://example:2376",
+		Cause: errors.New("connection refused"),
+	}
+	msg := friendlyCLIError(err)
+	assert.NotContains(t, msg, "Docker")
+	assert.NotContains(t, msg, "Podman")
+	assert.Contains(t, msg, "tcp://example:2376")
+}
+
 func TestFriendlyCLIError_ImageNotFound(t *testing.T) {
 	err := &image.ErrImageNotFound{Ref: "ghost:latest", Cause: errors.New("manifest unknown")}
 	msg := friendlyCLIError(err)

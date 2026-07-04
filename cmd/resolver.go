@@ -86,39 +86,50 @@ func selectDockerLikeResolver(engineName string, plat *ocispec.Platform) (image.
 		if err != nil {
 			return nil, err
 		}
-		if host == "" {
-			// No context, no DOCKER_HOST — moby client's FromEnv falls
-			// back to the platform-default socket, matching the pre-
-			// context behaviour so users who have never touched contexts
-			// see no change.
-			r, err := image.NewDockerResolver(image.WithPlatform(plat))
-			if err != nil {
-				return nil, fmt.Errorf("failed to initialize: %w", err)
-			}
-			return r, nil
-		}
-		return image.NewDockerResolverWithHost(host, image.WithPlatform(plat))
+		return buildEngineResolver("docker", host, plat)
 	case "podman":
 		host, err := podmanHost()
 		if err != nil {
 			return nil, err
 		}
-		if host == "" {
-			return image.NewDockerResolver(image.WithPlatform(plat))
-		}
-		return image.NewDockerResolverWithHost(host, image.WithPlatform(plat))
+		return buildEngineResolver("podman", host, plat)
 	case "auto":
-		host, err := autoEngineHost()
+		chosen, host, err := autoEngineHost()
 		if err != nil {
 			return nil, err
 		}
-		if host == "" {
-			return image.NewDockerResolver(image.WithPlatform(plat))
-		}
-		return image.NewDockerResolverWithHost(host, image.WithPlatform(plat))
+		return buildEngineResolver(chosen, host, plat)
 	default:
 		return nil, fmt.Errorf("unknown engine %q (expected docker, podman, or auto)", engineName)
 	}
+}
+
+// buildEngineResolver constructs the moby-client-backed resolver, tagging
+// it with the engine label ("docker" / "podman") and the target host so
+// downstream errors (ErrDaemonNotRunning in particular) carry accurate
+// context — a Podman-connection failure never renders as "Docker daemon
+// is not reachable" again.
+//
+// When host is empty the moby client's FromEnv path is used; the host tag
+// stays empty in that case because the exact URL the client resolves via
+// DOCKER_HOST is not visible here without duplicating that logic.
+func buildEngineResolver(engineName, host string, plat *ocispec.Platform) (image.Resolver, error) {
+	opts := []image.Option{
+		image.WithPlatform(plat),
+		image.WithEngineTag(engineName),
+	}
+	if host == "" {
+		r, err := image.NewDockerResolver(opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize: %w", err)
+		}
+		return r, nil
+	}
+	// WithHostTag lets the resolver render the target URL in its errors
+	// even though NewDockerResolverWithHost also auto-tags host — the
+	// explicit call keeps intent visible at the site that knows the URL.
+	opts = append(opts, image.WithHostTag(host))
+	return image.NewDockerResolverWithHost(host, opts...)
 }
 
 // dockerHost resolves the endpoint for --engine docker. Precedence:
@@ -168,47 +179,54 @@ func podmanHost() (string, error) {
 }
 
 // autoEngineHost picks an endpoint when the user has not specified an
-// engine. Precedence:
+// engine. Returns (engineName, host, err) so the resolver can be tagged
+// with the engine actually chosen — otherwise a Podman connection
+// selected here would surface downstream errors as "docker" and mislead
+// the user's troubleshooting. Precedence:
 //   1. Docker resolver (env or active context) — Docker has been the
 //      default since layerx v1.4.0, so it's still tried first
 //   2. Podman resolver (env or active connection)
 //   3. Docker socket probe
 //   4. Podman socket probe (Linux)
 //   5. ErrNoEngineFound listing everything we tried
-func autoEngineHost() (string, error) {
+//
+// A returned engineName of "docker" with an empty host means "let the
+// moby client's FromEnv resolve it via DOCKER_HOST or the platform
+// default socket" — the historic behaviour for auto-mode.
+func autoEngineHost() (string, string, error) {
 	if ep, err := dockerEndpointResolver.Resolve(); err != nil {
-		return "", err
+		return "", "", err
 	} else if ep.Host != "" {
 		// DOCKER_HOST callers already relied on the moby client's
 		// FromEnv seeing the variable; keep returning "" for that case
 		// so we don't reroute through WithHost and change the moby
 		// client's own error surface.
 		if ep.Source == "env:DOCKER_HOST" {
-			return "", nil
+			return "docker", "", nil
 		}
-		return ep.Host, nil
+		return "docker", ep.Host, nil
 	}
 	if ep, err := podmanEndpointResolver.Resolve(); err != nil {
-		return "", err
+		return "", "", err
 	} else if ep.Host != "" {
-		return ep.Host, nil
+		return "podman", ep.Host, nil
 	}
 
 	docker := dockerSocketCandidates()
 	if path, ok := probeFirst(docker); ok {
-		return "unix://" + path, nil
+		return "docker", "unix://" + path, nil
 	}
 	var podman []string
 	if runtime.GOOS == "linux" {
 		podman = podmanSocketCandidates()
 		if path, ok := probeFirst(podman); ok {
-			return "unix://" + path, nil
+			return "podman", "unix://" + path, nil
 		}
 	}
 	tried := make([]string, 0, len(docker)+len(podman))
 	tried = append(tried, docker...)
 	tried = append(tried, podman...)
-	return "", &image.ErrNoEngineFound{Tried: tried}
+	return "", "", &image.ErrNoEngineFound{Tried: tried}
 }
 
 func probeFirst(candidates []string) (string, bool) {
