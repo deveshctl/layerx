@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CLI help text (`layerx --help`, `layerx ci --help`, `layerx compare --help`)
+  and README now describe LayerX as a container image layer explorer that
+  works with Docker, Podman, and OCI archives, rather than a Docker-only
+  tool. Podman was already fully supported; the positioning now reflects
+  that. No functional change to any command or flag.
+- README restructured for discoverability: engine-agnostic hero, feature
+  section promoted to real H3s, added FAQ block with question-shaped
+  headings (dive comparison, Podman support, daemonless usage, CI gating,
+  Windows, safety, maintenance status).
+
 ## [v1.5.0] - 2026-06-24
 
 Multi-platform image support, an aggregated split-pane layer view in the

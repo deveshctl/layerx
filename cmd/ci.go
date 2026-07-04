@@ -44,10 +44,10 @@ var ciCmd = &cobra.Command{
 	Short: "Run efficiency checks for CI pipelines",
 	Long: `Evaluate image efficiency against configurable thresholds.
 
-Accepts either a Docker image reference or a path to a local image archive
-(docker save / OCI layout tarball). Archive mode requires no Docker daemon —
-useful in CI runners that already produced the artifact and want to avoid
-loading it into an engine just to inspect it.
+Accepts either a container image reference (Docker or Podman) or a path to a
+local image archive (docker save / podman save / OCI-layout tarball). Archive
+mode requires no daemon — useful in CI runners that already produced the
+artifact and want to avoid loading it into an engine just to inspect it.
 
 Exits 0 when all rules pass, 1 when any rule fails. Output is plain text
 suitable for CI logs.
@@ -137,8 +137,8 @@ func ciArgs(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "  layerx ci ./build/app.tar")
 	fmt.Fprintln(w, "  layerx ci --lowest-efficiency 0.95 nginx:latest")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "The argument may be a Docker image reference or a path to a tar archive")
-	fmt.Fprintln(w, "produced by `docker save` (or an OCI layout tarball).")
+	fmt.Fprintln(w, "The argument may be a container image reference (Docker or Podman) or a path")
+	fmt.Fprintln(w, "to a tar archive produced by `docker save` / `podman save` (or an OCI-layout tarball).")
 	fmt.Fprintln(w, "Run `layerx ci --help` for the full reference.")
 	return &ErrCIUsage{}
 }

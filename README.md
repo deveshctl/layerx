@@ -1,6 +1,6 @@
 # layerx
 
-Interactive Docker image layer inspector with CI-friendly efficiency checks. Single binary; no daemon required when reading saved image archives.
+**LayerX** — an open-source terminal explorer for **container images**. Open any **Docker**, **Podman**, or **OCI archive** in an interactive TUI, browse the file system each layer added, spot wasted bytes, and gate CI on image efficiency — from a single static binary.
 
 [![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)](https://github.com/deveshctl/layerx/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/deveshctl/layerx?sort=semver)](https://github.com/deveshctl/layerx/releases/latest)
@@ -11,109 +11,105 @@ Interactive Docker image layer inspector with CI-friendly efficiency checks. Sin
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
-![Layerx demo](assets/layerx-demo.gif)
+
+![LayerX — container image layer explorer for Docker, Podman, and OCI archives](assets/layerx-demo.gif)
+
+> Answers the questions `docker history` and `docker inspect` can't: *"which layer added this file?"*, *"how many bytes are wasted?"*, *"what actually changed between two builds?"*
 
 ---
 
-## What is layerx?
+## Table of contents
 
-A terminal tool for understanding what's inside a Docker image — which layer added each file, where the wasted bytes are, and what your `RUN` steps actually produced.
-
-Use it to:
-
-- Debug bloated images and find the layer responsible
-- Review the filesystem impact of a Dockerfile change before merging
-- Gate CI on layer waste or efficiency thresholds
+- [Why LayerX](#why-layerx)
+- [Quick start](#quick-start)
+- [Features](#features)
+- [Install](#install)
+- [Container engines — Docker, Podman, OCI archives](#container-engines)
+- [Multi-platform images (`--platform`)](#multi-platform-images---platform)
+- [CI mode & GitHub Actions](#ci-mode)
+- [Compare two images](#compare-two-images)
+- [JSON export](#json-export)
+- [Caching](#caching--environment)
+- [Verifying releases (Sigstore, SLSA, SBOM)](#verifying-releases)
+- [FAQ](#faq)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 
 ---
 
-## Quick Start
+## Why LayerX
+
+Container images look opaque until something goes wrong: a 2 GB image that should have been 200 MB, a mystery file that reappeared after you thought you deleted it, a base-image bump that quietly doubled the layer count. LayerX opens the image and shows you exactly what's inside — layer by layer, byte by byte.
+
+Use it when you need to:
+
+- **Debug bloated images** and find the exact `RUN` step responsible.
+- **Review the filesystem impact** of a Dockerfile change before it ships.
+- **Gate CI** on layer waste or efficiency thresholds — with a clear pass/fail signal.
+- **Diff two images** (release vs release, base bump vs no-bump) and see every added/removed file.
+- **Explore images without a daemon** — pass an OCI or `docker save` archive directly, no Docker required.
+
+LayerX is a **single static binary** with no runtime dependencies beyond your container engine. It works on Linux, macOS, and Windows (native — not just WSL). It reads live images through Docker or Podman, or `docker save` / OCI-layout archives directly from disk.
+
+---
+
+## Quick start
 
 ```bash
 # macOS / Linux
 brew install deveshctl/tap/layerx
 
-# Inspect a Docker image (daemon required)
+# Windows
+scoop bucket add layerx https://github.com/deveshctl/scoop-bucket
+scoop install layerx
+
+# Explore a live image (auto-detects Docker or Podman)
 layerx nginx:latest
 
-# Or inspect a local docker-save / OCI archive (no daemon needed)
+# Or explore a saved archive — no daemon required
 layerx ./build/app.tar
+
+# Gate a CI build on efficiency
+layerx ci --lowest-efficiency 0.95 myapp:${GIT_SHA}
 ```
 
-Other platforms: see [Install](#install).
+Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, verified releases): see [Install](#install) below.
 
 ---
 
-## What you can do
+## Features
 
-| Mode        | Command                                              | Best for                                                |
-|-------------|------------------------------------------------------|---------------------------------------------------------|
-| Interactive | `layerx IMAGE_OR_ARCHIVE`                            | Exploring layers, diffs, file contents, wasted bytes    |
-| Build       | `layerx build [BUILD_ARGS...]`                       | Build via docker/podman and inspect the result in one step |
-| CI          | `layerx ci IMAGE_OR_ARCHIVE` or `CI=true layerx ...` | Pipeline gates on efficiency / wasted bytes             |
-| Compare     | `layerx compare OLD NEW`                             | Side-by-side deltas between two builds; CI regression gate |
-| Export      | `layerx --json out.json IMAGE_OR_ARCHIVE`            | Scripts, dashboards, `jq`                               |
+### Interactive layer explorer
 
-`IMAGE_OR_ARCHIVE` is auto-detected: an existing file is read directly without contacting any container runtime, anything else is resolved through the Docker daemon. All three modes accept either form.
+- Vim-style navigation (`j/k`, `g/G`, `h/l`), tab-switch between panes, `?` for help.
+- Per-layer file tree with diff colouring (green = added, yellow = modified, red = removed).
+- **In-place file viewer** (`Enter`) — read file contents inside the TUI, with line numbers, scrolling, and search.
+- **File extraction** (`x`) — pull any single file out of any layer, straight to disk.
+- Clipboard integration (`y`, `Y`) — copy a path or a file's contents to the system clipboard, over SSH and tmux.
+- Sort by size, filter by name, hide unchanged files, jump to the layer that introduced the biggest waste (`w`).
+- Split-pane aggregated view — combine multiple layers into one virtual tree.
 
-Deeper guides live in [`docs/`](docs/):
+### Multi-engine, multi-source
 
-- [Configuration reference](docs/configuration.md) — every `.layerx.yaml` field, both path-rules forms, starter flavours
-- [CI integration](docs/ci-integration.md) — GitHub Actions and GitLab CI recipes, threshold recommendations, exit codes
-- [JSON export](docs/json-export.md) — full schema, `jq` one-liners, scripting use cases
+- **Docker** via the daemon (auto-negotiates the API version, works on Docker Engine v20 through v29+).
+- **Podman** via the Podman socket (`systemctl --user enable --now podman.socket`).
+- **OCI-layout archives** and **`docker save` / `podman save` tarballs** read directly from disk — no daemon, no network, no registry.
+- **Multi-platform images** — inspect a specific manifest with `--platform linux/amd64`, `linux/arm64`, `linux/arm/v7`, etc.
 
-### Interactive explorer
+### CI & automation
 
-- Browse layers with vim keys; see Dockerfile command, size, short digest
-- Per-layer file tree with diff colouring (green = added, yellow = modified, red = removed)
-- Open files inline with line numbers, scrolling, and in-viewer search
-- Sort by size, filter by name, hide unchanged files
-- Extract a file to disk, copy a path, or copy file contents to your clipboard (works over SSH and tmux)
-- Efficiency score and wasted bytes always visible in the status bar
+- `layerx ci` — three configurable rules (lowest efficiency, highest wasted bytes, highest user-wasted percent). Exit `0` pass, `1` rule failure, `2` operational error.
+- `layerx compare OLD NEW` — deterministic side-by-side deltas with a machine-parseable last line (`verdict: ok` / `verdict: regression`).
+- `layerx build` — build via docker/podman and inspect the result in a single command.
+- `--json` — full analysis (layers, files, efficiency) exported to JSON for scripts, dashboards, and `jq`.
+- Starter configs for Node, Python, Java, Go, and generic images (`layerx init --flavour ...`).
 
-See [TUI keybindings](#tui-keybindings) for the full shortcut list.
+### Trust & supply chain
 
-### CI mode
-
-- Three configurable rules: lowest efficiency, highest wasted bytes, highest user-wasted percent
-- Exits `0` on pass, `1` on rule failure, `2` on internal error
-- Configurable via `.layerx.yaml` or CLI flags
-
-### Compare two images
-
-```bash
-# Compare a release tag against the previous one
-layerx compare myapp:1.4.0 myapp:1.5.0
-
-# Mix archives and refs freely
-layerx compare ./build/prev.tar myapp:next
-
-# Show every diff entry instead of the top-N summary
-layerx compare --mode full myapp:old myapp:new
-```
-
-- Reports size, efficiency, layer, file, and waste deltas in a deterministic text report with consistently aligned columns
-- Default compact mode shows the largest deltas per section with a `... and N more` counter; `--mode full` prints everything; `--mode summary` keeps only the header and verdict
-- Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>` when both sides resolve to the same image, or `verdict: noop reason=path-equal` when both arguments are the same archive path and no digest is observable
-- Exit codes: `0` no regression, `1` regression detected, `2` operational error (daemon down, archive missing, etc.)
-- Live progress on stderr while resolving remote images — pulling, exporting, parsing, and the resolved digest are all surfaced per side. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating
-- Running `layerx compare` with no arguments prints a short usage hint with concrete examples instead of an opaque error
-
-### JSON export
-
-Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks. See [docs/json-export.md](docs/json-export.md) for the full schema, jq one-liners, and scripting recipes.
-
----
-
-## Prerequisites
-
-Docker is required when inspecting Docker image references (`nginx:latest`, `myregistry/app:tag`). It is **not** required when inspecting a local archive file (`docker save` output or OCI layout tarball) — archive mode reads the file directly.
-
-| Platform | Install                                                                                  |
-|----------|------------------------------------------------------------------------------------------|
-| Linux    | [Docker Engine](https://docs.docker.com/engine/install/)                                 |
-| macOS    | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/)             |
-| Windows  | [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)         |
+- Every release is [cosign-signed](https://www.sigstore.dev/) (keyless, GitHub OIDC).
+- Every archive ships with an **SPDX SBOM** and a **SLSA Build Level 3** provenance attestation.
+- Weekly [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/deveshctl/layerx) analysis.
+- Dependencies pinned to commit SHAs; Renovate keeps them fresh.
 
 ---
 
@@ -158,11 +154,255 @@ sudo rpm -i layerx_linux_arm64.rpm
 
 ### Direct download
 
-Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). For a specific version, replace `latest` with the tag (e.g. `v1.5.0`) in the URLs above.
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). Replace `latest` with a specific tag (e.g. `v1.5.0`) in any URL above.
 
-### Verifying releases
+### Build from source
 
-Every release ships with a cosign-signed `checksums.txt`, an SPDX SBOM per archive, and a SLSA provenance attestation. Verifying both proves the archive came out of this repository's release workflow on GitHub-hosted runners.
+Requires Go 1.26+:
+
+```bash
+go install github.com/deveshctl/layerx@latest
+```
+
+---
+
+## Usage
+
+```bash
+# Interactive TUI — live image (Docker or Podman auto-detected)
+layerx nginx:latest
+
+# Interactive TUI — local archive, no daemon required
+layerx ./build/app.tar
+
+# Force a fresh analysis (bypass the cache)
+layerx --no-cache nginx:latest
+
+# CI mode — exit 1 if efficiency drops below 95%
+layerx ci --lowest-efficiency 0.95 myapp:${GIT_SHA}
+
+# JSON export
+layerx --json analysis.json nginx:latest
+
+# Shell completion (bash / zsh / fish / PowerShell)
+source <(layerx completion bash)
+```
+
+`IMAGE_OR_ARCHIVE` is auto-detected: an existing regular file is read directly without contacting any runtime; anything else is resolved through the active container engine. Every subcommand (`ci`, `compare`, `build`, `--json`) accepts both forms.
+
+### TUI keybindings
+
+| Key         | Action                                                       |
+|-------------|--------------------------------------------------------------|
+| `Tab`       | Switch panel (layers ↔ file tree)                            |
+| `j` / `k`   | Move up / down                                               |
+| `g` / `G`   | Jump to top / bottom                                         |
+| `h` / `l`   | Scroll left / right (file viewer, long lines)                |
+| `Enter`     | Open file viewer; expand or collapse a folder                |
+| `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |
+| `/`         | Filter file tree (tree) / search in viewer (viewer)          |
+| `n` / `N`   | Next / previous search match (viewer)                        |
+| `y`         | Copy file path to clipboard                                  |
+| `Y`         | Copy file content (viewer) or layer command (layers)         |
+| `d`         | Toggle diff-only mode (hide unchanged files)                 |
+| `s`         | Cycle sort: default → largest → smallest                     |
+| `S`         | Cycle layer size column: change → stored → stored+change     |
+| `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
+| `x`         | Extract focused file to disk                                 |
+| `A`         | Toggle aggregated (split-pane) view                          |
+| `?`         | Toggle help overlay                                          |
+| `q`         | Quit                                                         |
+
+---
+
+## Container engines
+
+LayerX talks to any daemon that implements the Docker Engine REST API. Docker and Podman are both first-class.
+
+### Docker (default)
+
+No setup required — LayerX uses your `DOCKER_HOST` if set, otherwise the platform default socket:
+
+- Linux: `/var/run/docker.sock`
+- macOS: `~/.docker/run/docker.sock`
+- Windows: `\\.\pipe\docker_engine`
+
+### Podman
+
+**Linux** — start the Podman socket and LayerX auto-detects it:
+
+```bash
+systemctl --user enable --now podman.socket
+layerx --engine podman alpine:3
+```
+
+If Podman is your only engine, `--engine auto` (the default) falls back to the Podman socket when no Docker socket is found, so the flag is optional.
+
+**macOS / Windows** — Podman Machine forwards the socket via SSH or a named pipe; set `DOCKER_HOST` from your active connection:
+
+```bash
+DOCKER_HOST=$(podman system connection list --format '{{.URI}}' | head -n 1) \
+  layerx --engine podman alpine:3
+```
+
+### Archive mode (no daemon required)
+
+Skip the engine entirely by passing a `docker save` or `podman save` tar, or an OCI-layout archive:
+
+```bash
+podman save -o alpine.tar alpine:3
+layerx ./alpine.tar
+```
+
+Useful for airgapped machines, CI runners without docker-in-docker, and anyone who prefers not to run a daemon.
+
+### Multi-platform images (`--platform`)
+
+Most images on public registries today are multi-platform: `nginx:latest` resolves to a manifest list with separate manifests for `linux/amd64`, `linux/arm64`, and more. By default LayerX inspects whichever variant your engine picks for the host (Apple Silicon → arm64; typical CI runner → amd64). Pass `--platform` to pick one explicitly:
+
+```bash
+# Inspect the arm64 variant on an amd64 host (or anywhere)
+layerx --platform linux/arm64 nginx:latest
+
+# Variant suffixes are supported (e.g. arm/v7 for older Pis)
+layerx --platform linux/arm/v7 alpine:3
+
+# Gate CI against the variant your service actually runs
+layerx ci --platform linux/amd64 --lowest-efficiency 0.9 myapp:${GIT_SHA}
+
+# Compare the same logical image across architectures
+layerx compare --platform linux/amd64 myapp:1.5.0 myapp:1.5.0
+```
+
+Accepted shapes (same as `docker --platform`): `OS/ARCH`, `OS/ARCH/VARIANT`, or the bare arch shortcut (`amd64` is treated as `linux/amd64`). When the requested platform is not in the image's manifest list, LayerX prints the variants the image actually carries — no silent mismatch.
+
+`--platform` works in archive mode too: LayerX sanity-checks the archive against the requested variant and refuses to inspect a mismatched tarball.
+
+---
+
+## CI mode
+
+### GitHub Actions
+
+```yaml
+- name: Install LayerX
+  run: |
+    curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
+    sudo dpkg -i layerx_linux_amd64.deb
+
+- name: Check image efficiency
+  run: layerx ci --lowest-efficiency 0.95 myapp:${{ github.sha }}
+```
+
+### Configuration
+
+Drop a `.layerx.yaml` in your project root:
+
+```yaml
+version: 1
+
+rules:
+  lowest-efficiency: 0.9
+  highest-wasted-bytes: 52428800    # 50 MB
+  highest-user-wasted-percent: 0.1
+
+path-rules:
+  block:
+    - "**/.git/**"
+    - /tmp/**
+  deny-waste:
+    - "**/*.pyc"
+```
+
+CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
+
+Full field reference, path-rule semantics, and worked examples: [docs/configuration.md](docs/configuration.md). End-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit codes): [docs/ci-integration.md](docs/ci-integration.md).
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | All rules passed (or, for non-CI commands, the run completed). |
+| `1`  | A CI rule failed (`layerx ci`), or `layerx compare` detected a regression. |
+| `2`  | Operational error — engine down, archive missing, malformed config, write failure, etc. Don't gate on this; surface it. |
+
+### Starter configs
+
+Run `layerx init` to drop a ready-made `.layerx.yaml`:
+
+```bash
+layerx init --flavour node       # Node.js / npm / yarn / pnpm
+layerx init --flavour python     # CPython, .pyc and __pycache__ rules
+layerx init --flavour java       # Maven, Gradle, multi-stage targets
+layerx init --flavour go         # tighter thresholds for Go images
+layerx init --flavour generic    # baseline — works for any stack
+```
+
+Each starter blocks build-time caches (`/root/.npm/...`, `/root/.cache/pip/...`, etc.) and version-control metadata, and flags wasteful layer patterns. Edit the file after init to tune for your repo. Starters live in [`cmd/examples/`](cmd/examples/).
+
+---
+
+## Compare two images
+
+```bash
+# Compare release-to-release
+layerx compare myapp:1.4.0 myapp:1.5.0
+
+# Mix archives and refs freely
+layerx compare ./build/prev.tar myapp:next
+
+# Show every diff entry instead of the top-N summary
+layerx compare --mode full myapp:old myapp:new
+```
+
+- Reports size, efficiency, layer, file, and waste deltas in a deterministic text report with aligned columns.
+- Default compact mode shows the largest deltas per section with `... and N more` counters; `--mode full` prints everything; `--mode summary` keeps only header + verdict.
+- Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>`, or `verdict: noop reason=path-equal`.
+- Exit codes: `0` no regression, `1` regression detected, `2` operational error.
+- Live progress on stderr while resolving remote images. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating.
+
+---
+
+## JSON export
+
+Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scripted checks. Schema, `jq` one-liners, and scripting recipes: [docs/json-export.md](docs/json-export.md).
+
+```bash
+layerx --json analysis.json nginx:latest
+
+jq '.efficiency' analysis.json
+jq '.layers[] | select(.wasted_bytes > 1e7) | {index, command, wasted_bytes}' analysis.json
+```
+
+---
+
+## Caching & environment
+
+| Variable                 | Purpose                                                                  |
+|--------------------------|--------------------------------------------------------------------------|
+| `CI=true`                | Treat `layerx IMAGE` (no subcommand) as `layerx ci IMAGE`                |
+| `LAYERX_CACHE_DIR`       | Override the default analysis cache directory                            |
+| `LAYERX_CACHE_TTL_DAYS`  | Evict cache entries older than this many days. Default `30`. `0` disables. |
+| `LAYERX_CACHE_MAX_BYTES` | Evict oldest entries until total cache size is at or below this. Default `1073741824` (1 GiB). `0` disables. |
+
+Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` bypasses the cache for a single run. The cache self-prunes by age and total size at the end of every successful write.
+
+Inspect and evict cache entries explicitly:
+
+```bash
+layerx cache list                    # what's cached
+layerx cache prune                   # dry run
+layerx cache prune --older-than 7d   # evict entries older than 7 days
+layerx cache prune --all             # empty
+```
+
+`--older-than` accepts `s`, `m`, `h`, `d`, `w` suffixes (e.g. `90m`, `12h`, `30d`, `2w`).
+
+---
+
+## Verifying releases
+
+Every release ships a cosign-signed `checksums.txt`, an SPDX SBOM per archive, and a SLSA Build Level 3 provenance attestation. Verifying both proves the archive came out of this repository's release workflow on GitHub-hosted runners.
 
 ```bash
 TAG=v1.5.0   # the release you downloaded
@@ -193,306 +433,84 @@ slsa-verifier verify-artifact "${ARCHIVE}" \
 
 The signature chain is anchored in [Sigstore](https://www.sigstore.dev/)'s public transparency log; no long-lived keys are involved.
 
-### Build from source
-
-Requires Go 1.26+:
-
-```bash
-go install github.com/deveshctl/layerx@latest
-```
-
 ---
 
-## Usage
-
-```bash
-# Interactive TUI — Docker reference
-layerx nginx:latest
-
-# Interactive TUI — local archive (no daemon required)
-layerx ./build/app.tar
+## FAQ
 
-# Force a fresh analysis (bypass the cache)
-layerx --no-cache nginx:latest
+### What is LayerX?
 
-# CI mode — exit 1 if efficiency < 95% (works for both inputs)
-layerx ci --lowest-efficiency 0.95 nginx:latest
-layerx ci --lowest-efficiency 0.95 ./build/app.tar
+LayerX is an open-source command-line tool that opens a container image (Docker, Podman, or OCI archive) in an interactive terminal explorer. You can browse each layer, see the files it added or removed, view file contents inline, extract any file to disk, and measure image efficiency (wasted bytes across layers). It also runs headless in CI to fail a build when an image drifts past a size or efficiency threshold.
 
-# JSON export
-layerx --json analysis.json nginx:latest
-
-# Shell completion (bash)
-source <(layerx completion bash)
-```
+### Which container engines does LayerX support?
 
-### TUI keybindings
+Docker and Podman today, with more engines planned. Any daemon exposing the Docker Engine REST API works out of the box (LayerX negotiates the API version, so it doesn't break on engine upgrades). You can also skip the daemon entirely and point LayerX at a `docker save` or OCI-layout archive on disk.
 
-| Key         | Action                                                       |
-|-------------|--------------------------------------------------------------|
-| `Tab`       | Switch panel (layers ↔ file tree)                            |
-| `j` / `k`   | Move up / down                                               |
-| `g` / `G`   | Jump to top / bottom                                         |
-| `h` / `l`   | Scroll left / right (file viewer, long lines)                |
-| `Enter`     | Open file viewer; expand or collapse a folder                |
-| `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |
-| `/`         | Filter file tree (tree) / search in viewer (viewer)          |
-| `n` / `N`   | Next / previous search match (viewer)                        |
-| `y`         | Copy file path to clipboard                                  |
-| `Y`         | Copy file content (viewer) or layer command (layers)         |
-| `d`         | Toggle diff-only mode (hide unchanged files)                 |
-| `s`         | Cycle sort: default → largest → smallest                     |
-| `S`         | Cycle layer size column: change → stored → stored+change     |
-| `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
-| `x`         | Extract focused file to disk                                 |
-| `?`         | Toggle help overlay                                          |
-| `q`         | Quit                                                         |
+### Do I need Docker installed to use LayerX?
 
----
+No. If you have a `docker save` output or an OCI-layout tarball, LayerX reads it directly — no daemon, no network, no root. This makes LayerX useful on airgapped machines, in CI runners that don't allow docker-in-docker, and on developer machines that use Podman or rootless containers instead of Docker.
 
-## Container Engines
+### How does LayerX relate to `dive`?
 
-layerx talks to any daemon that implements the Docker Engine REST API. Docker
-and Podman are both supported.
+LayerX is inspired by [wagoodman/dive](https://github.com/wagoodman/dive) and speaks the same mental model — the "layer panel + file tree + wasted-bytes score" pattern that dive established. Compared to dive, LayerX adds an in-place file viewer, working file extraction on modern OCI-format images, first-class Podman support, native Windows binaries, multi-platform manifest selection, and signed releases with SLSA provenance. If you're a dive user looking for a tool that keeps pace with recent Docker Engine versions, LayerX is designed as a drop-in replacement — the CLI and TUI ergonomics are deliberately familiar.
 
-### Docker (default)
+### How is LayerX different from `docker history` and `docker inspect`?
 
-No setup required — layerx uses your `DOCKER_HOST` if set, or the platform
-default socket (`/var/run/docker.sock` on Linux, `~/.docker/run/docker.sock`
-on macOS, `\\.\pipe\docker_engine` on Windows).
+`docker history` shows *what commands ran* to build the image; `docker inspect` shows *the image's metadata*. Neither shows *what files each layer actually put into the image*. LayerX opens the layer tarballs, walks the file trees, applies whiteouts, and gives you both: the commands and their concrete filesystem impact.
 
-### Podman
+### Can LayerX gate my CI pipeline on image size?
 
-**Linux:** start the Podman socket and layerx auto-detects it:
+Yes. `layerx ci IMAGE_OR_ARCHIVE` has three configurable thresholds (lowest efficiency, highest wasted bytes, highest user-wasted percent) and clean exit codes (`0` pass, `1` rule failure, `2` operational error) so you can gate a merge with a single line in GitHub Actions, GitLab CI, or any pipeline runner. See [docs/ci-integration.md](docs/ci-integration.md).
 
-```bash
-systemctl --user enable --now podman.socket
-layerx --engine podman alpine:3
-```
+### Does LayerX work on Windows natively?
 
-If Podman is your only engine, `--engine auto` (the default) will fall back
-to the Podman socket when no Docker socket is found, so the flag is
-optional.
+Yes — Windows binaries for amd64 and arm64 are published with every release, and Scoop is a supported install path. LayerX runs against Docker Desktop, Podman Desktop, or archive files directly. WSL is not required.
 
-**macOS / Windows:** Podman Machine forwards the socket via SSH or a named
-pipe; the path varies per connection. Set `DOCKER_HOST` from your active
-connection:
+### Is LayerX safe to run against untrusted images?
 
-```bash
-DOCKER_HOST=$(podman system connection list --format '{{.URI}}' | head -n 1) \
-  layerx --engine podman alpine:3
-```
+LayerX reads image tarballs, walks their file trees, and caps in-memory reads at 2 GiB per file to prevent a crafted tar entry from exhausting memory. It never executes anything from the image. That said, treat any container image as untrusted input: pair LayerX (which tells you *what's inside*) with a vulnerability scanner like Trivy or Grype (which tells you *whether what's inside has known CVEs*).
 
-### Archive mode (no daemon)
+### Is this project actively maintained?
 
-You can skip the daemon entirely by passing a `docker save` or `podman save`
-tar archive directly:
-
-```bash
-podman save -o alpine.tar alpine:3
-layerx ./alpine.tar
-```
-
-### Multi-platform images (`--platform`)
-
-Most images on Docker Hub today are multi-platform: a single tag like
-`nginx:latest` resolves to a manifest list with separate manifests for
-`linux/amd64`, `linux/arm64`, and friends. By default layerx inspects
-whichever variant the daemon picks for your host (an Apple Silicon Mac
-sees the arm64 manifest; a typical CI runner sees amd64). Pass
-`--platform` to pick a specific variant explicitly:
-
-```bash
-# Inspect the arm64 variant on an amd64 host (or anywhere)
-layerx --platform linux/arm64 nginx:latest
-
-# Variant suffixes are supported (e.g. arm/v7 for older Pis)
-layerx --platform linux/arm/v7 alpine:3
-
-# CI gate against the variant your service actually runs
-layerx ci --platform linux/amd64 --lowest-efficiency 0.9 myapp:${{ github.sha }}
-
-# Compare the same logical image across architectures
-layerx compare --platform linux/amd64 myapp:1.5.0 myapp:1.5.0
-# (point one side at a different ref to compare across versions)
-```
-
-Accepted shapes (same as `docker --platform`): `OS/ARCH`, `OS/ARCH/VARIANT`,
-or the bare arch shortcut (`amd64` is treated as `linux/amd64`). When the
-requested platform is not present in the image's manifest list, layerx
-prints the variants the image actually carries:
-
-```
-Error: platform linux/ppc64le not found in image "nginx:latest"
-
-Available platforms:
-  - linux/amd64
-  - linux/arm64
-  - linux/arm/v7
-```
-
-`--platform` works in archive mode too — it sanity-checks that the archive
-was produced for the requested variant and refuses to inspect a mismatched
-tarball, so a typo can't silently analyze the wrong image.
-
-`layerx build --platform <list>` is forwarded straight to the engine's
-own `build --platform` (it governs what gets *built*); the engine then
-hands a single-variant image to layerx, so the top-level `--platform`
-flag is unused on the build path.
-
----
-
-## CI mode
-
-### GitHub Actions
-
-```yaml
-- name: Install layerx
-  run: |
-    curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
-    sudo dpkg -i layerx_linux_amd64.deb
-
-- name: Check image efficiency
-  run: layerx ci --lowest-efficiency 0.95 myapp:${{ github.sha }}
-```
-
-### Configuration
-
-Drop a `.layerx.yaml` in your project root:
-
-```yaml
-version: 1
-
-rules:
-  lowest-efficiency: 0.9
-  highest-wasted-bytes: 52428800    # 50MB
-  highest-user-wasted-percent: 0.1
-
-path-rules:
-  block:
-    - "**/.git/**"
-    - /tmp/**
-  deny-waste:
-    - "**/*.pyc"
-```
-
-See `layerx init` (below) for ready-made configs by language.
-
-CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
-
-For the full field reference, path-rule semantics, and worked examples, see [docs/configuration.md](docs/configuration.md). For end-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit-code reference), see [docs/ci-integration.md](docs/ci-integration.md).
-
-### Exit codes
-
-| Code | Meaning |
-|------|---------|
-| `0`  | All rules passed (or, for non-CI commands, the run completed). |
-| `1`  | A CI rule failed (`layerx ci`), or `layerx compare` detected a regression. |
-| `2`  | Operational error — Docker daemon down, archive missing, malformed config, write failure, etc. Don't gate on this; surface it. |
-
-Pipelines should treat `1` as the gate signal and fail loudly on `2`. Full breakdown in [docs/ci-integration.md](docs/ci-integration.md#exit-codes).
-
-### Starter configs
-
-Run `layerx init` to drop a ready-made `.layerx.yaml` in your repo:
-
-```bash
-layerx init --flavour node       # Node.js / npm / yarn / pnpm
-layerx init --flavour python     # CPython, .pyc and __pycache__ rules
-layerx init --flavour java       # Maven, Gradle, multi-stage targets
-layerx init --flavour go         # tighter thresholds for Go images
-layerx init --flavour generic    # baseline — works for any stack
-```
-
-Each starter blocks build-time caches (`/root/.npm/...`, `/root/.cache/pip/...`,
-etc.) and version-control metadata, and flags wasteful layer patterns
-(`node_modules` reinstalled per layer, `.pyc` files duplicated). Edit the
-file after init to tune for your repo.
-
-The starter configs live in [`cmd/examples/`](cmd/examples/) for browsing
-or copy-paste.
-
----
-
-## Caching & environment
-
-| Variable                 | Purpose                                                                  |
-|--------------------------|--------------------------------------------------------------------------|
-| `CI=true`                | Treat `layerx IMAGE` (no subcommand) as `layerx ci IMAGE`                |
-| `LAYERX_CACHE_DIR`       | Override the default analysis cache directory                            |
-| `LAYERX_CACHE_TTL_DAYS`  | Evict cache entries older than this many days. Default `30`. `0` disables. |
-| `LAYERX_CACHE_MAX_BYTES` | Evict oldest entries until total cache size is at or below this. Default `1073741824` (1 GiB). `0` disables. |
-
-Repeat runs against an unchanged image digest reuse the cache and skip the tar export and parse. `--no-cache` bypasses the cache for a single run; the run still refreshes the cache on success. The cache directory self-prunes by age and total size at the end of every successful write; failures are best-effort and surface as `cache prune ...` warnings on stderr.
-
-### Cache management
-
-Inspect and explicitly evict cache entries with the `layerx cache`
-subcommands:
-
-```bash
-# Show what's in the cache (image, digest, size, cached-at).
-layerx cache list
-
-# Preview eviction without touching disk (bare prune is a dry run).
-layerx cache prune
-
-# Evict entries older than 7 days.
-layerx cache prune --older-than 7d
-
-# Empty the cache.
-layerx cache prune --all
-```
-
-`cache list` shows the original image reference for entries written by layerx v1.4 and later (older entries render as `<unknown>` until they are re-cached). `--older-than` accepts an integer plus a unit suffix (`s`, `m`, `h`, `d`, `w`); examples include `90m`, `12h`, `30d`, `2w`. `mo` and `y` are not accepted. `layerx cache --help` shows the resolved cache directory and references the `LAYERX_CACHE_TTL_DAYS` and `LAYERX_CACHE_MAX_BYTES` overrides documented above.
+Yes. Releases are cut on a monthly cadence; every release ships signed artefacts, an SBOM, and SLSA provenance. See the [Releases page](https://github.com/deveshctl/layerx/releases) for the current version and [CHANGELOG.md](CHANGELOG.md) for what's new.
 
 ---
 
 ## Troubleshooting
 
-- **"Cannot connect to the Docker daemon"** — Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux. (Tip: if your image is already saved as a tarball, pass the file path instead — no daemon required.)
-- **"Archive not found"** — the path you passed doesn't exist or isn't a regular file. Check spelling and that you're not pointing at a directory.
-- **"Not a valid image archive"** — the file exists but isn't a `docker save` or OCI layout tarball. Re-export with `docker save -o image.tar IMAGE` or build with `--output type=oci,dest=image.tar`.
-- **"image not found"** — layerx pulls images on demand. Check the reference and that you can `docker pull` it manually.
-- **Cache permission errors** — point `LAYERX_CACHE_DIR` somewhere writable, e.g. `LAYERX_CACHE_DIR=$HOME/.cache/layerx`.
+- **"Cannot connect to the Docker daemon"** — Docker isn't running. Start Docker Desktop, or `sudo systemctl start docker` on Linux. If your image is already saved as a tarball, pass the file path instead — no daemon required.
+- **"Archive not found"** — the path you passed doesn't exist or isn't a regular file. Check spelling; make sure you're not pointing at a directory.
+- **"Not a valid image archive"** — the file exists but isn't a `docker save` or OCI-layout tarball. Re-export with `docker save -o image.tar IMAGE` or build with `--output type=oci,dest=image.tar`.
+- **"image not found"** — LayerX pulls images on demand. Confirm the reference and that you can `docker pull` (or `podman pull`) it manually.
+- **Cache permission errors** — point `LAYERX_CACHE_DIR` at a writable path, e.g. `LAYERX_CACHE_DIR=$HOME/.cache/layerx`.
 
 ---
 
 ## Contributing
 
-Issues and PRs welcome. For larger changes, please open an issue first to discuss the approach. See [CONTRIBUTING.md](CONTRIBUTING.md) for the build, test, and branching workflow, and [CHANGELOG](CHANGELOG.md) for release notes.
+Issues and PRs welcome. For larger changes, open an issue first. See [CONTRIBUTING.md](CONTRIBUTING.md) for the build, test, and branching workflow, and [CHANGELOG](CHANGELOG.md) for release notes.
 
 Security issues: please follow [SECURITY.md](SECURITY.md) — don't open public issues for vulnerabilities.
 
----
-
-## Architecture
+### Architecture (for contributors)
 
 ```
-image/    Domain layer — Docker SDK, tar parsing, file tree, efficiency
+image/    Domain — image reading, tar parsing, file tree, efficiency
 tui/      Bubbletea v2 TUI — consumes image/ interfaces only
 ci/       CI evaluator — consumes image/ interfaces only
 cmd/      Cobra CLI — wires packages together
 config/   .layerx.yaml loader
 ```
 
-Design rules:
+Design rules: `image/` has zero imports from `tui/`, `ci/`, or `config/`. TUI and CI consume interfaces, never concrete engine SDK types. All engine client calls negotiate the API version.
 
-- `image/` has zero imports from `tui/`, `ci/`, or `config/`
-- TUI and CI consume interfaces, never concrete Docker SDK types
-- All Docker client calls negotiate the API version (no breakage on Docker Engine upgrades)
-- Both whiteout conventions handled correctly (regular and opaque)
-
----
-
-## Tech stack
+### Tech stack
 
 | Concern  | Choice                                                                                         |
 |----------|------------------------------------------------------------------------------------------------|
 | Language | Go 1.26+                                                                                       |
 | CLI      | [cobra](https://github.com/spf13/cobra)                                                        |
 | TUI      | [bubbletea v2](https://github.com/charmbracelet/bubbletea) + [lipgloss v2](https://github.com/charmbracelet/lipgloss) + [bubbles v2](https://github.com/charmbracelet/bubbles) |
-| Docker   | [moby/moby client](https://github.com/moby/moby)                                               |
+| Engine   | [moby/moby client](https://github.com/moby/moby) (Docker + Podman via Docker Engine API)       |
 | Config   | [goccy/go-yaml](https://github.com/goccy/go-yaml)                                              |
 | Testing  | [testify](https://github.com/stretchr/testify)                                                 |
 
@@ -500,4 +518,4 @@ Design rules:
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
