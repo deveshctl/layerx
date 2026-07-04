@@ -25,8 +25,9 @@ func noCacheRequested() bool {
 
 var rootCmd = &cobra.Command{
 	Use:   "layerx [flags] IMAGE_OR_ARCHIVE",
-	Short: "Explore container image layers (Docker, Podman, OCI archives)",
-	Long: `Explore a container image's layers, filesystem changes, and wasted bytes.
+	Short: "Inspect container image layers (Docker, Podman, OCI archives)",
+	Long: `LayerX Image Inspector opens a container image's layers, filesystem
+changes, and wasted bytes.
 
 Common usage:
   layerx IMAGE              browse layers interactively in a TUI

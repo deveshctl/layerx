@@ -1,6 +1,6 @@
-# layerx
+# LayerX Image Inspector
 
-**LayerX** — an open-source terminal explorer for **container images**. Open any **Docker**, **Podman**, or **OCI archive** in an interactive TUI, browse the file system each layer added, spot wasted bytes, and gate CI on image efficiency — from a single static binary.
+**LayerX Image Inspector** is an open-source terminal tool for inspecting, comparing, and CI-gating **Docker**, **Podman**, and **OCI** container images. Open an image in an interactive TUI, browse the filesystem each layer added, spot wasted bytes, and catch image regressions before they ship — from a single static binary.
 
 [![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)](https://github.com/deveshctl/layerx/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/deveshctl/layerx?sort=semver)](https://github.com/deveshctl/layerx/releases/latest)
@@ -12,9 +12,9 @@
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
-![LayerX — container image layer explorer for Docker, Podman, and OCI archives](assets/layerx-demo.gif)
+![LayerX Image Inspector — inspect Docker, Podman, and OCI image layers in a terminal UI](assets/layerx-demo.gif)
 
-> Answers the questions `docker history` and `docker inspect` can't: *"which layer added this file?"*, *"how many bytes are wasted?"*, *"what actually changed between two builds?"*
+> A modern image inspector for the questions `docker history` and `docker inspect` can't answer: *"which layer added this file?"*, *"how many bytes are wasted?"*, *"what actually changed between two builds?"*
 
 ---
 
@@ -39,7 +39,7 @@
 
 ## Why LayerX
 
-Container images look opaque until something goes wrong: a 2 GB image that should have been 200 MB, a mystery file that reappeared after you thought you deleted it, a base-image bump that quietly doubled the layer count. LayerX opens the image and shows you exactly what's inside — layer by layer, byte by byte.
+Container images look opaque until something goes wrong: a 2 GB image that should have been 200 MB, a mystery file that reappeared after you thought you deleted it, a base-image bump that quietly doubled the layer count. LayerX Image Inspector opens the image and shows you exactly what's inside — layer by layer, byte by byte.
 
 Use it when you need to:
 
@@ -49,7 +49,7 @@ Use it when you need to:
 - **Diff two images** (release vs release, base bump vs no-bump) and see every added/removed file.
 - **Explore images without a daemon** — pass an OCI or `docker save` archive directly, no Docker required.
 
-LayerX is a **single static binary** with no runtime dependencies beyond your container engine. It works on Linux, macOS, and Windows (native — not just WSL). It reads live images through Docker or Podman, or `docker save` / OCI-layout archives directly from disk.
+LayerX Image Inspector is a **single static binary** with no runtime dependencies beyond your container engine. It works on Linux, macOS, and Windows (native — not just WSL). It reads live images through Docker or Podman, or `docker save` / OCI-layout archives directly from disk.
 
 ---
 
@@ -79,7 +79,7 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 
 ## Features
 
-### Interactive layer explorer
+### Interactive image inspection
 
 - Vim-style navigation (`j/k`, `g/G`, `h/l`), tab-switch between panes, `?` for help.
 - Per-layer file tree with diff colouring (green = added, yellow = modified, red = removed).
@@ -437,9 +437,9 @@ The signature chain is anchored in [Sigstore](https://www.sigstore.dev/)'s publi
 
 ## FAQ
 
-### What is LayerX?
+### What is LayerX Image Inspector?
 
-LayerX is an open-source command-line tool that opens a container image (Docker, Podman, or OCI archive) in an interactive terminal explorer. You can browse each layer, see the files it added or removed, view file contents inline, extract any file to disk, and measure image efficiency (wasted bytes across layers). It also runs headless in CI to fail a build when an image drifts past a size or efficiency threshold.
+LayerX Image Inspector is an open-source command-line tool that opens a container image (Docker, Podman, or OCI archive) in an interactive terminal UI. You can browse each layer, see the files it added or removed, view file contents inline, extract any file to disk, and measure image efficiency (wasted bytes across layers). It also runs headless in CI to fail a build when an image drifts past a size or efficiency threshold.
 
 ### Which container engines does LayerX support?
 
@@ -451,7 +451,7 @@ No. If you have a `docker save` output or an OCI-layout tarball, LayerX reads it
 
 ### How does LayerX relate to `dive`?
 
-LayerX is inspired by [wagoodman/dive](https://github.com/wagoodman/dive) and speaks the same mental model — the "layer panel + file tree + wasted-bytes score" pattern that dive established. Compared to dive, LayerX adds an in-place file viewer, working file extraction on modern OCI-format images, first-class Podman support, native Windows binaries, multi-platform manifest selection, and signed releases with SLSA provenance. If you're a dive user looking for a tool that keeps pace with recent Docker Engine versions, LayerX is designed as a drop-in replacement — the CLI and TUI ergonomics are deliberately familiar.
+LayerX Image Inspector is inspired by [wagoodman/dive](https://github.com/wagoodman/dive) and speaks the same mental model — the "layer panel + file tree + wasted-bytes score" pattern that dive established. Compared to dive, LayerX adds an in-place file viewer, working file extraction on modern OCI-format images, first-class Podman support, native Windows binaries, multi-platform manifest selection, image-to-image comparison, CI regression gates, and signed releases with SLSA provenance. If you're a dive user looking for a tool that keeps pace with recent Docker Engine versions, LayerX is designed as a familiar migration path.
 
 ### How is LayerX different from `docker history` and `docker inspect`?
 
