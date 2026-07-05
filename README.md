@@ -5,8 +5,6 @@
 [![CI](https://github.com/deveshctl/layerx/actions/workflows/ci.yml/badge.svg)](https://github.com/deveshctl/layerx/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/deveshctl/layerx?sort=semver)](https://github.com/deveshctl/layerx/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/deveshctl/layerx.svg)](https://pkg.go.dev/github.com/deveshctl/layerx)
-[![Go Report Card](https://goreportcard.com/badge/github.com/deveshctl/layerx)](https://goreportcard.com/report/github.com/deveshctl/layerx)
-[![codecov](https://codecov.io/gh/deveshctl/layerx/branch/main/graph/badge.svg)](https://codecov.io/gh/deveshctl/layerx)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/deveshctl/layerx/badge)](https://scorecard.dev/viewer/?uri=github.com/deveshctl/layerx)
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
@@ -34,6 +32,7 @@
 - [FAQ](#faq)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [Migrating from Dive](docs/migrating-from-dive.md)
 
 ---
 
@@ -284,8 +283,8 @@ layerx --platform linux/arm/v7 alpine:3
 # Gate CI against the variant your service actually runs
 layerx ci --platform linux/amd64 --lowest-efficiency 0.9 myapp:${GIT_SHA}
 
-# Compare the same logical image across architectures
-layerx compare --platform linux/amd64 myapp:1.5.0 myapp:1.5.0
+# Compare the same image across architectures
+layerx compare --platform linux/amd64 myapp:1.5.0 --platform linux/arm64 myapp:1.5.0
 ```
 
 Accepted shapes (same as `docker --platform`): `OS/ARCH`, `OS/ARCH/VARIANT`, or the bare arch shortcut (`amd64` is treated as `linux/amd64`). When the requested platform is not in the image's manifest list, LayerX prints the variants the image actually carries — no silent mismatch.
@@ -465,7 +464,7 @@ No. If you have a `docker save` output or an OCI-layout tarball, LayerX reads it
 
 ### How does LayerX relate to `dive`?
 
-LayerX Image Inspector is inspired by [wagoodman/dive](https://github.com/wagoodman/dive) and speaks the same mental model — the "layer panel + file tree + wasted-bytes score" pattern that dive established. Compared to dive, LayerX adds an in-place file viewer, working file extraction on modern OCI-format images, first-class Podman support, native Windows binaries, multi-platform manifest selection, image-to-image comparison, CI regression gates, and signed releases with SLSA provenance. If you're a dive user looking for a tool that keeps pace with recent Docker Engine versions, LayerX is designed as a familiar migration path.
+LayerX is inspired by [wagoodman/dive](https://github.com/wagoodman/dive) and keeps the same mental model. If you're a Dive user, see [docs/migrating-from-dive.md](docs/migrating-from-dive.md).
 
 ### How is LayerX different from `docker history` and `docker inspect`?
 

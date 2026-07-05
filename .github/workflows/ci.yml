@@ -6,8 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# Least-privilege default. No job in this workflow needs write scopes;
-# codecov uploads via its own token, govulncheck only reads.
+# Least-privilege default. No job in this workflow needs write scopes.
 permissions:
   contents: read
 
@@ -22,11 +21,6 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
-      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
-          fail_ci_if_error: false
 
   cross-compile:
     runs-on: ubuntu-latest
