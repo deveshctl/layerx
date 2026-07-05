@@ -68,10 +68,11 @@ var compareCmd = &cobra.Command{
 	Long: `Compare two images and report size, efficiency, layer, file, and waste
 deltas in a deterministic, CI-friendly text report.
 
-Both arguments accept the same inputs as "layerx" itself: a Docker image
-reference (e.g. "nginx:1.25") or a path to a local image archive produced
-by "docker save" or an OCI layout tarball. The two sides may mix freely
-(an archive on the old side, a registry ref on the new side, etc.).
+Both arguments accept the same inputs as "layerx" itself: a container image
+reference (Docker or Podman — e.g. "nginx:1.25") or a path to a local image
+archive produced by "docker save" / "podman save" or an OCI-layout tarball.
+The two sides may mix freely (an archive on the old side, a registry ref on
+the new side, etc.).
 
 Output ends with a single machine-parseable verdict line:
   verdict: ok
@@ -141,8 +142,8 @@ func compareArgs(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(w, "  layerx compare ./build/prev.tar ./build/new.tar")
 	fmt.Fprintln(w, "  layerx compare --mode full nginx:1.25 nginx:1.26")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Each argument may be a Docker image reference or a path to a tar archive")
-	fmt.Fprintln(w, "produced by `docker save` (or an OCI layout tarball).")
+	fmt.Fprintln(w, "Each argument may be a container image reference (Docker or Podman) or a path")
+	fmt.Fprintln(w, "to a tar archive produced by `docker save` / `podman save` (or an OCI-layout tarball).")
 	fmt.Fprintln(w, "Run `layerx compare --help` for the full reference.")
 	return &ErrCompareUsage{}
 }

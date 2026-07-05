@@ -25,8 +25,9 @@ func noCacheRequested() bool {
 
 var rootCmd = &cobra.Command{
 	Use:   "layerx [flags] IMAGE_OR_ARCHIVE",
-	Short: "Inspect Docker image layers",
-	Long: `Inspect a container image's layers, filesystem changes, and wasted bytes.
+	Short: "Inspect container image layers (Docker, Podman, OCI archives)",
+	Long: `LayerX Image Inspector opens a container image's layers, filesystem
+changes, and wasted bytes.
 
 Common usage:
   layerx IMAGE              browse layers interactively in a TUI
@@ -34,12 +35,12 @@ Common usage:
   layerx compare A B        diff two images for regressions
   layerx build [ARGS...]    build via the active engine, then inspect the result
 
-IMAGE_OR_ARCHIVE accepts a Docker image reference (e.g. "nginx:latest") or
-a path to a local archive produced by "docker save" or an OCI layout
-tarball. The two are auto-detected: an existing regular file is read
-directly without contacting any runtime; anything else is resolved via
-the Docker daemon. Archive mode needs no daemon, no network, and no
-running containers.
+IMAGE_OR_ARCHIVE accepts a container image reference (e.g. "nginx:latest") or
+a path to a local archive produced by "docker save" / "podman save" or an
+OCI-layout tarball. The two are auto-detected: an existing regular file is
+read directly without contacting any runtime; anything else is resolved via
+the active container engine (Docker or Podman). Archive mode needs no
+daemon, no network, and no running containers.
 
 Use --json to skip the TUI and export to a file. Set CI=true to make the
 bare form behave as "layerx ci" with config-file (or default) thresholds.
@@ -51,10 +52,11 @@ Engines: layerx auto-detects Docker or Podman; pass --engine to override.
 Platforms: pass --platform OS/ARCH (e.g. linux/arm64) to inspect a specific
 variant of a multi-platform image; layerx pulls and exports only that
 variant. Without --platform, the daemon's default platform is used.`,
-	Example: `  # Inspect an image interactively (Docker daemon required)
+	Example: `  # Inspect an image interactively (Docker or Podman auto-detected)
   layerx nginx:latest
 
-  # Inspect a local archive produced by "docker save" (no daemon required)
+  # Inspect a local archive produced by "docker save" or "podman save"
+  # (no daemon required)
   layerx ./build/app.tar
 
   # Inspect an OCI layout tarball
