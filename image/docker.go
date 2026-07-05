@@ -48,10 +48,36 @@ func WithPlatform(p *ocispec.Platform) Option {
 	return func(r *DockerResolver) { r.platform = p }
 }
 
+// WithEngineTag records the engine label ("docker" / "podman") for use
+// in error messages the resolver emits. Empty is fine — friendly
+// renderers fall back to a generic "container engine" phrase when the
+// tag is missing. This is context, NOT dispatch: the resolver still
+// talks to whatever Docker Engine REST API the client is pointed at.
+func WithEngineTag(name string) Option {
+	return func(r *DockerResolver) { r.engine = name }
+}
+
+// WithHostTag records the daemon URL for use in error messages. Kept
+// separate from the moby-client's own host because the client resolves
+// its host from DOCKER_HOST via FromEnv when NewDockerResolver is used
+// without an explicit host; the resolver otherwise has no way to
+// recover that string for a user-facing message.
+func WithHostTag(host string) Option {
+	return func(r *DockerResolver) { r.host = host }
+}
+
 // DockerResolver resolves image layers via the Docker daemon.
 type DockerResolver struct {
 	cli      client.APIClient
 	platform *ocispec.Platform
+	// engine is the layerx --engine label ("docker" / "podman" / "") for
+	// user-facing error messages. See WithEngineTag; the field affects
+	// only Error() text, never dispatch.
+	engine string
+	// host is the daemon URL for user-facing error messages. See
+	// WithHostTag; empty means "resolver was constructed via FromEnv and
+	// does not know the host string".
+	host string
 }
 
 // NewDockerResolver creates a resolver connected to the local Docker daemon.
@@ -67,7 +93,7 @@ func NewDockerResolver(opts ...Option) (Resolver, error) {
 		// disables negotiation and breaks on Docker Engine upgrades.
 		cli, err := client.New(client.FromEnv)
 		if err != nil {
-			return nil, fmt.Errorf("cannot connect to Docker daemon: %w", err)
+			return nil, fmt.Errorf("cannot connect to %s: %w", r.engineLabel(), err)
 		}
 		r.cli = cli
 	}
@@ -79,14 +105,44 @@ func NewDockerResolverWithHost(host string, opts ...Option) (Resolver, error) {
 	for _, opt := range opts {
 		opt(r)
 	}
+	// Auto-tag the host so ErrDaemonNotRunning carries the target URL
+	// even when callers forget to pass WithHostTag. Explicit WithHostTag
+	// still wins because Options apply in order above and the guard
+	// below only fills a zero value.
+	if r.host == "" {
+		r.host = host
+	}
 	if r.cli == nil {
 		cli, err := client.New(client.FromEnv, client.WithHost(host))
 		if err != nil {
-			return nil, fmt.Errorf("cannot connect to Docker daemon at %s: %w", host, err)
+			return nil, fmt.Errorf("cannot connect to %s daemon at %s: %w", r.engineLabel(), host, err)
 		}
 		r.cli = cli
 	}
 	return r, nil
+}
+
+// engineLabel returns the engine name for use in constructor-time error
+// text. Falls back to "container engine" when no tag has been applied,
+// matching ErrDaemonNotRunning.Error()'s own fallback.
+func (r *DockerResolver) engineLabel() string {
+	if r.engine == "" {
+		return "container engine"
+	}
+	return r.engine
+}
+
+// daemonErr wraps a moby-client transport failure in ErrDaemonNotRunning
+// with the resolver's engine and host tags attached. Every call site that
+// previously constructed &ErrDaemonNotRunning{Cause: err} inline now goes
+// through this helper so a Podman-configured resolver never surfaces a
+// "Docker daemon" message.
+func (r *DockerResolver) daemonErr(cause error) *ErrDaemonNotRunning {
+	return &ErrDaemonNotRunning{
+		Engine: r.engine,
+		Host:   r.host,
+		Cause:  cause,
+	}
 }
 
 // Inspect returns lightweight image metadata without exporting the full tar.
@@ -101,7 +157,7 @@ func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMe
 			return nil, &ErrImageNotFound{Ref: imageRef, Cause: err}
 		}
 		if isDaemonUnreachable(err) {
-			return nil, &ErrDaemonNotRunning{Cause: err}
+			return nil, r.daemonErr(err)
 		}
 		return nil, fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
@@ -121,7 +177,7 @@ func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, 
 			return "", &ErrImageNotFound{Ref: imageRef, Cause: err}
 		}
 		if isDaemonUnreachable(err) {
-			return "", &ErrDaemonNotRunning{Cause: err}
+			return "", r.daemonErr(err)
 		}
 		return "", fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
@@ -202,7 +258,7 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 			return &ErrImageNotFound{Ref: imageRef, Cause: err}
 		}
 		if isDaemonUnreachable(err) {
-			return &ErrDaemonNotRunning{Cause: err}
+			return r.daemonErr(err)
 		}
 		return fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
@@ -222,7 +278,7 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
 			}
-			return &ErrDaemonNotRunning{Cause: err}
+			return r.daemonErr(err)
 		}
 		if len(result.Items) > 0 {
 			return nil

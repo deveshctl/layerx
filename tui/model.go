@@ -2150,8 +2150,24 @@ func (m *model) viewVisibleHeight() int {
 }
 
 func friendlyError(err error) string {
-	if _, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
-		return "Docker is not running. Please start Docker and try again."
+	if daemonErr, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
+		switch daemonErr.Engine {
+		case "docker":
+			if daemonErr.Host != "" {
+				return fmt.Sprintf("Docker daemon at %s is not reachable. Please check the daemon and try again.", daemonErr.Host)
+			}
+			return "Docker is not running. Please start Docker and try again."
+		case "podman":
+			if daemonErr.Host != "" {
+				return fmt.Sprintf("Podman connection at %s is not reachable. Please check the connection and try again.", daemonErr.Host)
+			}
+			return "Podman is not reachable. Please check the connection and try again."
+		default:
+			if daemonErr.Host != "" {
+				return fmt.Sprintf("Container engine at %s is not reachable. Please check the endpoint and try again.", daemonErr.Host)
+			}
+			return "Container engine is not reachable. Please check the endpoint and try again."
+		}
 	}
 	if pullErr, ok := errors.AsType[*image.ErrPullFailed](err); ok {
 		return fmt.Sprintf("Failed to pull image %q. Check the image name and your network.", pullErr.Ref)

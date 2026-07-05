@@ -22,9 +22,9 @@ jobs:
       # cannot. Crashes are surfaced by go test's non-zero exit; failing
       # corpora land under image/testdata/fuzz and should be committed
       # alongside the fix when one is found.
-      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=5m ./image/...
-      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=5m ./image/...
-      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=5m ./image/...
+      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=5m ./image
+      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=5m ./image
+      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=5m ./image
 
   vuln-scan:
     runs-on: ubuntu-latest

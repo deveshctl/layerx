@@ -217,19 +217,32 @@ source <(layerx completion bash)
 
 ## Container engines
 
-LayerX talks to any daemon that implements the Docker Engine REST API. Docker and Podman are both first-class.
+LayerX talks to any daemon that implements the Docker Engine REST API. Docker and Podman are both first-class. LayerX honours each engine's *native* notion of "which daemon am I currently talking to", so once you've configured your engine the normal way — `docker context use my-remote`, `podman system connection default staging` — `layerx` inspects the same daemon your engine's own CLI would.
 
 ### Docker (default)
 
-No setup required — LayerX uses your `DOCKER_HOST` if set, otherwise the platform default socket:
+No setup required. LayerX resolves the endpoint the same way `docker` itself does:
 
-- Linux: `/var/run/docker.sock`
-- macOS: `~/.docker/run/docker.sock`
-- Windows: `\\.\pipe\docker_engine`
+1. `DOCKER_HOST` env if set — for scripted or CI workflows.
+2. `DOCKER_CONTEXT` env if set — overrides the active context per-shell.
+3. The active Docker context from `~/.docker/config.json` (`docker context use <name>`).
+4. The platform default socket:
+   - Linux: `/var/run/docker.sock`
+   - macOS: `~/.docker/run/docker.sock`
+   - Windows: `\\.\pipe\docker_engine`
 
 ### Podman
 
-**Linux** — start the Podman socket and LayerX auto-detects it:
+Same idea, with Podman's own env vars and config files:
+
+1. `CONTAINER_HOST` env if set (also `DOCKER_HOST` for back-compat).
+2. `CONTAINER_CONNECTION` env if set — overrides the active connection per-shell.
+3. The default connection from `~/.config/containers/podman-connections.json` or `containers.conf` (`podman system connection default <name>`).
+4. On Linux, the rootless / rootful Podman socket if the systemd unit is running.
+
+The upshot: once you've run `podman system connection add` / `podman system connection default`, `layerx --engine podman <image>` just works. No `DOCKER_HOST=$(podman system connection list …)` shim required.
+
+**Linux quick start** — no connections configured, just the local socket:
 
 ```bash
 systemctl --user enable --now podman.socket
@@ -238,11 +251,12 @@ layerx --engine podman alpine:3
 
 If Podman is your only engine, `--engine auto` (the default) falls back to the Podman socket when no Docker socket is found, so the flag is optional.
 
-**macOS / Windows** — Podman Machine forwards the socket via SSH or a named pipe; set `DOCKER_HOST` from your active connection:
+**macOS / Windows** — Podman Machine ships with a preconfigured connection. Once `podman machine start` is running, `layerx --engine podman alpine:3` picks up the machine's connection automatically. To point at a different remote, use Podman's own tooling:
 
 ```bash
-DOCKER_HOST=$(podman system connection list --format '{{.URI}}' | head -n 1) \
-  layerx --engine podman alpine:3
+podman system connection add prod ssh://user@prod-host/run/user/1000/podman/podman.sock
+podman system connection default prod
+layerx --engine podman alpine:3        # inspects on prod, no env plumbing
 ```
 
 ### Archive mode (no daemon required)
@@ -254,7 +268,7 @@ podman save -o alpine.tar alpine:3
 layerx ./alpine.tar
 ```
 
-Useful for airgapped machines, CI runners without docker-in-docker, and anyone who prefers not to run a daemon.
+Useful for airgapped machines, CI runners without docker-in-docker, and anyone who prefers not to run a daemon. Archive mode never reads Docker contexts or Podman connections — the file on disk *is* the source of truth.
 
 ### Multi-platform images (`--platform`)
 
