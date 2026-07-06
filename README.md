@@ -153,7 +153,7 @@ sudo rpm -i layerx_linux_arm64.rpm
 
 ### Direct download
 
-Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). Replace `latest` with a specific tag (e.g. `v1.5.0`) in any URL above.
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). Replace `latest` with a specific tag (e.g. `v1.5.1`) in any URL above.
 
 ### Build from source
 
@@ -418,7 +418,7 @@ layerx cache prune --all             # empty
 Every release ships a cosign-signed `checksums.txt`, an SPDX SBOM per archive, and a SLSA Build Level 3 provenance attestation. Verifying both proves the archive came out of this repository's release workflow on GitHub-hosted runners.
 
 ```bash
-TAG=v1.5.0   # the release you downloaded
+TAG=v1.5.1   # the release you downloaded
 ARCHIVE=layerx_linux_amd64.tar.gz
 BASE="https://github.com/deveshctl/layerx/releases/download/${TAG}"
 
