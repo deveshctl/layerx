@@ -207,7 +207,7 @@ docker run --rm -it \
 
 Trade-offs vs. the native binary: the image is a distroless base plus the layerx binary (a few MB of overhead — check the release page for the exact compressed size), it needs the `--group-add` step on Linux for Docker's `root:docker`-owned socket, and file-extraction (`x` key) writes into the container's filesystem — bind-mount an output directory if you want the file on the host. Native binaries are the smoother path for daily use; the container image shines in CI runners that already have an engine but no package manager, and for pinning the exact LayerX version alongside your other build tooling.
 
-> **First release only:** GHCR packages default to private. After the first successful push, the maintainer flips the package to public visibility from the package page (see [docs/releasing.md](docs/releasing.md#first-time-ghcr-setup)). Once public, `docker pull` needs no authentication.
+> **First release only:** GHCR packages default to private, so `docker pull` returns 401 until visibility is flipped to public — usually within a few hours of a new release landing.
 
 ### Build from source
 

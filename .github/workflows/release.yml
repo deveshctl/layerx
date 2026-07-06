@@ -135,7 +135,8 @@ jobs:
       # `packages: write` is what lets GITHUB_TOKEN push to ghcr.io. Note that
       # the resulting package must be manually flipped to public visibility
       # after the first push — GHCR defaults to private, and there is no API
-      # to flip this on publish. See docs/releasing.md for the exact UI path.
+      # to flip this on publish. Flip via the package settings UI on GitHub,
+      # or `gh api --method PATCH /user/packages/container/layerx -f visibility=public`.
       packages: write
       contents: read
     steps:
