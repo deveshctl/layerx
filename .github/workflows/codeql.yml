@@ -1,0 +1,60 @@
+# CodeQL static analysis. Runs on pushes to main, PRs targeting main, and
+# a weekly schedule so long-lived branches also get re-scanned as CodeQL's
+# query set evolves. Results land in GitHub code-scanning; the scheduled
+# and push runs are also what OpenSSF Scorecard's SAST check looks for.
+#
+# Pinned by full commit SHA per the Pinned-Dependencies convention used
+# across the other workflows. Renovate's digest updater keeps the SHAs
+# current.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 04:27 UTC every Tuesday — off-the-hour to avoid GH Actions queue spikes,
+    # and staggered off Scorecard's Monday slot so the two don't compete.
+    - cron: '27 4 * * 2'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Publish findings to GitHub code-scanning.
+      security-events: write
+      # CodeQL reads workflow metadata to attribute alerts to the run.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go]
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+        with:
+          languages: ${{ matrix.language }}
+
+      # Autobuild works for straight `go build ./...` projects; layerx has
+      # no code generation or non-standard build steps, so the default path
+      # covers every package.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+        with:
+          category: /language:${{ matrix.language }}
