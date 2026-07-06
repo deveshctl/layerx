@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Multi-arch container image published to
+  `ghcr.io/deveshctl/layerx` on every tagged release (linux/amd64 +
+  linux/arm64). The image reuses the exact binary produced by GoReleaser,
+  so `layerx --version` matches across brew, scoop, deb, rpm,
+  direct-download, and the container image. Runs on Docker, Podman, or
+  any OCI runtime. See the "Container image" section of the README for
+  socket-mount examples and the `--group-add` note for Docker on Linux.
+
+### Changed
+- Extend the PR-time fuzz smoke budget from 30s to 60s per target. The
+  30s window occasionally exceeded its deadline on shared CI runners
+  while a worker was still processing a slow input from the corpus,
+  surfacing as a spurious "context deadline exceeded" failure with no
+  crasher reproducer. The nightly fuzz workflow retains its longer
+  budgets and is unchanged.
+
 ### Fixed
 - Bound the decompressed byte count walked by the per-layer tar reader in
   `findFileInLayer`. Previously a crafted gzip stream (tiny compressed
@@ -17,14 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the ceiling already used when loading layer blobs from a spooled image
   archive. Legitimate images are unaffected; malformed inputs return a
   structured "reading layer tar" error instead of stalling.
-
-### Changed
-- Extend the PR-time fuzz smoke budget from 30s to 60s per target. The
-  30s window occasionally exceeded its deadline on shared CI runners
-  while a worker was still processing a slow input from the corpus,
-  surfacing as a spurious "context deadline exceeded" failure with no
-  crasher reproducer. The nightly fuzz workflow retains its longer
-  budgets and is unchanged.
 
 ## [v1.5.1] - 2026-07-06
 
