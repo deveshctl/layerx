@@ -516,7 +516,13 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 
 	// filePath is already cleaned (no leading slash) by the caller.
 
-	tr := tar.NewReader(r)
+	// Cap the decompressed byte count walked by the tar reader. Without this
+	// a crafted gzip stream (tiny compressed input, huge expanded output) can
+	// make tar.Reader consume unbounded bytes when skipping between entries —
+	// the per-entry MaxSaveSize check below only bounds reads of the matched
+	// file, not the walk itself. MaxLayerBlobSize matches the ceiling used
+	// when loading layer blobs from a spooled image archive.
+	tr := tar.NewReader(io.LimitReader(r, MaxLayerBlobSize+1))
 
 	// Walk the full layer once. A regular entry for filePath in the same
 	// layer wins over an earlier-positioned whiteout for the same path —

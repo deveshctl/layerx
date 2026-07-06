@@ -63,12 +63,15 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.26'
-      # Short PR-time fuzz smoke. Each fuzz target gets 30s; the nightly
+      # Short PR-time fuzz smoke. Each fuzz target gets 60s; the nightly
       # workflow runs longer budgets. The matrix expands as new Fuzz* targets
       # are added — keep this list in sync with image/*_fuzz_test.go.
-      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=30s ./image
-      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=30s ./image
-      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=30s ./image
+      # 60s (up from 30s) leaves headroom past Go's coverage-gathering warmup
+      # so a worker landing on a slow input near the deadline doesn't trip
+      # "context deadline exceeded" on shared runners.
+      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=60s ./image
+      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=60s ./image
+      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=60s ./image
 
   test-podman:
     runs-on: ubuntu-latest
