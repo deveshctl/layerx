@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Bound the decompressed byte count walked by the per-layer tar reader in
+  `findFileInLayer`. Previously a crafted gzip stream (tiny compressed
+  input expanding to a huge tar body) could make the tar walker consume
+  unbounded bytes when skipping between entries — the existing per-file
+  `MaxSaveSize` cap only bounded reads of the matched file, not the walk
+  itself. The walk is now capped at `MaxLayerBlobSize` (16 GiB), matching
+  the ceiling already used when loading layer blobs from a spooled image
+  archive. Legitimate images are unaffected; malformed inputs return a
+  structured "reading layer tar" error instead of stalling.
+
+### Changed
+- Extend the PR-time fuzz smoke budget from 30s to 60s per target. The
+  30s window occasionally exceeded its deadline on shared CI runners
+  while a worker was still processing a slow input from the corpus,
+  surfacing as a spurious "context deadline exceeded" failure with no
+  crasher reproducer. The nightly fuzz workflow retains its longer
+  budgets and is unchanged.
+
 ## [v1.5.1] - 2026-07-06
 
 Multi-engine polish: LayerX now honours the active Docker context and
