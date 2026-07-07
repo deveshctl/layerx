@@ -115,6 +115,9 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 			}
 		}
 	} else {
+		if in.offset > len(in.files) {
+			in.offset = len(in.files)
+		}
 		end := max(min(in.offset+contentHeight, len(in.files)), in.offset)
 		visible := in.files[in.offset:end]
 
