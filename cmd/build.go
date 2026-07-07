@@ -54,7 +54,14 @@ layerx asks the engine to write the image ID to a temporary file via
 
 On a successful build, layerx hands the image ID off to the TUI exactly as
 "layerx IMAGE" would. On a failed build, layerx exits with the engine's
-exit code and does not launch the TUI.`,
+exit code and does not launch the TUI.
+
+Flag ordering: layerx flags (--engine, --no-cache, --json) must appear
+BEFORE "build" in the invocation — arguments after "build" are forwarded
+verbatim to the engine and layerx never sees them:
+
+  layerx --engine podman build -t myimage .   # correct
+  layerx build --engine podman -t myimage .   # wrong: --engine forwarded to engine`,
 	Example: `  # Build the current directory and inspect the result
   layerx build -t myimage .
 

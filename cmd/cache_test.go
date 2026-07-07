@@ -233,8 +233,9 @@ func TestCachePrune_AllDryRun_DoesNotTouchDisk(t *testing.T) {
 	assert.Contains(t, out, "freeing")
 	// Bare prune is purely a dry run; the hint must point at the commands
 	// that actually remove entries so users don't think prune ran.
-	assert.Contains(t, out, "--all to remove every entry")
+	assert.Contains(t, out, "layerx cache prune --all")
 	assert.Contains(t, out, "--older-than DURATION")
+	assert.Contains(t, out, "--dry-run  preview")
 
 	// Disk untouched.
 	for _, d := range []string{digestA, digestB} {

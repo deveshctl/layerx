@@ -15,8 +15,8 @@ func init() {
 }
 
 var completionCmd = &cobra.Command{
-	Use:   "completion [bash|zsh|fish|powershell]",
-	Short: "Generate shell completion script",
+	Use:   "completion <shell>",
+	Short: "Generate shell completion script for bash, zsh, fish, or powershell",
 	Long: `Generate an autocompletion script for the specified shell.
 
 The script enables tab completion for subcommands, flags, and image
