@@ -48,9 +48,6 @@ func (r *PodmanResolver) Resolve() (Endpoint, error) {
 	if h := r.env("CONTAINER_HOST"); h != "" {
 		return Endpoint{Host: h, Source: "env:CONTAINER_HOST"}, nil
 	}
-	if h := r.env("DOCKER_HOST"); h != "" {
-		return Endpoint{Host: h, Source: "env:DOCKER_HOST"}, nil
-	}
 
 	// Read whichever file exists. json first, since 4.4+ writes both and
 	// treats the json file as authoritative.
@@ -65,25 +62,31 @@ func (r *PodmanResolver) Resolve() (Endpoint, error) {
 		requested = defaultName
 		origin = cfgSource // e.g. "podman-connections.json" or "containers.conf"
 	}
-	if requested == "" {
-		return Endpoint{}, nil
+	if requested != "" {
+		uri, ok := conns[requested]
+		if !ok {
+			names := make([]string, 0, len(conns))
+			for k := range conns {
+				names = append(names, k)
+			}
+			nameSort(names)
+			return Endpoint{}, &ErrConnectionNotFound{
+				Engine:    "podman",
+				Requested: requested,
+				Available: names,
+				Origin:    origin,
+			}
+		}
+		return Endpoint{Host: uri, Source: "podman-connection:" + requested}, nil
 	}
 
-	uri, ok := conns[requested]
-	if !ok {
-		names := make([]string, 0, len(conns))
-		for k := range conns {
-			names = append(names, k)
-		}
-		nameSort(names)
-		return Endpoint{}, &ErrConnectionNotFound{
-			Engine:    "podman",
-			Requested: requested,
-			Available: names,
-			Origin:    origin,
-		}
+	// DOCKER_HOST as a last-resort back-compat fallback: only consulted when
+	// no Podman-specific env var or config file named a connection.
+	if h := r.env("DOCKER_HOST"); h != "" {
+		return Endpoint{Host: h, Source: "env:DOCKER_HOST"}, nil
 	}
-	return Endpoint{Host: uri, Source: "podman-connection:" + requested}, nil
+
+	return Endpoint{}, nil
 }
 
 // loadConnections reads whichever of the two Podman config files exists on
