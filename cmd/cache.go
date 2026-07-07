@@ -102,7 +102,7 @@ func init() {
 	cachePruneCmd.Flags().BoolVar(&flagCacheAll, "all", false,
 		"remove every entry under the cache directory")
 	cachePruneCmd.Flags().BoolVar(&flagCacheDryRun, "dry-run", false,
-		"print actions without removing (default when no other flag is set)")
+		"preview removals without deleting (implicit when no other flag is given)")
 	cachePruneCmd.MarkFlagsMutuallyExclusive("older-than", "all")
 
 	cacheCmd.AddCommand(cacheListCmd)
@@ -160,10 +160,10 @@ func runCachePrune(cmd *cobra.Command, _ []string) error {
 	// On a bare `prune` (no flags), nothing was actually removed. Hint at
 	// the commands that would, so users don't think the dry-run did the job.
 	if bareDryRun && len(res.Removed) > 0 {
-		fmt.Fprintln(cmd.OutOrStdout(),
-			"\nThis was a dry run. Re-run with --all to remove every entry,")
-		fmt.Fprintln(cmd.OutOrStdout(),
-			"or with --older-than DURATION (e.g. 7d, 12h, 2w) to remove a subset.")
+		fmt.Fprintln(cmd.OutOrStdout(), "\nThis was a dry run. To remove entries, use:")
+		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --all                      remove all entries")
+		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --older-than DURATION      remove entries older than e.g. 7d, 12h, 2w")
+		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --older-than 7d --dry-run  preview what --older-than would remove")
 	}
 
 	// Exit 1 only when the prune accomplished nothing AND a partial

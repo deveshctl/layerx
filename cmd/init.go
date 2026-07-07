@@ -48,6 +48,9 @@ Refuses to overwrite an existing .layerx.yaml unless --force is set.`,
 func init() {
 	initCmd.Flags().StringVar(&flagInitFlavour, "flavour", "",
 		fmt.Sprintf("starter config flavour (%s)", flavourList()))
+	initCmd.Flags().StringVar(&flagInitFlavour, "flavor", "",
+		fmt.Sprintf("starter config flavour (%s)", flavourList()))
+	_ = initCmd.Flags().MarkHidden("flavor")
 	initCmd.Flags().BoolVar(&flagInitForce, "force", false,
 		"overwrite an existing .layerx.yaml")
 	rootCmd.AddCommand(initCmd)

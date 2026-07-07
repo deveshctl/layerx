@@ -64,7 +64,7 @@ var (
 
 var compareCmd = &cobra.Command{
 	Use:   "compare [flags] OLD_IMAGE NEW_IMAGE",
-	Short: "Compare two images and surface size/efficiency deltas",
+	Short: "Compare two images and surface size/efficiency deltas (exit 1 on regression)",
 	Long: `Compare two images and report size, efficiency, layer, file, and waste
 deltas in a deterministic, CI-friendly text report.
 
@@ -103,7 +103,10 @@ See "layerx --help" for details on --engine and --no-cache.`,
   layerx compare --no-cache myapp:prev myapp:next
 
   # CI gate: fails non-zero on regression
-  layerx compare myapp:prev myapp:next || echo "image regressed"`,
+  layerx compare myapp:prev myapp:next || echo "image regressed"
+
+  # Script-friendly: extract the machine-parseable verdict line
+  layerx compare myapp:prev myapp:next | grep '^verdict:'  # ok | regression | noop`,
 	Args:          compareArgs,
 	RunE:          runCompareCmd,
 	SilenceErrors: true,
