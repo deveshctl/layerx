@@ -70,6 +70,12 @@ COPY --from=stage /out/layerx /usr/local/bin/layerx
 # No shell is present, so the exec-form ENTRYPOINT executes layerx directly
 # — SIGINT / SIGTERM reach the TUI cleanly without a shell wrapper swallowing
 # them.
+# termenv (used by lipgloss) detects color support from these vars.
+# distroless ships no terminfo database, so TERM alone is insufficient —
+# COLORTERM=truecolor enables 24-bit hex colors defined in tui/styles.go.
+ENV TERM=xterm-256color \
+    COLORTERM=truecolor
+
 WORKDIR /home/nonroot
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/layerx"]
