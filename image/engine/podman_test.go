@@ -30,12 +30,14 @@ func TestPodmanResolver_ContainerHostEnvWins(t *testing.T) {
 
 func TestPodmanResolver_DockerHostEnvHonouredForBackCompat(t *testing.T) {
 	// Users who scripted DOCKER_HOST=$(podman system connection list...)
-	// against v1.4.x layerx must keep working. CONTAINER_HOST takes
-	// priority over DOCKER_HOST when both are set (matches Podman CLI
-	// behaviour), but DOCKER_HOST alone still wins over on-disk config.
+	// against v1.4.x layerx must keep working. DOCKER_HOST is a last-resort
+	// fallback: it wins when no Podman-specific env var or config file named
+	// a connection (empty Default and no CONTAINER_CONNECTION).
 	fs := newMemFS("/h", "/h/.config")
+	// Connections file present but Default is empty — no named connection
+	// selected, so resolution falls through to DOCKER_HOST.
 	fs.putStr("/h/.config/containers/podman-connections.json", `{
-"Connection":{"Default":"prod","Connections":{"prod":{"URI":"unused"}}}}`)
+"Connection":{"Default":"","Connections":{"prod":{"URI":"unused"}}}}`)
 
 	r := newPodmanResolverWithDeps(staticEnv(map[string]string{
 		"DOCKER_HOST": "tcp://legacy:2375",
