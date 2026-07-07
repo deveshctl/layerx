@@ -4,6 +4,10 @@
 #      SBOM per archive.
 #   2. The SLSA reusable workflow generates a non-forgeable provenance
 #      attestation over the checksums file and uploads it to the release.
+#   3. The ghcr job packages the same goreleaser-built Linux binaries into
+#      a multi-arch OCI image and pushes it to ghcr.io/deveshctl/layerx.
+#      Reusing the release-built binary keeps `layerx --version` identical
+#      across brew / scoop / deb / rpm / direct-download / container.
 #
 # Verification commands live in SECURITY.md.
 
@@ -13,6 +17,11 @@ on:
   push:
     tags:
       - "v*"
+  # Manual dispatch runs the container image build without publishing, so
+  # the Dockerfile and buildx wiring can be validated on a feature branch
+  # before cutting a real tag. The `push` flag on the build step below is
+  # gated on `event_name == 'push'`, so a dispatch run is always a dry run.
+  workflow_dispatch:
 
 # Workflow-default is read-only. Each job opts into the writes it needs.
 permissions:
@@ -53,12 +62,19 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          # `--skip=publish` on workflow_dispatch: we still build every archive
+          # (so the ghcr job has real Linux binaries to package) but don't cut
+          # a GitHub release. Tag runs use the full publish flow.
+          args: >-
+            release
+            --clean
+            ${{ github.event_name == 'workflow_dispatch' && '--snapshot --skip=publish --skip=sign' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
 
       - name: Export checksums for SLSA provenance
+        if: github.event_name == 'push'
         id: hash
         run: |
           set -euo pipefail
@@ -73,8 +89,33 @@ jobs:
           fi
           echo "hashes=$(base64 -w0 < "$checksum_path")" >> "$GITHUB_OUTPUT"
 
+      # Ship the Linux binaries downstream to the ghcr job. We only need the
+      # linux_* build outputs; the archives, deb/rpm, and checksums stay in
+      # dist/ for goreleaser's own publish step and are not required for the
+      # image. Retention is short — this artifact is scratch state, not a
+      # release asset.
+      #
+      # upload-artifact@v4 strips the longest common leading directory when
+      # matching multiple globs — here `dist/` is stripped, so the artifact
+      # contains `layerx_linux_amd64_v1/layerx` etc. The ghcr job's
+      # `download-artifact` step re-adds the prefix via `path: dist/`, which
+      # is what the Dockerfile's `COPY dist/ /src/dist/` expects. If you
+      # ever change the download path, update the Dockerfile in lockstep.
+      - name: Upload Linux binaries for image build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: layerx-linux-binaries
+          path: |
+            dist/layerx_linux_amd64*/layerx
+            dist/layerx_linux_arm64*/layerx
+          if-no-files-found: error
+          retention-days: 1
+
   provenance:
     needs: [goreleaser]
+    # SLSA generator only makes sense for a real release. Skip on manual
+    # dispatch (no artifacts to attest, no release to upload to).
+    if: github.event_name == 'push'
     permissions:
       # Required by the SLSA generator: mint OIDC token, write the release.
       id-token: write
@@ -86,3 +127,111 @@ jobs:
     with:
       base64-subjects: ${{ needs.goreleaser.outputs.hashes }}
       upload-assets: true
+
+  ghcr:
+    needs: [goreleaser]
+    runs-on: ubuntu-latest
+    permissions:
+      # `packages: write` is what lets GITHUB_TOKEN push to ghcr.io. Note that
+      # the resulting package must be manually flipped to public visibility
+      # after the first push — GHCR defaults to private, and there is no API
+      # to flip this on publish. Flip via the package settings UI on GitHub,
+      # or `gh api --method PATCH /user/packages/container/layerx -f visibility=public`.
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download release binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: layerx-linux-binaries
+          path: dist/
+
+      - name: Show binary layout (debug)
+        run: |
+          set -eux
+          find dist -maxdepth 3 -type f -printf '%p %s bytes\n'
+          # Binaries lose the +x bit through the artifact upload/download
+          # round-trip; the Dockerfile's `install -m 0755` restores it, but
+          # we also chmod here so anything that reads dist/ before the image
+          # build sees a usable binary.
+          find dist -type f -name layerx -exec chmod 0755 {} +
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        # Login is only needed when we actually push. workflow_dispatch runs
+        # are dry runs (build-only), so skip auth to avoid unnecessary token
+        # usage.
+        if: github.event_name == 'push'
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute lowercase image name
+        id: image
+        # GHCR rejects any mixed-case path segment; `github.repository_owner`
+        # preserves the login's original casing. Force lowercase so the
+        # workflow keeps working if this repo is ever transferred to an org
+        # or user with mixed-case in their name.
+        run: |
+          set -eu
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "name=ghcr.io/${owner}/layerx" >> "$GITHUB_OUTPUT"
+
+      - name: Extract image metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          # Preserve the `v` prefix in image tags so they match the git tag
+          # scheme exactly (`v1.5.1`, `v1.5`, `v1`). The default `{{version}}`
+          # helper strips the leading `v`; use `v{{version}}` etc. to keep it.
+          # `latest` is gated to non-prerelease tag pushes.
+          # Pre-release tags (v1.5.0-rc.1) skip the major/minor rollups and
+          # `latest` automatically via the semver helper + the enable clause.
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=dispatch-${{ github.run_id }},enable=${{ github.event_name == 'workflow_dispatch' }}
+          # metadata-action fills in `source`, `revision`, `version`, and
+          # `created` from workflow context; the static labels below just make
+          # the intent explicit and stop `docker inspect` from picking up
+          # whatever GitHub's repo description happens to be that day.
+          labels: |
+            org.opencontainers.image.title=layerx
+            org.opencontainers.image.description=Terminal container image layer explorer — inspect Docker, Podman, and OCI images.
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=deveshctl
+
+      - name: Build and push image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          # metadata-action emits every OCI label we care about (title,
+          # description, source, revision, version, created, licenses,
+          # vendor). These override the LABEL defaults in the Dockerfile,
+          # so `docker inspect ghcr.io/...` shows the git tag and commit
+          # rather than the Dockerfile's `dev`/`unknown` placeholders.
+          labels: ${{ steps.meta.outputs.labels }}
+          # GitHub Actions cache backend for buildx. `mode=max` caches every
+          # intermediate layer (not just the final one), so repeated releases
+          # short-circuit on the runtime base image + the unchanged staging
+          # step, and only the binary-copy layer rebuilds.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
