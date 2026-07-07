@@ -180,7 +180,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 
 	noCache := noCacheRequested()
 
-	if os.Getenv("CI") == "true" {
+	if v := os.Getenv("CI"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
 		if err := validateCLIThresholdFlags(ciCmd); err != nil {
 			return err
 		}

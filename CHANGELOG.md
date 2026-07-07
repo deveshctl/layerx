@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budgets and is unchanged.
 
 ### Fixed
+### Fixed
+- Accept all standard truthy values for the `CI` environment variable
+  (`true`, `True`, `TRUE`, `1`, `yes`), not only the exact lowercase
+  string `"true"`. AppVeyor sets `CI=True`; some Kubernetes pipelines
+  use `CI=1`. Mismatches previously caused `layerx IMAGE` to open the
+  interactive TUI instead of running CI checks on those platforms.
+- `FormatSignedBytes(math.MinInt64)` no longer produces a double-minus
+  result. Negating `MinInt64` overflows in two's-complement; the
+  magnitude is now computed via `uint64` arithmetic, which is
+  overflow-safe.
+- The file-tree renderer in the TUI now clamps the scroll offset to the
+  current file list length before slicing, guarding against a future
+  out-of-bounds panic if any code path shrinks the list without
+  resetting the offset.
+- Podman connection resolution now checks `CONTAINER_CONNECTION` and the
+  active Podman connection before falling back to `DOCKER_HOST`. The
+  previous order meant a legacy `DOCKER_HOST` in the environment would
+  silently shadow an explicit `CONTAINER_CONNECTION=staging` override.
 - Bound the decompressed byte count walked by the per-layer tar reader in
   `findFileInLayer`. Previously a crafted gzip stream (tiny compressed
   input expanding to a huge tar body) could make the tar walker consume
