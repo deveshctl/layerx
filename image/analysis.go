@@ -6,7 +6,6 @@ import (
 	"fmt"
 )
 
-// Analysis holds the complete result of inspecting an image.
 type Analysis struct {
 	ImageRef        string
 	Layers          []Layer
@@ -22,8 +21,6 @@ type AnalyzeOptions struct {
 	// so the next default-mode run is a hit.
 	NoCache bool
 
-	// Progress, if non-nil, receives ProgressEvents during the run. Same
-	// semantics as AnalyzeWithProgress; sending PhaseCacheLoad on hit.
 	Progress chan<- ProgressEvent
 
 	// CacheRoot overrides CacheDir() for this call. Empty = use CacheDir().
@@ -32,14 +29,10 @@ type AnalyzeOptions struct {
 	CacheRoot string
 }
 
-// Analyze resolves an image and computes stacked file trees. Backwards-compatible
-// shim around AnalyzeWithOptions; caching is enabled, no progress channel.
 func Analyze(ctx context.Context, resolver Resolver, imageRef string) (*Analysis, error) {
 	return AnalyzeWithOptions(ctx, resolver, imageRef, AnalyzeOptions{})
 }
 
-// AnalyzeWithProgress is preserved for callers that already pass a progress
-// channel. Equivalent to AnalyzeWithOptions{Progress: progress}.
 func AnalyzeWithProgress(ctx context.Context, resolver Resolver, imageRef string, progress chan<- ProgressEvent) (*Analysis, error) {
 	return AnalyzeWithOptions(ctx, resolver, imageRef, AnalyzeOptions{Progress: progress})
 }

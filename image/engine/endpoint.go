@@ -37,7 +37,6 @@ type Endpoint struct {
 	Source string
 }
 
-// IsZero reports whether e is the zero value.
 func (e Endpoint) IsZero() bool { return e.Host == "" }
 
 // Resolver reports the currently active endpoint for one engine on this

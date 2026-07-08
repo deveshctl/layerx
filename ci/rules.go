@@ -108,8 +108,6 @@ func (r LowestEfficiency) Evaluate(ctx EvalContext) []RuleResult {
 	}}
 }
 
-// HighestWastedBytes fails if wasted bytes exceed the threshold.
-// A threshold of 0 disables this rule (always passes).
 type HighestWastedBytes struct {
 	Threshold int64
 }
@@ -132,8 +130,6 @@ func (r HighestWastedBytes) Evaluate(ctx EvalContext) []RuleResult {
 	}}
 }
 
-// HighestUserWastedPercent fails if wasted bytes as a fraction of total size exceed the threshold.
-// A threshold of 0 disables this rule (always passes).
 type HighestUserWastedPercent struct {
 	Threshold float64
 }

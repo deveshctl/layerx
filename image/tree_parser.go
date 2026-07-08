@@ -30,7 +30,6 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 
 		switch hdr.Typeflag {
 		case tar.TypeReg, tar.TypeDir, tar.TypeSymlink, tar.TypeLink, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
-			// supported
 		default:
 			// Skip TypeXGlobalHeader, TypeXHeader, TypeGNULongName, TypeGNULongLink, etc.
 			// Go's tar reader merges most extended-header forms transparently; the

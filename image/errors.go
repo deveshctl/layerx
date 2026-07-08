@@ -94,9 +94,6 @@ func (e *ErrArchivePermission) Error() string {
 
 func (e *ErrArchivePermission) Unwrap() error { return e.Cause }
 
-// ErrInvalidArchive is returned when the file exists and is readable but is
-// not a valid docker-save / OCI image archive (missing manifest.json,
-// malformed manifest, malformed config, etc).
 type ErrInvalidArchive struct {
 	Path  string
 	Cause error

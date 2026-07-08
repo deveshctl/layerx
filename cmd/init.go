@@ -99,9 +99,6 @@ func isTerminal(r io.Reader) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
-// promptFlavour shows a numbered selector and reads the user's choice.
-// 1) node, 2) python, 3) java, 4) go, 5) generic. Default (empty input)
-// is generic.
 func promptFlavour(in io.Reader, errw io.Writer) (string, error) {
 	fmt.Fprintln(errw, "Pick a starter config flavour:")
 	for i, f := range validFlavours {

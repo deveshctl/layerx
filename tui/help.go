@@ -169,7 +169,6 @@ func helpLayoutColumns(sections []helpSection) [][]helpSection {
 			{s[4], s[5]},
 		}
 	default:
-		// Fallback: chunk into up to three roughly equal columns.
 		n := len(sections)
 		per := (n + 2) / 3
 		var cols [][]helpSection

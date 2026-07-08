@@ -91,8 +91,6 @@ func (r BlockPathRule) Evaluate(ctx EvalContext) []RuleResult {
 	return results
 }
 
-// DenyWastePathRule fails for any wasted file (LayerCount >= 2) whose path
-// matches one of Patterns. Reads ctx.Efficiency.WastedFiles directly.
 type DenyWastePathRule struct {
 	ID       string
 	Patterns []string

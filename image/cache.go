@@ -103,9 +103,6 @@ const (
 	maxCacheTTLDays = 100000
 )
 
-// CacheEntry is one record from the cache root, or one removal result.
-// Digest is the raw directory name (no "sha256:" prefix), matching how
-// it is stored on disk and accepted by the existing cache helpers.
 type CacheEntry struct {
 	Digest   string
 	Size     int64     // bytes — size of the layers.gob file on disk
@@ -166,10 +163,6 @@ var nowFn = time.Now
 // dirs and retry. Production code never overwrites it.
 var removeAllFn = os.RemoveAll
 
-// loadPruneLimits returns the active TTL and size cap, applying env-var
-// overrides on top of defaults. Unparseable or negative values fall back
-// to the default with a single PhaseCacheWarn so the user knows their
-// override was ignored. progress may be nil.
 func loadPruneLimits(progress chan<- ProgressEvent) (ttl time.Duration, maxBytes int64) {
 	ttlDays := defaultCacheTTLDays
 	if v := os.Getenv("LAYERX_CACHE_TTL_DAYS"); v != "" {
@@ -238,9 +231,6 @@ func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
 	}
 }
 
-// cachePath returns the absolute path to the gob file for a given digest
-// under root. The digest is normalized (sha256: prefix stripped) and
-// validated to ensure the directory name cannot escape root.
 func cachePath(root, digest string) (string, error) {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
@@ -465,9 +455,6 @@ func writeMetaSidecar(dir, imageRef string) {
 	}
 }
 
-// readMetaSidecar returns the image_ref recorded in {dir}/meta.json, or
-// "" when the file is absent, unreadable, or malformed. Never errors:
-// callers (ListCache) treat empty as "<unknown>".
 func readMetaSidecar(dir string) string {
 	body, err := os.ReadFile(filepath.Join(dir, "meta.json"))
 	if err != nil {
@@ -489,9 +476,6 @@ func readMetaSidecar(dir string) string {
 	return ref
 }
 
-// tempFilename returns prefix + 16 random hex chars. The caller chooses the
-// directory; uniqueness is provided by the random suffix and enforced by
-// O_EXCL on the saveCache create call.
 func tempFilename(prefix string) (string, error) {
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -661,7 +645,6 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		return res, nil
 	}
 
-	// TTL pass.
 	if opts.TTL > 0 {
 		survivors := records[:0]
 		t := now()
@@ -675,7 +658,6 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		records = survivors
 	}
 
-	// Size-cap pass.
 	if opts.MaxBytes > 0 {
 		var total int64
 		for _, r := range records {

@@ -141,7 +141,6 @@ func runCachePrune(cmd *cobra.Command, _ []string) error {
 		opts.All = true
 		opts.DryRun = flagCacheDryRun
 	default:
-		// Bare prune (or only --dry-run): dry run that lists everything.
 		opts.All = true
 		opts.DryRun = true
 		bareDryRun = true
@@ -191,7 +190,6 @@ func parseOlderThan(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty duration")
 	}
-	// Split into leading-digit prefix and unit suffix.
 	i := 0
 	for i < len(s) && (s[i] == '-' || s[i] == '+' || unicode.IsDigit(rune(s[i]))) {
 		i++
@@ -278,10 +276,6 @@ func renderListTable(w io.Writer, root string, entries []image.CacheEntry) {
 	fmt.Fprintf(w, "\nTotal: %d entries, %s\n", len(entries), image.FormatBytes(total))
 }
 
-// renderPruneResult writes per-entry lines and a summary footer.
-// In dryRun mode, lines say "Would remove ..." and the footer says
-// "Would remove N entries, freeing X". On a real run, "Removed ..."
-// and "Removed N entries, freed X". Empty results print "Nothing to prune."
 func renderPruneResult(w io.Writer, res image.PruneResult, dryRun bool) {
 	if len(res.Removed) == 0 {
 		fmt.Fprintln(w, "Nothing to prune.")

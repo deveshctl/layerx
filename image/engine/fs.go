@@ -26,9 +26,6 @@ type files interface {
 	// a bad config from wedging layerx.
 	readFile(path string) ([]byte, error)
 
-	// stat returns fs.FileInfo for the path or a wrapped *fs.PathError.
-	// Used to detect whether an optional config file exists at all,
-	// without loading its contents.
 	stat(path string) (fs.FileInfo, error)
 
 	// readDir returns the immediate children of dir. Used to enumerate
@@ -36,9 +33,6 @@ type files interface {
 	// context names actually present on disk.
 	readDir(dir string) ([]fs.DirEntry, error)
 
-	// homeDir returns the current user's home directory, matching
-	// os.UserHomeDir semantics. Used to build ~/.docker/ and
-	// ~/.config/containers/ paths without shelling out.
 	homeDir() (string, error)
 
 	// configDir returns the OS's per-user config directory, matching
@@ -97,8 +91,6 @@ func (*pathTooLargeErr) Error() string {
 	return "config file exceeds 1 MiB — refusing to load"
 }
 
-// homePath joins home directory with elements. Empty home returns "".
-// Kept small: only used by the two Resolver constructors below.
 func homePath(f files, elem ...string) string {
 	home, err := f.homeDir()
 	if err != nil || home == "" {

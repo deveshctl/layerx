@@ -1,8 +1,5 @@
 package image
 
-// TreeLiveFileBytes returns the sum of file sizes in tree, excluding
-// directories and any nodes marked Removed (their subtrees are not
-// descended). Returns 0 for nil tree or nil root.
 func TreeLiveFileBytes(tree *FileTree) int64 {
 	if tree == nil || tree.Root == nil {
 		return 0

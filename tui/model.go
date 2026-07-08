@@ -17,7 +17,6 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
-// Config holds the parameters needed to start the TUI.
 type Config struct {
 	ImageRef string
 	Resolver image.Resolver
@@ -77,7 +76,6 @@ const (
 
 const maxFilterLen = 256
 
-// fileContentMsg is sent when async file extraction completes.
 type fileContentMsg struct {
 	requestID uint64
 	content   *image.FileContent
@@ -100,27 +98,22 @@ type highlightedMsg struct {
 	lines     []string
 }
 
-// analysisMsg is sent when the background fetch completes.
 type analysisMsg struct {
 	analysis *image.Analysis
 	err      error
 }
 
-// inspectMsg is sent when the quick image inspect completes.
 type inspectMsg struct {
 	meta *image.ImageMeta
 	err  error
 }
 
-// progressMsg reports loading progress from the resolver.
 type progressMsg struct {
 	event image.ProgressEvent
 }
 
-// spinnerTickMsg triggers a spinner frame advance.
 type spinnerTickMsg struct{}
 
-// clearCopyMsg clears the "Copied!" confirmation after a timeout.
 type clearCopyMsg struct{}
 
 // clearStatusMsg clears the transient status bar message after a timeout.
@@ -146,7 +139,6 @@ func (m *model) scheduleStatusClear(d time.Duration) tea.Cmd {
 	})
 }
 
-// fileSaveMsg is sent when async file extraction for save-to-disk completes.
 type fileSaveMsg struct {
 	requestID uint64
 	filename  string
@@ -241,7 +233,6 @@ type model struct {
 	fetchCancel context.CancelFunc
 }
 
-// NewModel creates a new model wired to real Docker data.
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -558,17 +549,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// When filter input is active, capture all keys.
 		if m.filterActive {
 			return m.handleFilterInput(msg)
 		}
 
-		// When waste overlay is open, capture all keys.
 		if m.showWaste {
 			return m.handleWasteOverlay(msg)
 		}
 
-		// Help toggle works when ready.
 		if key.Matches(msg, m.keys.Help) && m.state == stateReady {
 			m.showHelp = !m.showHelp
 			return m, nil
@@ -579,7 +567,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// When viewing a file, only scroll/close/search keys work.
 		if m.viewState == viewReady {
 			if m.viewSearchActive {
 				return m.handleViewerSearchInput(msg)
@@ -1101,8 +1088,6 @@ func (m model) finalLiveSize() int64 {
 	return total
 }
 
-// isTreeFocused reports whether the focused panel is the file tree (in either
-// single-pane mode or one of the two split-pane sub-panels).
 func (m model) isTreeFocused() bool {
 	return m.focus == focusTree || m.focus == focusTreeAgg
 }
@@ -1118,7 +1103,6 @@ func (m model) treeCursorFor(f focus) int {
 	return m.treeCursor
 }
 
-// treeOffsetFor mirrors treeCursorFor for scroll offsets.
 func (m model) treeOffsetFor(f focus) int {
 	if f == focusTreeAgg {
 		return m.aggOffset
@@ -1180,10 +1164,6 @@ func (m model) useTreeCollapse() bool {
 	return m.sortMode == sortNone && m.filterQuery == "" && !m.diffOnly
 }
 
-// currentTreeRoot returns the root for the *active* pane: the focused
-// sub-panel in split mode, otherwise the single tree pane. In single-pane
-// (aggregated=false) mode the result is StackedTrees[layerCursor]; in
-// split-pane mode it follows the focused sub-panel (top vs bottom).
 func (m model) currentTreeRoot() *image.FileNode {
 	return m.rootFor(m.activeTreeFocus())
 }
@@ -1646,7 +1626,6 @@ func (m model) viewReady() tea.View {
 	rightWidth := m.width - leftWidth - 1
 	// header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1) = 8
 	panelHeight := m.height - chromeRows
-
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
 	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())

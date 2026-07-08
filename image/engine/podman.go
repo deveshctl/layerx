@@ -29,8 +29,6 @@ type PodmanResolver struct {
 	files files
 }
 
-// NewPodmanResolver returns a resolver using the real process environment
-// and filesystem.
 func NewPodmanResolver() *PodmanResolver {
 	return &PodmanResolver{env: os.Getenv, files: osFiles{}}
 }
@@ -40,10 +38,8 @@ func newPodmanResolverWithDeps(e env, f files) *PodmanResolver {
 	return &PodmanResolver{env: e, files: f}
 }
 
-// Name reports the engine identifier this resolver handles.
 func (r *PodmanResolver) Name() string { return "podman" }
 
-// Resolve implements Resolver.Resolve.
 func (r *PodmanResolver) Resolve() (Endpoint, error) {
 	if h := r.env("CONTAINER_HOST"); h != "" {
 		return Endpoint{Host: h, Source: "env:CONTAINER_HOST"}, nil
@@ -142,9 +138,6 @@ type podmanConnectionsEntry struct {
 	URI string `json:"URI"`
 }
 
-// parsePodmanConnectionsJSON decodes the 4.4+ connections file. Returns
-// (name→URI, default name, err); malformed JSON is reported with the file
-// path.
 func parsePodmanConnectionsJSON(data []byte, path string) (map[string]string, string, error) {
 	var f podmanConnectionsFile
 	if err := json.Unmarshal(data, &f); err != nil {
@@ -264,8 +257,6 @@ func stripComment(line string) string {
 	return line
 }
 
-// splitKeyValue splits "key = value" into (key, value, true) or returns
-// ("", "", false) when there is no '='.
 func splitKeyValue(line string) (string, string, bool) {
 	eq := strings.IndexByte(line, '=')
 	if eq < 0 {
