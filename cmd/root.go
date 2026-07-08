@@ -16,9 +16,6 @@ var (
 	flagNoCacheFl bool
 )
 
-// noCacheRequested returns true when the user passed --no-cache on this
-// invocation. Wrapped in a helper so rootCmd, ciCmd, and compareCmd
-// share a single read site for the bypass intent.
 func noCacheRequested() bool {
 	return flagNoCacheFl
 }

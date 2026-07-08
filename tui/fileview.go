@@ -210,7 +210,6 @@ func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, 
 	queryRunes := []rune(strings.ToLower(query))
 	queryLen := len(queryRunes)
 
-	// Determine which occurrence on this line (if any) is the current match.
 	currentOccurrence := -1
 	if matchCursor < len(matches) && matches[matchCursor][0] == lineIdx {
 		// Count how many matches on this line precede the current one.

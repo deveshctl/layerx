@@ -32,7 +32,6 @@ const MaxSaveSize = 2 << 30 // 2 GiB
 // claims a single blob is petabytes.
 const MaxLayerBlobSize = 16 << 30 // 16 GiB
 
-// FileContent holds the result of extracting a file from an image.
 type FileContent struct {
 	Path      string
 	Data      []byte
@@ -41,7 +40,6 @@ type FileContent struct {
 	Binary    bool
 }
 
-// Extractor retrieves file contents from a container image.
 type Extractor interface {
 	Extract(ctx context.Context, imageRef string, filePath string) (*FileContent, error)
 	ExtractRaw(ctx context.Context, imageRef string, filePath string) ([]byte, error)
@@ -79,7 +77,6 @@ func IsBinary(data []byte) bool {
 	return false
 }
 
-// processContent applies binary detection and size limits to raw file data.
 func processContent(path string, data []byte, totalSize int64) *FileContent {
 	fc := &FileContent{
 		Path: path,
@@ -108,17 +105,14 @@ func processContent(path string, data []byte, totalSize int64) *FileContent {
 	return fc
 }
 
-// DockerExtractor extracts files from images via the Docker daemon.
 type DockerExtractor struct {
 	cli client.APIClient
 }
 
-// NewDockerExtractor creates an extractor using the provided Docker client.
 func NewDockerExtractor(cli client.APIClient) *DockerExtractor {
 	return &DockerExtractor{cli: cli}
 }
 
-// Extract creates a temporary container, copies the file out, and removes the container.
 func (e *DockerExtractor) Extract(ctx context.Context, imageRef string, filePath string) (*FileContent, error) {
 	createResult, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Image: imageRef,
@@ -151,7 +145,6 @@ func (e *DockerExtractor) Extract(ctx context.Context, imageRef string, filePath
 	return processContent(filePath, data, totalSize), nil
 }
 
-// ExtractRaw extracts a file's raw bytes without truncation or binary detection.
 func (e *DockerExtractor) ExtractRaw(ctx context.Context, imageRef string, filePath string) ([]byte, error) {
 	createResult, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Image: imageRef,
@@ -391,9 +384,6 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 	return layerPaths, load, cleanup, nil
 }
 
-// readManifestFromSpool walks the spooled outer tar from the beginning and
-// returns the manifest.json bytes. Non-manifest entries are streamed past
-// without buffering.
 func readManifestFromSpool(spool *os.File) ([]byte, error) {
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek spool: %w", err)
@@ -638,10 +628,6 @@ func regularWhiteoutTarget(name string) (string, bool) {
 	return "", false
 }
 
-// ExtractFromLayer extracts a file as it exists at the given layer cursor.
-// It walks back from layerCursor toward layer 0 looking for the most recent
-// layer whose tar contains the path as a regular file. A whiteout encountered
-// during the walk-back stops the search and returns an error.
 func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string, filePath string, layerCursor int) (*FileContent, error) {
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
@@ -667,8 +653,6 @@ func (e *DockerExtractor) ExtractFromLayer(ctx context.Context, imageRef string,
 	return processContent(filePath, data, int64(len(data))), nil
 }
 
-// ExtractRawFromLayer is the raw-bytes variant of ExtractFromLayer.
-// No truncation, no binary detection. Used by save-to-disk.
 func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef string, filePath string, layerCursor int) ([]byte, error) {
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)

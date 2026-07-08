@@ -44,10 +44,6 @@ func NewArchiveResolverWithPlatform(path string, p *ocispec.Platform) *ArchiveRe
 	return &ArchiveResolver{path: path, platform: p}
 }
 
-// openArchive opens path read-only, mapping fs errors to typed errors so the
-// caller (TUI, CLI) can render a tailored message: ErrArchiveNotFound for
-// missing paths, ErrArchivePermission for EACCES, and a wrapped infra error
-// for everything else (I/O failures, too many open files, etc).
 func openArchive(path string) (*os.File, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -63,7 +59,6 @@ func openArchive(path string) (*os.File, error) {
 	return f, nil
 }
 
-// Resolve reads the archive and returns the parsed layer list.
 func (r *ArchiveResolver) Resolve(ctx context.Context, imageRef string) ([]Layer, error) {
 	return r.ResolveWithProgress(ctx, imageRef, nil)
 }
@@ -135,9 +130,6 @@ func (r *ArchiveResolver) checkPlatform(f *os.File) error {
 	}
 }
 
-// readArchivePlatform reads the image config blob and returns its declared
-// platform. Used only for the archive-side --platform sanity check; the
-// parseLayers fast-path does not need it.
 func readArchivePlatform(f *os.File) (*ocispec.Platform, error) {
 	manifestData, rootJSON, _, err := scanResolveMetadata(f)
 	if err != nil {
@@ -264,15 +256,10 @@ func (r *ArchiveResolver) ImageID(ctx context.Context, imageRef string) (string,
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-// NewExtractor returns an ArchiveExtractor bound to this resolver's archive
-// path. Implements ExtractorSource so the TUI's file viewer and save-to-disk
-// features work in archive mode.
 func (r *ArchiveResolver) NewExtractor() Extractor {
 	return &ArchiveExtractor{path: r.path}
 }
 
-// ArchiveExtractor extracts file content from layers in a local image archive.
-// Reuses findFileInLayer (daemon-independent) for the per-layer search.
 type ArchiveExtractor struct {
 	path string
 }
@@ -291,7 +278,6 @@ func (e *ArchiveExtractor) Extract(ctx context.Context, imageRef string, filePat
 	return e.ExtractFromLayer(ctx, imageRef, filePath, n-1)
 }
 
-// ExtractRaw is the raw-bytes variant of Extract, same routing.
 func (e *ArchiveExtractor) ExtractRaw(ctx context.Context, imageRef string, filePath string) ([]byte, error) {
 	n, err := e.layerCount()
 	if err != nil {
@@ -356,7 +342,6 @@ func (e *ArchiveExtractor) ExtractFromLayer(ctx context.Context, imageRef string
 	return processContent(filePath, data, int64(len(data))), nil
 }
 
-// ExtractRawFromLayer is the raw-bytes variant of ExtractFromLayer.
 func (e *ArchiveExtractor) ExtractRawFromLayer(ctx context.Context, imageRef string, filePath string, layerCursor int) ([]byte, error) {
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)

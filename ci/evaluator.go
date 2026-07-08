@@ -7,7 +7,6 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
-// Report holds the results of all rule evaluations.
 type Report struct {
 	Passed   bool
 	Results  []RuleResult
@@ -45,7 +44,6 @@ func Evaluate(ctx EvalContext, rules []Rule) *Report {
 	return report
 }
 
-// ExitCode returns 0 if all rules passed, 1 otherwise.
 func (r *Report) ExitCode() int {
 	if r.Passed {
 		return 0

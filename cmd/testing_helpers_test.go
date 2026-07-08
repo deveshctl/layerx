@@ -62,10 +62,6 @@ func okResolver(layers ...image.Layer) *fakeResolver {
 	return &fakeResolver{layers: layers}
 }
 
-func errResolver(err error) *fakeResolver {
-	return &fakeResolver{resolveErr: err}
-}
-
 func cancelResolver() *fakeResolver {
 	return &fakeResolver{blockOnResolve: make(chan struct{})}
 }

@@ -42,8 +42,6 @@ func highlightFileCmd(requestID uint64, path string, data []byte) tea.Cmd {
 	}
 }
 
-// highlightFileLines returns syntax-highlighted lines for path/data, or nil if
-// highlighting is unavailable.
 func highlightFileLines(path string, data []byte) []string {
 	initChroma()
 	if chromaFmt == nil || chromaStyle == nil {

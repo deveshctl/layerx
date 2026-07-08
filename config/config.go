@@ -16,7 +16,6 @@ import (
 
 const defaultConfigFile = ".layerx.yaml"
 
-// Config holds all user-configurable settings.
 type Config struct {
 	// Version is the schema version of this .layerx.yaml. Currently only 1
 	// is accepted. Unset (zero) is treated as 1. Future schema breakage
@@ -49,14 +48,12 @@ type rawConfig struct {
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
 }
 
-// RulesConfig holds CI rule thresholds.
 type RulesConfig struct {
 	LowestEfficiency        float64 `yaml:"lowest-efficiency"`
 	HighestWastedBytes      int64   `yaml:"highest-wasted-bytes"`
 	HighestUserWastedPercent float64 `yaml:"highest-user-wasted-percent"`
 }
 
-// Default returns the config with hardcoded default values.
 func Default() *Config {
 	return &Config{
 		Version: 1,
@@ -68,8 +65,6 @@ func Default() *Config {
 	}
 }
 
-// Load reads .layerx.yaml from the current directory.
-// Returns default config if the file does not exist.
 func Load() (*Config, error) {
 	return LoadFrom(defaultConfigFile)
 }
@@ -100,8 +95,6 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, err
 	}
 
-	// Decode into rawConfig so rules and path-rules stay as AST nodes for
-	// shape validation before defaults are applied.
 	var raw rawConfig
 	dec := yaml.NewDecoder(bytes.NewReader(data), yaml.Strict())
 	if err := dec.Decode(&raw); err != nil {
@@ -168,9 +161,6 @@ func rejectNullSections(path string, data []byte) error {
 	return nil
 }
 
-// checkRulesNotNull walks one document body looking for a top-level `rules`
-// key whose value is *ast.NullNode. Returns the SectionRules-tagged error if
-// found; nil otherwise (including when the key is absent).
 func checkRulesNotNull(path string, body ast.Node) error {
 	visit := func(key, value ast.Node) error {
 		if key == nil || value == nil {

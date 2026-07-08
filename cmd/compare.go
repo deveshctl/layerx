@@ -304,17 +304,12 @@ func drainProgressWithClock(w io.Writer, side, ref string, ch <-chan image.Progr
 		announced     bool
 	)
 	for ev := range ch {
-		// Print "resolving REF" exactly once, on the first event we see for
-		// this side, so the user knows which image is currently working.
 		if !announced {
 			fmt.Fprintf(w, "[%s] resolving %s\n", side, ref)
 			announced = true
 		}
 		switch ev.Phase {
 		case image.PhasePulling:
-			// Coalesce repeated pulling events into at most one line per
-			// coalesce window. The first pulling event always prints (so
-			// the user sees "pulling" immediately); subsequent ones bunch.
 			if lastPhase != image.PhasePulling {
 				fmt.Fprintf(w, "[%s] pulling image\n", side)
 				lastPhase = image.PhasePulling
@@ -430,9 +425,6 @@ func writeHeader(w io.Writer, r *image.CompareResult) {
 // cmd/ does not depend on an unexported image symbol.
 const scoreHeaderEpsilon = 1e-9
 
-// newCompareTabwriter returns a tabwriter tuned for compare tables: 2-space
-// minimum cell padding, no left padding, padchar=' '. Output is plain ASCII
-// so it survives CI logs and pipes to grep/awk.
 func newCompareTabwriter(w io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 }

@@ -43,9 +43,6 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 	return renderPanel(body, title, focused, contentWidth, height, hasAbove, hasBelow)
 }
 
-// treePaneInput collects the parameters for renderTreeBody. Fields mirror
-// the renderFileTree signature; bodyHeight is the number of rows to fill
-// (the outer panel border is added by the caller).
 type treePaneInput struct {
 	files         []*image.FileNode
 	cursor        int
@@ -69,10 +66,6 @@ type treePaneInput struct {
 	emptyMsg string
 }
 
-// renderTreeBody renders the inner content of a file-tree pane (no border):
-// optional column header, the visible file slice, and an optional filter
-// bar. Returns the rendered body plus the scroll-indicator hints
-// (hasAbove/hasBelow) so the caller can paint them on the panel border.
 func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 	contentHeight := in.bodyHeight
 	if in.showFilterBar {
@@ -152,10 +145,6 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 	return sb.String(), hasAbove, hasBelow
 }
 
-// splitTreeInput drives renderSplitFileTree. The two sub-panes share the
-// outer panel chrome (border + title) but otherwise behave like
-// independent file-tree panes: each carries its own files/cursor/offset
-// and renders its own header + filter bar.
 type splitTreeInput struct {
 	width, height int
 	currentLayer  int
@@ -202,8 +191,6 @@ func renderSplitFileTree(in splitTreeInput) string {
 	totalContent := max(in.height, 4)
 
 	topRows, botRows := splitPanelRows(totalContent)
-	// splitPanelRows reserves one row for the divider; the renderer paints
-	// it explicitly between the two sub-pane bodies.
 
 	topBody, topAbove, topBelow := renderTreeBody(treePaneInput{
 		files:         in.topFiles,
@@ -262,7 +249,6 @@ func renderSplitDivider(botFocused bool, contentWidth int, botFiles []*image.Fil
 		label = fmt.Sprintf(" ▾ Cumulative · %d items ", len(botFiles))
 	}
 
-	// Style: dim by default, accent + bold when the bottom pane is focused.
 	labelStyle := lipgloss.NewStyle().Foreground(unchangedColor)
 	lineStyle := lipgloss.NewStyle().Foreground(separatorColor)
 	if botFocused {
@@ -365,7 +351,6 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 	const colGap = 2
 	const diffGlyphCol = 2
 
-	// Determine which metadata columns fit alongside a minimum 8-char filename.
 	const minNameSpace = 8
 	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
 	sizeMeta := diffGlyphCol + sizeCol + colGap

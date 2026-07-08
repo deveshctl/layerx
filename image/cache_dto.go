@@ -12,7 +12,6 @@ import (
 // changes — those run on every load and are not persisted.
 const SchemaVersion = 2
 
-// cacheEnvelope is the single top-level value written to disk per digest.
 type cacheEnvelope struct {
 	Digest        string
 	SchemaVersion int

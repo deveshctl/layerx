@@ -33,8 +33,6 @@ func isValidFlavour(s string) bool {
 	return slices.Contains(validFlavours, s)
 }
 
-// flavourList renders the supported flavours as a human-readable list:
-// "node, python, java, go, or generic".
 func flavourList() string {
 	if len(validFlavours) == 0 {
 		return ""

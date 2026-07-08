@@ -2,14 +2,12 @@ package image
 
 import "sort"
 
-// WastedFile records a file path that appears redundantly across multiple layers.
 type WastedFile struct {
 	Path        string
 	TotalWasted int64
 	LayerCount  int
 }
 
-// EfficiencyResult holds the efficiency analysis output.
 type EfficiencyResult struct {
 	Score       float64
 	WastedBytes int64
@@ -53,8 +51,6 @@ func EfficiencyFromAnalysis(a *Analysis) *EfficiencyResult {
 	return computeEfficiency(a.Layers, stacked)
 }
 
-// occurrence records a single layer-i appearance of a path with the bytes
-// it occupied at that snapshot.
 type efficiencyOccurrence struct {
 	layerIdx int
 	size     int64
@@ -75,9 +71,6 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		indices[i] = idx
 	}
 
-	// Collect every path that ever appeared across the raw layers, regardless
-	// of whether it was later removed. The stacked-tree walk decides occupancy
-	// per snapshot.
 	paths := make(map[string]struct{})
 	for _, layer := range layers {
 		if layer.Tree == nil || layer.Tree.Root == nil {

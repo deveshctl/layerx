@@ -17,10 +17,8 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// Option configures a DockerResolver.
 type Option func(*DockerResolver)
 
-// WithClient injects a Docker API client (used for testing).
 func WithClient(cli client.APIClient) Option {
 	return func(r *DockerResolver) { r.cli = cli }
 }
@@ -66,7 +64,6 @@ func WithHostTag(host string) Option {
 	return func(r *DockerResolver) { r.host = host }
 }
 
-// DockerResolver resolves image layers via the Docker daemon.
 type DockerResolver struct {
 	cli      client.APIClient
 	platform *ocispec.Platform
@@ -80,7 +77,6 @@ type DockerResolver struct {
 	host string
 }
 
-// NewDockerResolver creates a resolver connected to the local Docker daemon.
 func NewDockerResolver(opts ...Option) (Resolver, error) {
 	r := &DockerResolver{}
 	for _, opt := range opts {
@@ -122,9 +118,6 @@ func NewDockerResolverWithHost(host string, opts ...Option) (Resolver, error) {
 	return r, nil
 }
 
-// engineLabel returns the engine name for use in constructor-time error
-// text. Falls back to "container engine" when no tag has been applied,
-// matching ErrDaemonNotRunning.Error()'s own fallback.
 func (r *DockerResolver) engineLabel() string {
 	if r.engine == "" {
 		return "container engine"
@@ -184,8 +177,6 @@ func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, 
 	return inspect.ID, nil
 }
 
-// inspectOpts builds the per-call ImageInspectOption slice, attaching the
-// resolver's pinned --platform when set.
 func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
 	if r.platform == nil {
 		return nil
@@ -195,17 +186,14 @@ func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
 	}
 }
 
-// NewExtractor creates an Extractor using this resolver's Docker client.
 func (r *DockerResolver) NewExtractor() Extractor {
 	return NewDockerExtractor(r.cli)
 }
 
-// Resolve fetches the image, exports it as a tar, and parses the layer list.
 func (r *DockerResolver) Resolve(ctx context.Context, imageRef string) ([]Layer, error) {
 	return r.ResolveWithProgress(ctx, imageRef, nil)
 }
 
-// ResolveWithProgress fetches the image with progress reporting via the channel.
 func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef string, progress chan<- ProgressEvent) ([]Layer, error) {
 	if err := r.ensureImageWithProgress(ctx, imageRef, progress); err != nil {
 		return nil, err
@@ -324,9 +312,6 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	return nil
 }
 
-// pullOpts builds the ImagePullOptions for the active resolve, attaching
-// the pinned --platform when set. The daemon resolves the manifest list and
-// pulls only the matching manifest's layer blobs.
 func (r *DockerResolver) pullOpts() client.ImagePullOptions {
 	opts := client.ImagePullOptions{}
 	if r.platform != nil {
@@ -715,8 +700,6 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 	return manifestData, rootJSON, headers, nil
 }
 
-// readEntryFromSpool walks the spool and returns the bytes of a single named
-// entry. Used for OCI configs that live under blobs/sha256/.
 func readEntryFromSpool(spool *os.File, name string) ([]byte, error) {
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek spool: %w", err)
@@ -786,9 +769,6 @@ type configHistoryEntry struct {
 	EmptyLayer bool   `json:"empty_layer"`
 }
 
-// extractShortID derives a 12-char short ID from a layer path.
-// Handles both legacy format ("aabbcc.../layer.tar") and
-// OCI format ("blobs/sha256/aabbcc...").
 func extractShortID(layerPath string) string {
 	parts := strings.Split(layerPath, "/")
 	var id string

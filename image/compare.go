@@ -10,7 +10,6 @@ import (
 // scoreEpsilon absorbs float drift in efficiency-score comparisons.
 const scoreEpsilon = 1e-9
 
-// ImageSummary captures top-level identity and size of an analyzed image.
 type ImageSummary struct {
 	ImageRef   string
 	LayerCount int
@@ -59,7 +58,6 @@ type FileDiff struct {
 	ChangeReason string
 }
 
-// FileDiffSummary aggregates FileDiffs into counts and byte totals.
 type FileDiffSummary struct {
 	AddedCount    int
 	RemovedCount  int
@@ -68,8 +66,6 @@ type FileDiffSummary struct {
 	BytesRemoved  int64
 }
 
-// WasteDiff captures how a single path's contribution to wasted bytes
-// shifted between two images.
 type WasteDiff struct {
 	Path         string
 	BeforeWasted int64
@@ -77,7 +73,6 @@ type WasteDiff struct {
 	WastedDelta  int64
 }
 
-// CompareResult is the aggregate output of CompareAnalysis.
 type CompareResult struct {
 	Before ImageSummary
 	After  ImageSummary
@@ -244,8 +239,6 @@ type fileSnapshot struct {
 	IsHardlink bool
 }
 
-// finalStacked returns the last stacked tree of an analysis, or nil if there
-// isn't one. The last entry represents the live filesystem of the image.
 func finalStacked(a *Analysis) *FileTree {
 	if a == nil || len(a.StackedTrees) == 0 {
 		return nil

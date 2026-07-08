@@ -60,8 +60,6 @@ func normalizePathRules(node ast.Node) ([]PathRuleSpec, error) {
 	}
 }
 
-// normalizeFlat decodes a mapping into flatPathRules and emits one
-// PathRuleSpec per non-empty field.
 func normalizeFlat(node ast.Node) ([]PathRuleSpec, error) {
 	var flat flatPathRules
 	if err := yaml.NodeToValue(node, &flat, yaml.Strict()); err != nil {
@@ -102,9 +100,6 @@ func normalizeFlat(node ast.Node) ([]PathRuleSpec, error) {
 	return specs, nil
 }
 
-// normalizeList decodes a sequence into []listPathRule and emits one
-// PathRuleSpec per entry. Validates id (required, unique), type (required,
-// known), and per-type fields.
 func normalizeList(node ast.Node) ([]PathRuleSpec, error) {
 	var raw []listPathRule
 	if err := yaml.NodeToValue(node, &raw, yaml.Strict()); err != nil {
@@ -159,8 +154,6 @@ func normalizeList(node ast.Node) ([]PathRuleSpec, error) {
 	return specs, nil
 }
 
-// validateGlobs checks every pattern with doublestar's validator. The ruleID
-// is used to make error messages findable.
 func validateGlobs(ruleID string, patterns []string) error {
 	for _, p := range patterns {
 		if !doublestar.ValidatePattern(p) {

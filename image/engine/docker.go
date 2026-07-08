@@ -38,10 +38,8 @@ func newDockerResolverWithDeps(e env, f files) *DockerResolver {
 	return &DockerResolver{env: e, files: f}
 }
 
-// Name reports the engine identifier this resolver handles.
 func (r *DockerResolver) Name() string { return "docker" }
 
-// Resolve implements Resolver.Resolve.
 func (r *DockerResolver) Resolve() (Endpoint, error) {
 	if h := r.env("DOCKER_HOST"); h != "" {
 		return Endpoint{Host: h, Source: "env:DOCKER_HOST"}, nil
@@ -91,9 +89,6 @@ type dockerConfig struct {
 	CurrentContext string `json:"currentContext"`
 }
 
-// activeContext returns (name, origin, parsed-config). Origin is a
-// human-readable phrase for ErrConnectionNotFound.Origin ("env" or
-// "docker config").
 func (r *DockerResolver) activeContext() (string, string, *dockerConfig, error) {
 	if v := r.env("DOCKER_CONTEXT"); v != "" {
 		return v, "env:DOCKER_CONTEXT", nil, nil
@@ -233,9 +228,6 @@ func (r *DockerResolver) enumerateContexts(metaRoot string) ([]string, error) {
 	return out, nil
 }
 
-// decodeContextHost extracts Endpoints["docker"].Host from a meta.json byte
-// stream. Malformed JSON is reported with the file path so users can find
-// the file that needs fixing.
 func decodeContextHost(data []byte, path string) (string, error) {
 	var m contextMetadata
 	if err := json.Unmarshal(data, &m); err != nil {
