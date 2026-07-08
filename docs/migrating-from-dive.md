@@ -129,8 +129,9 @@ layerx --platform linux/arm64 myapp:latest
 # Gate CI against the exact variant that ships
 layerx ci --platform linux/amd64 --lowest-efficiency 0.9 myapp:${GIT_SHA}
 
-# Compare the arm64 and amd64 variants of the same image
-layerx compare --platform linux/arm64 myapp:1.5.0 --platform linux/amd64 myapp:1.5.0
+# Compare the arm64 and amd64 variants of the same image using two separate inspect runs
+layerx --platform linux/arm64 myapp:1.5.0
+layerx --platform linux/amd64 myapp:1.5.0
 ```
 
 `--platform` works on every subcommand — `layerx`, `layerx ci`, `layerx compare`, and `--json` — and on archives too. If the platform you asked for isn't in the image, LayerX tells you which variants are actually there instead of silently inspecting the wrong one.
