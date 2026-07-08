@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.5.2] - 2026-07-08
+
+Multi-arch container image on GHCR, fuzz hardening, and CLI help-text polish.
+
 ### Added
 - Multi-arch container image published to
   `ghcr.io/deveshctl/layerx` on every tagged release (linux/amd64 +
@@ -24,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crasher reproducer. The nightly fuzz workflow retains its longer
   budgets and is unchanged.
 
-### Fixed
 ### Fixed
 - Accept all standard truthy values for the `CI` environment variable
   (`true`, `True`, `TRUE`, `1`, `yes`), not only the exact lowercase
