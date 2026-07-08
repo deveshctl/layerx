@@ -90,17 +90,21 @@ func TestErrNoCIRulesEnabled_MessagesDifferByPath(t *testing.T) {
 	assert.NotEqual(t, direct, viaEnv, "messages must differ so the user gets path-appropriate guidance")
 }
 
-// --json must live on rootCmd's persistent flag set so it is inherited by
-// the ci subcommand (`layerx ci --json out.json IMG`). Earlier it was a
-// local flag on rootCmd which made the ci subcommand reject --json with an
-// "unknown flag" error.
+// --json must be registered on both rootCmd (local) and ciCmd (local) so that
+// `layerx --json out.json IMG` and `layerx ci --json out.json IMG` both work,
+// while `layerx compare --json` is rejected at parse time (compare never
+// registers it). This replaced the earlier persistent-flag approach, which
+// caused compare to silently accept and then runtime-reject the flag.
 func TestJSONFlagIsPersistent(t *testing.T) {
-	persistent := rootCmd.PersistentFlags().Lookup("json")
-	assert.NotNil(t, persistent, "--json must be on rootCmd.PersistentFlags so subcommands inherit it")
+	rootLocal := rootCmd.Flags().Lookup("json")
+	assert.NotNil(t, rootLocal, "--json must be a local flag on rootCmd")
 
-	// And the ci subcommand must see it through inherited flags.
-	inherited := ciCmd.InheritedFlags().Lookup("json")
-	assert.NotNil(t, inherited, "ci subcommand must inherit --json from rootCmd")
+	ciLocal := ciCmd.Flags().Lookup("json")
+	assert.NotNil(t, ciLocal, "--json must be a local flag on ciCmd")
+
+	// compare must NOT have --json registered (neither local nor inherited).
+	compareFlag := compareCmd.Flags().Lookup("json")
+	assert.Nil(t, compareFlag, "compareCmd must not register --json")
 }
 
 // writeConfig writes a .layerx.yaml into a temp dir and chdirs there so
