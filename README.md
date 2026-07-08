@@ -438,9 +438,17 @@ Full analysis (layers, files, efficiency) as JSON — pipe through `jq` for scri
 ```bash
 layerx --json analysis.json nginx:latest
 
-jq '.efficiency' analysis.json
-jq '.layers[] | select(.wasted_bytes > 1e7) | {index, command, wasted_bytes}' analysis.json
+# Efficiency score
+jq '.efficiency.score' analysis.json
+
+# Layers larger than 10 MB
+jq '.layers[] | select(.size > 10485760) | {index: .index, command: .command, size: .size}' analysis.json
+
+# Top 5 largest wasted files
+jq '.efficiency.wastedFiles | sort_by(-.totalWasted) | .[0:5]' analysis.json
 ```
+
+Full schema reference and scripting recipes: [docs/json-export.md](docs/json-export.md).
 
 ---
 
