@@ -337,8 +337,9 @@ layerx --platform linux/arm/v7 alpine:3
 # Gate CI against the variant your service actually runs
 layerx ci --platform linux/amd64 --lowest-efficiency 0.9 myapp:${GIT_SHA}
 
-# Compare the same image across architectures
-layerx compare --platform linux/amd64 myapp:1.5.0 --platform linux/arm64 myapp:1.5.0
+# Compare the same image across architectures using two separate inspect runs
+layerx --platform linux/amd64 myapp:1.5.0
+layerx --platform linux/arm64 myapp:1.5.0
 ```
 
 Accepted shapes (same as `docker --platform`): `OS/ARCH`, `OS/ARCH/VARIANT`, or the bare arch shortcut (`amd64` is treated as `linux/amd64`). When the requested platform is not in the image's manifest list, LayerX prints the variants the image actually carries — no silent mismatch.
