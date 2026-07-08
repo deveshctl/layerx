@@ -20,7 +20,7 @@ var completionCmd = &cobra.Command{
 	Long: `Generate an autocompletion script for the specified shell.
 
 The script enables tab completion for subcommands, flags, and image
-references (read from "docker images") in your current shell session.`,
+references (queried from the active container engine) in your current shell session.`,
 	Example: `  # Bash (current session)
   source <(layerx completion bash)
 
@@ -54,14 +54,26 @@ references (read from "docker images") in your current shell session.`,
 	},
 }
 
+// engineBinaryForCompletion returns the binary name to use for image-ref
+// completion based on the active engineFlag value. "auto" and "" both default
+// to "docker" (matching the resolver's probe order).
+func engineBinaryForCompletion(flag string) string {
+	if flag == "podman" {
+		return "podman"
+	}
+	return "docker"
+}
+
 func completeImageRefs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) != 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
+	binary := engineBinaryForCompletion(engineFlag)
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
+	out, err := exec.CommandContext(ctx, binary, "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

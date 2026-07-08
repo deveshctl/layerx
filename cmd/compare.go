@@ -172,10 +172,6 @@ func runCompareCmd(cmd *cobra.Command, args []string) error {
 func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	oldRef, newRef := args[0], args[1]
 
-	if flagJSON != "" {
-		return errors.New("--json is not supported by `layerx compare`; the report is text-only")
-	}
-
 	if err := validateCompareFlags(flagCompareMode, flagCompareTop); err != nil {
 		return err
 	}

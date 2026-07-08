@@ -108,6 +108,8 @@ func init() {
 	ciCmd.Flags().Lookup("highest-wasted-bytes").DefValue = "from config (built-in disabled)"
 	ciCmd.Flags().Lookup("highest-user-wasted-percent").DefValue = "from config (built-in 0.1)"
 
+	ciCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
+
 	rootCmd.AddCommand(ciCmd)
 }
 

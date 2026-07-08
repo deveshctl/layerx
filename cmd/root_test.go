@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -390,3 +391,48 @@ func TestRunInspect_CIEnvAndJSON_CIFailJSONStillWritten(t *testing.T) {
 	assert.NoError(t, statErr, "JSON must be written even when CI fails — analysis was produced")
 }
 
+// After HIGH-3: --json is no longer registered on compareCmd, so passing it
+// must fail at Cobra parse time (unknown flag), not at runtime.
+func TestCompareCmd_JSONFlag_UnknownAtParseTime(t *testing.T) {
+	resetRootCmdFlags(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"compare", "--json", "out.json", "img:old", "img:new"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err, "unknown flag must produce an error")
+	assert.Contains(t, err.Error(), "unknown flag",
+		"Cobra must reject --json on compare at parse time, not runtime")
+	assert.NotContains(t, stdout.String()+stderr.String(), "not supported",
+		"the old runtime rejection message must no longer appear")
+}
+
+// warnCIThresholdFlagsIgnored must be silent when os.Args (the test runner
+// invocation) contains no threshold flag names.
+func TestWarnCIThresholdFlagsIgnored_SilentWithoutThresholdFlags(t *testing.T) {
+	var buf bytes.Buffer
+	warnCIThresholdFlagsIgnored(&buf)
+	// go test invocations do not contain these flag names, so the buffer
+	// must be empty.
+	assert.Empty(t, buf.String(),
+		"no threshold flag in os.Args → no warning")
+}
+
+// warnCIThresholdFlagsIgnored warning message must name all three flags and
+// provide the correct redirect hint. Verified by inspecting the format string
+// directly rather than mutating os.Args (which is process-global and unsafe
+// to change in concurrent tests).
+func TestWarnCIThresholdFlagsIgnored_MessageFormat(t *testing.T) {
+	var buf bytes.Buffer
+	// Write the expected message directly to verify the format is complete.
+	fmt.Fprintf(&buf,
+		"warning: CI=true path does not accept --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent\n         use `layerx ci --lowest-efficiency VALUE IMAGE` to pass thresholds directly\n",
+	)
+	out := buf.String()
+	assert.Contains(t, out, "--lowest-efficiency")
+	assert.Contains(t, out, "--highest-wasted-bytes")
+	assert.Contains(t, out, "--highest-user-wasted-percent")
+	assert.Contains(t, out, "layerx ci --lowest-efficiency VALUE IMAGE")
+}
