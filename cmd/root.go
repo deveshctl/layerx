@@ -91,7 +91,7 @@ variant. Without --platform, the daemon's default platform is used.`,
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
+	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto". Each engine honours its own active context/connection ("docker context use", "podman system connection default"); DOCKER_HOST / CONTAINER_HOST env vars still override`)

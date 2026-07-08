@@ -390,3 +390,21 @@ func TestRunInspect_CIEnvAndJSON_CIFailJSONStillWritten(t *testing.T) {
 	assert.NoError(t, statErr, "JSON must be written even when CI fails — analysis was produced")
 }
 
+// After HIGH-3: --json is no longer registered on compareCmd, so passing it
+// must fail at Cobra parse time (unknown flag), not at runtime.
+func TestCompareCmd_JSONFlag_UnknownAtParseTime(t *testing.T) {
+	resetRootCmdFlags(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"compare", "--json", "out.json", "img:old", "img:new"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err, "unknown flag must produce an error")
+	assert.Contains(t, err.Error(), "unknown flag",
+		"Cobra must reject --json on compare at parse time, not runtime")
+	assert.NotContains(t, stdout.String()+stderr.String(), "not supported",
+		"the old runtime rejection message must no longer appear")
+}
+
