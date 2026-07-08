@@ -43,7 +43,10 @@ the active container engine (Docker or Podman). Archive mode needs no
 daemon, no network, and no running containers.
 
 Use --json to skip the TUI and export to a file. Set CI=true to make the
-bare form behave as "layerx ci" with config-file (or default) thresholds.
+bare form behave as "layerx ci" with config-file (or default) thresholds;
+threshold flags (--lowest-efficiency, --highest-wasted-bytes,
+--highest-user-wasted-percent) are not accepted on this path — use
+"layerx ci --lowest-efficiency 0.95 IMAGE" to pass thresholds directly.
 
 Cache: results are cached per image digest. Use --no-cache to bypass for
 a single run; "layerx cache list" inspects entries and "layerx cache prune"
@@ -181,6 +184,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	noCache := noCacheRequested()
 
 	if v := os.Getenv("CI"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
+		warnCIThresholdFlagsIgnored(os.Stderr)
 		if err := validateCLIThresholdFlags(ciCmd); err != nil {
 			return err
 		}
@@ -229,6 +233,28 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		NoCache:  noCache,
 		Platform: activePlatformDisplay(),
 	})
+}
+
+// warnCIThresholdFlagsIgnored prints a warning to w when CI=true is active
+// and a threshold flag name appears in the raw process arguments. Threshold
+// flags are registered only on ciCmd, so Cobra rejects them as unknown flags
+// before RunE on the root command — this warning is a belt-and-suspenders
+// guard that fires if flag wiring ever changes.
+func warnCIThresholdFlagsIgnored(w io.Writer) {
+	thresholdFlags := []string{
+		"--lowest-efficiency",
+		"--highest-wasted-bytes",
+		"--highest-user-wasted-percent",
+	}
+	raw := strings.Join(os.Args, " ")
+	for _, f := range thresholdFlags {
+		if strings.Contains(raw, f) {
+			fmt.Fprintf(w,
+				"warning: CI=true path does not accept --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent\n         use `layerx ci --lowest-efficiency VALUE IMAGE` to pass thresholds directly\n",
+			)
+			return
+		}
+	}
 }
 
 // combineCIAndJSONErr decides which error wins when CI=true is paired with
