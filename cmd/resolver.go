@@ -272,7 +272,11 @@ func podmanRootlessSocketPath() string {
 }
 
 func isRegularFilePath(path string) bool {
-	info, err := os.Stat(path)
+	// os.Lstat rather than os.Stat: a symlink named like an image reference
+	// (e.g. "nginx:latest -> /tmp/attacker.tar") must not silently reroute
+	// archive detection. Only a genuine regular file (not a link to one) is
+	// accepted as an archive path.
+	info, err := os.Lstat(path)
 	if err != nil {
 		return false
 	}

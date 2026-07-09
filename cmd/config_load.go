@@ -13,8 +13,20 @@ import (
 // cobra's full usage block. On error the one-line message is printed to
 // stderr along with a section-specific hint when the failure is a
 // *config.LoadError.
+//
+// If --config was passed it is used directly. Otherwise config.Load() walks
+// up from CWD looking for .layerx.yaml, then falls back to the OS user-config
+// directory.
 func loadConfig(cmd *cobra.Command) (*config.Config, error) {
-	cfg, err := config.Load()
+	var (
+		cfg *config.Config
+		err error
+	)
+	if flagConfig != "" {
+		cfg, err = config.LoadFrom(flagConfig)
+	} else {
+		cfg, err = config.Load()
+	}
 	if err != nil {
 		wrapped := fmt.Errorf("loading config: %w", err)
 		presentConfigLoadFailure(cmd, wrapped)

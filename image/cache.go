@@ -239,19 +239,22 @@ func cachePath(root, digest string) (string, error) {
 	return filepath.Join(root, norm, "layers.gob"), nil
 }
 
-// normalizeDigest strips the "sha256:" prefix when present and rejects
-// anything that could escape a single directory component (empty, path
-// separators, "..", control chars).
+// normalizeDigest strips the "sha256:" prefix when present and validates that
+// the remainder is exactly 64 lowercase hex characters — the canonical form
+// of a Docker/OCI content-addressable layer digest.
+//
+// Accepting only the strict hex form prevents pruneCache from treating
+// arbitrary directory names (e.g. a mispointed LAYERX_CACHE_DIR that shares
+// a parent with unrelated data) as evictable cache entries.
 func normalizeDigest(digest string) (string, error) {
 	rest, _ := strings.CutPrefix(digest, "sha256:")
-	if rest == "" {
+	if len(rest) != 64 {
 		return "", errBadDigest
 	}
-	if rest == "." || rest == ".." {
-		return "", errBadDigest
-	}
-	if strings.ContainsAny(rest, `/\`) || strings.Contains(rest, "..") {
-		return "", errBadDigest
+	for _, c := range rest {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "", errBadDigest
+		}
 	}
 	return rest, nil
 }

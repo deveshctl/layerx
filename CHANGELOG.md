@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--config PATH` persistent flag lets you point any subcommand at a specific
+  `.layerx.yaml` regardless of the working directory. Useful for monorepos and
+  scripts that invoke `layerx ci` from a subdirectory.
+
+### Changed
+- `layerx` now walks up the directory tree from the current working directory
+  when searching for `.layerx.yaml`, stopping at the filesystem root. A config
+  file at the repo root is found even when the command is invoked from a nested
+  subdirectory. Falls back to `$XDG_CONFIG_HOME/layerx/config.yaml` (Linux) or
+  `%AppData%\layerx\config.yaml` (Windows) when no file is found in the walk.
+- The Docker engine resolver now honours the `DOCKER_CONFIG` environment
+  variable when locating `config.json` and the context metadata directory,
+  matching the behaviour of the Docker CLI.
+- The Podman engine resolver now honours `PODMAN_CONNECTIONS_CONF` and
+  `CONTAINERS_CONF` environment variables before falling back to the default
+  XDG config paths.
+- `isRegularFilePath` (archive auto-detection in the resolver) now uses
+  `os.Lstat` instead of `os.Stat`, so a symlink whose name looks like an
+  image reference (e.g. `nginx:latest`) is not mistaken for an archive.
+- The cache-entry validator (`normalizeDigest`) now requires exactly 64
+  lowercase hexadecimal characters after the `sha256:` prefix. This prevents
+  `layerx cache prune` from deleting unrelated directories when
+  `LAYERX_CACHE_DIR` points at a shared parent directory.
+
+### Fixed
+- File extraction (`x` key) no longer silently overwrites a dangling symlink
+  at the destination path. If a broken symlink exists at the target, the
+  filename is bumped (e.g. `foo.env.1`) rather than replacing the link.
+- `isDaemonUnreachable` no longer fires on generic OS errors such as "no such
+  file or directory" from a missing credential helper or certificate. The check
+  now requires daemon-specific phrasing, reducing false "Is Docker running?"
+  messages when the daemon is fine.
+- `isImageNotFoundMessage` no longer matches the bare substring "not found",
+  which previously misclassified credential-helper and route errors as
+  image-not-found failures.
+
 ## [v1.5.2] - 2026-07-08
 
 Multi-arch container image on GHCR, fuzz hardening, and CLI help-text polish.

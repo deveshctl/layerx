@@ -786,14 +786,21 @@ func extractShortID(layerPath string) string {
 // isImageNotFoundMessage classifies a registry pull error as "ref does not
 // exist" (vs network / auth / 5xx). Conservative substring match against the
 // phrases emitted by Docker Hub, GHCR, ECR, and GCR pull paths.
+//
+// "not found" is intentionally absent: it is too broad and matches unrelated
+// errors such as "credential store not found" or "route not found", which
+// would misdirect the user to check the image name when the real cause is
+// elsewhere. Use "manifest unknown" / "manifest for " / "repository does not
+// exist" instead — all of which reference the image unambiguously.
 func isImageNotFoundMessage(s string) bool {
 	s = strings.ToLower(s)
 	for _, needle := range []string{
 		"manifest unknown",
 		"manifest for ",
-		"not found",
 		"repository does not exist",
 		"pull access denied",
+		"name unknown",
+		"name not known",
 	} {
 		if strings.Contains(s, needle) {
 			return true
@@ -805,6 +812,13 @@ func isImageNotFoundMessage(s string) bool {
 // isDaemonUnreachable substring-matches moby connection-failure messages.
 // Substring match works on every supported transport (unix socket, Windows
 // named pipe, TCP) without depending on internal SDK types.
+//
+// "no such file or directory" and "file does not exist" are intentionally
+// absent: they are generic OS strings that also appear in unrelated errors
+// (missing credential helper, missing certificate, missing bind-mount source)
+// and would produce a false "daemon not running" diagnosis. The daemon-specific
+// phrases below all require the word "daemon", a socket/pipe reference, or the
+// connection endpoint itself, so they cannot fire on unrelated filesystem errors.
 func isDaemonUnreachable(err error) bool {
 	if err == nil {
 		return false
@@ -814,10 +828,13 @@ func isDaemonUnreachable(err error) bool {
 		"cannot connect to the docker daemon",
 		"is the docker daemon running",
 		"docker daemon is not running",
-		"no such file or directory",
 		"connection refused",
 		"connect: permission denied",
-		"file does not exist",
+		// Windows named-pipe connect failure includes the pipe path
+		"error during connect",
+		// moby SDK wraps dial errors with the endpoint URL; matching on
+		// "/var/run/docker.sock" or "pipe/docker_engine" would be too
+		// specific, so we key on the SDK's "Cannot connect" prefix instead.
 	} {
 		if strings.Contains(s, needle) {
 			return true

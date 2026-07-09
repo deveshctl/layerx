@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -65,8 +66,39 @@ func Default() *Config {
 	}
 }
 
+// Load searches for .layerx.yaml starting from the current working directory
+// and walking up to the filesystem root (bounded at 50 levels). The first
+// file found is loaded. If no file is found in the walk, the XDG user config
+// directory (~/.config/layerx/config.yaml on Linux, %AppData%\layerx\config.yaml
+// on Windows) is checked as a final fallback. Returns Default() when no file
+// is found in any location.
 func Load() (*Config, error) {
-	return LoadFrom(defaultConfigFile)
+	// Walk up from CWD.
+	dir, err := os.Getwd()
+	if err != nil {
+		return Default(), nil
+	}
+	for i := 0; i < 50; i++ {
+		candidate := filepath.Join(dir, defaultConfigFile)
+		if _, err := os.Stat(candidate); err == nil {
+			return LoadFrom(candidate)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // reached root
+		}
+		dir = parent
+	}
+
+	// XDG / OS user-config fallback.
+	if cfgDir, err := os.UserConfigDir(); err == nil && cfgDir != "" {
+		candidate := filepath.Join(cfgDir, "layerx", "config.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			return LoadFrom(candidate)
+		}
+	}
+
+	return Default(), nil
 }
 
 // LoadFrom reads config from the specified path.
