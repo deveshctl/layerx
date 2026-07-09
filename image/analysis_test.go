@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -235,7 +236,7 @@ func TestAnalyze_CacheHit_SkipsResolve(t *testing.T) {
 			Tree: makeTree(makeFile("a", "/a", 50)),
 		},
 	}
-	resolver := &mockResolver{layers: layers, imageID: "sha256:cafebabe"}
+	resolver := &mockResolver{layers: layers, imageID: "sha256:cafebabe" + strings.Repeat("0", 56)}
 
 	// First call: miss -> resolve -> save.
 	r1, err := AnalyzeWithOptions(context.Background(), resolver, "img:1", AnalyzeOptions{})
@@ -258,7 +259,7 @@ func TestAnalyze_NoCache_AlwaysResolves(t *testing.T) {
 	t.Setenv("LAYERX_CACHE_DIR", cacheRoot)
 
 	layers := []Layer{{Index: 0, ID: "aa", Size: 1, Tree: makeTree(makeFile("x", "/x", 1))}}
-	resolver := &mockResolver{layers: layers, imageID: "sha256:1111"}
+	resolver := &mockResolver{layers: layers, imageID: "sha256:" + strings.Repeat("1", 64)}
 
 	_, err := AnalyzeWithOptions(context.Background(), resolver, "img", AnalyzeOptions{NoCache: true})
 	require.NoError(t, err)
@@ -267,7 +268,7 @@ func TestAnalyze_NoCache_AlwaysResolves(t *testing.T) {
 	assert.Equal(t, 2, resolver.resolveCalls, "NoCache must always resolve")
 
 	// But the cache MUST still have been written.
-	cached, ok, err := loadCache(cacheRoot, "sha256:1111")
+	cached, ok, err := loadCache(cacheRoot, "sha256:"+strings.Repeat("1", 64))
 	require.NoError(t, err)
 	require.True(t, ok, "NoCache still writes cache after a successful resolve")
 	require.Len(t, cached, 1)
@@ -278,7 +279,7 @@ func TestAnalyze_DifferentTagSameDigest_HitsCache(t *testing.T) {
 	t.Setenv("LAYERX_CACHE_DIR", cacheRoot)
 
 	layers := []Layer{{Index: 0, ID: "aa", Size: 1, Tree: makeTree(makeFile("x", "/x", 1))}}
-	resolver := &mockResolver{layers: layers, imageID: "sha256:samedigest"}
+	resolver := &mockResolver{layers: layers, imageID: "sha256:" + strings.Repeat("d", 64)}
 
 	r1, err := AnalyzeWithOptions(context.Background(), resolver, "myapp:latest", AnalyzeOptions{})
 	require.NoError(t, err)
@@ -311,7 +312,7 @@ func TestAnalyze_CacheHit_EmitsPhaseCacheLoad(t *testing.T) {
 	t.Setenv("LAYERX_CACHE_DIR", cacheRoot)
 
 	layers := []Layer{{Index: 0, ID: "aa", Size: 1, Tree: makeTree(makeFile("x", "/x", 1))}}
-	resolver := &mockResolver{layers: layers, imageID: "sha256:probe"}
+	resolver := &mockResolver{layers: layers, imageID: "sha256:" + strings.Repeat("3", 64)}
 
 	// Prime the cache.
 	_, err := AnalyzeWithOptions(context.Background(), resolver, "img", AnalyzeOptions{})

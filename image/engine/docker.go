@@ -89,14 +89,26 @@ type dockerConfig struct {
 	CurrentContext string `json:"currentContext"`
 }
 
+// dockerConfigDir returns the Docker configuration directory, honouring the
+// DOCKER_CONFIG env var before falling back to ~/.docker. Mirrors what the
+// Docker CLI does: if DOCKER_CONFIG is set, all config files (config.json,
+// contexts/meta/…) live under it rather than under ~/.docker.
+func (r *DockerResolver) dockerConfigDir() string {
+	if v := r.env("DOCKER_CONFIG"); v != "" {
+		return v
+	}
+	return homePath(r.files, ".docker")
+}
+
 func (r *DockerResolver) activeContext() (string, string, *dockerConfig, error) {
 	if v := r.env("DOCKER_CONTEXT"); v != "" {
 		return v, "env:DOCKER_CONTEXT", nil, nil
 	}
-	cfgPath := homePath(r.files, ".docker", "config.json")
-	if cfgPath == "" {
+	configDir := r.dockerConfigDir()
+	if configDir == "" {
 		return "", "", nil, nil
 	}
+	cfgPath := filepath.Join(configDir, "config.json")
 	data, err := r.files.readFile(cfgPath)
 	if err != nil {
 		if isNotExist(err) {
@@ -141,10 +153,11 @@ type contextEndpointEntry struct {
 // when name is not found on disk, or ("", nil, err) on a real I/O /
 // parse failure.
 func (r *DockerResolver) readContextHost(name string) (string, []string, error) {
-	metaRoot := homePath(r.files, ".docker", "contexts", "meta")
-	if metaRoot == "" {
+	configDir := r.dockerConfigDir()
+	if configDir == "" {
 		return "", nil, errNoActiveEndpoint
 	}
+	metaRoot := filepath.Join(configDir, "contexts", "meta")
 
 	// Docker CLI hashes context names to directory identifiers with
 	// SHA-256(name)-hex, matching the reference implementation in

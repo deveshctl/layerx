@@ -14,6 +14,7 @@ import (
 var (
 	flagJSON      string
 	flagNoCacheFl bool
+	flagConfig    string
 )
 
 func noCacheRequested() bool {
@@ -93,6 +94,7 @@ variant. Without --platform, the daemon's default platform is used.`,
 func init() {
 	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
+	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "", "path to .layerx.yaml config file (default: walk up from CWD, then $XDG_CONFIG_HOME/layerx/config.yaml)")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto". Each engine honours its own active context/connection ("docker context use", "podman system connection default"); DOCKER_HOST / CONTAINER_HOST env vars still override`)
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",

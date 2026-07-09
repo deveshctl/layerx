@@ -502,10 +502,11 @@ func TestIsImageNotFoundMessage(t *testing.T) {
 	}{
 		{"docker hub manifest unknown", "manifest unknown", true},
 		{"manifest for ref not found", "manifest for nginx:bogus not found", true},
-		{"plain not found", "Error response from daemon: not found", true},
 		{"repository does not exist", "repository does not exist or may require 'docker login'", true},
 		{"pull access denied", "pull access denied for private/foo", true},
 		{"mixed case", "Manifest Unknown", true},
+		{"credential-helper not found is not image-not-found",
+			`credential store "osxkeychain" not found`, false},
 		{"network error", "dial tcp: lookup registry: no such host", false},
 		{"5xx", "received unexpected HTTP status: 500 Internal Server Error", false},
 		{"empty", "", false},

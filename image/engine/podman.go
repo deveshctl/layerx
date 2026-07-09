@@ -91,8 +91,16 @@ func (r *PodmanResolver) Resolve() (Endpoint, error) {
 // Podman 4.4+ writes podman-connections.json; older versions (and admin-
 // installed system configs) use containers.conf. When both are present the
 // JSON file wins, mirroring Podman's own read order.
+//
+// PODMAN_CONNECTIONS_CONF and CONTAINERS_CONF env vars override the default
+// config file paths, matching Podman's own behaviour. Each is checked before
+// falling back to the XDG/OS default location.
 func (r *PodmanResolver) loadConnections() (map[string]string, string, string, error) {
-	jsonPath := configPath(r.files, "containers", "podman-connections.json")
+	// Resolve the connections JSON path: env override first, then XDG default.
+	jsonPath := r.env("PODMAN_CONNECTIONS_CONF")
+	if jsonPath == "" {
+		jsonPath = configPath(r.files, "containers", "podman-connections.json")
+	}
 	if jsonPath != "" {
 		data, err := r.files.readFile(jsonPath)
 		switch {
@@ -107,7 +115,11 @@ func (r *PodmanResolver) loadConnections() (map[string]string, string, string, e
 		}
 	}
 
-	confPath := configPath(r.files, "containers", "containers.conf")
+	// Resolve the containers.conf path: env override first, then XDG default.
+	confPath := r.env("CONTAINERS_CONF")
+	if confPath == "" {
+		confPath = configPath(r.files, "containers", "containers.conf")
+	}
 	if confPath != "" {
 		data, err := r.files.readFile(confPath)
 		switch {

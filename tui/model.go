@@ -243,7 +243,7 @@ func NewModel(cfg Config) model {
 		resolver:    cfg.Resolver,
 		progressCh:  ch,
 		writeFile:   atomicWriteFile,
-		statFile:    os.Stat,
+		statFile:    os.Lstat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
 		fetchCtx:    ctx,
@@ -1935,6 +1935,10 @@ func saveFileCmd(ctx context.Context, stat func(string) (os.FileInfo, error),
 // up to 1000 candidates and returns an error if all are taken — never
 // silently clobbers a pre-existing file by reusing the .999 candidate.
 // The probe loop honours ctx so a quit can abort a slow filesystem.
+//
+// Uses lstat (does not follow symlinks) so that a dangling symlink at
+// filename is treated as "present" and bumped to filename.1 rather than
+// silently clobbered.
 func uniquePath(ctx context.Context, stat func(string) (os.FileInfo, error), filename string) (string, error) {
 	if stat == nil {
 		return filename, nil
@@ -2004,7 +2008,17 @@ func atomicWriteFile(name string, data []byte, perm os.FileMode) error {
 	target := name
 	if resolved, err := filepath.EvalSymlinks(name); err == nil {
 		target = resolved
-	} else if !os.IsNotExist(err) {
+	} else if os.IsNotExist(err) {
+		// EvalSymlinks returns ErrNotExist for both "nothing at this path" and
+		// "dangling symlink" — distinguish them with Lstat. If a symlink entry
+		// exists at name (even a broken one), refuse to replace it: uniquePath
+		// should have already bumped the filename, so arriving here with a
+		// symlink at the destination means something changed under us.
+		if info, lstatErr := os.Lstat(name); lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to overwrite symlink at %s", name)
+		}
+		// Nothing at this path — write directly.
+	} else {
 		return err
 	}
 	dir := filepath.Dir(target)

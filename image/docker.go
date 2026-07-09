@@ -786,14 +786,21 @@ func extractShortID(layerPath string) string {
 // isImageNotFoundMessage classifies a registry pull error as "ref does not
 // exist" (vs network / auth / 5xx). Conservative substring match against the
 // phrases emitted by Docker Hub, GHCR, ECR, and GCR pull paths.
+//
+// The bare substring "not found" is intentionally absent: it collides with
+// unrelated errors such as `credential store "osxkeychain" not found`,
+// `route not found`, and header-missing errors, which would misdirect the
+// user to check the image name when the real cause is elsewhere. The needles
+// below all reference the image, manifest, or repository unambiguously.
 func isImageNotFoundMessage(s string) bool {
 	s = strings.ToLower(s)
 	for _, needle := range []string{
 		"manifest unknown",
 		"manifest for ",
-		"not found",
 		"repository does not exist",
 		"pull access denied",
+		"name unknown",
+		"name not known",
 	} {
 		if strings.Contains(s, needle) {
 			return true
@@ -805,6 +812,11 @@ func isImageNotFoundMessage(s string) bool {
 // isDaemonUnreachable substring-matches moby connection-failure messages.
 // Substring match works on every supported transport (unix socket, Windows
 // named pipe, TCP) without depending on internal SDK types.
+//
+// "no such file or directory" and "file does not exist" are only treated as
+// daemon-unreachable when the error also references a socket or named-pipe
+// path. This prevents generic filesystem errors (missing credential helper,
+// missing certificate) from being misclassified as connectivity problems.
 func isDaemonUnreachable(err error) bool {
 	if err == nil {
 		return false
@@ -814,14 +826,22 @@ func isDaemonUnreachable(err error) bool {
 		"cannot connect to the docker daemon",
 		"is the docker daemon running",
 		"docker daemon is not running",
-		"no such file or directory",
 		"connection refused",
 		"connect: permission denied",
-		"file does not exist",
+		"error during connect",
 	} {
 		if strings.Contains(s, needle) {
 			return true
 		}
+	}
+	// "no such file or directory" / "file does not exist" are genuine
+	// daemon-unreachable signals only when they appear in the context of a
+	// Unix socket or Windows named-pipe path. Without that guard they fire
+	// on unrelated filesystem errors (missing credential helpers, certs, etc.).
+	socketMissing := strings.Contains(s, "no such file or directory") || strings.Contains(s, "file does not exist")
+	hasPipePath := strings.Contains(s, ".sock") || strings.Contains(s, "/pipe/") || strings.Contains(s, "podman.sock")
+	if socketMissing && hasPipePath {
+		return true
 	}
 	return false
 }
