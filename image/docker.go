@@ -787,11 +787,11 @@ func extractShortID(layerPath string) string {
 // exist" (vs network / auth / 5xx). Conservative substring match against the
 // phrases emitted by Docker Hub, GHCR, ECR, and GCR pull paths.
 //
-// "not found" is intentionally absent: it is too broad and matches unrelated
-// errors such as "credential store not found" or "route not found", which
-// would misdirect the user to check the image name when the real cause is
-// elsewhere. Use "manifest unknown" / "manifest for " / "repository does not
-// exist" instead — all of which reference the image unambiguously.
+// The bare substring "not found" is intentionally absent: it collides with
+// unrelated errors such as `credential store "osxkeychain" not found`,
+// `route not found`, and header-missing errors, which would misdirect the
+// user to check the image name when the real cause is elsewhere. The needles
+// below all reference the image, manifest, or repository unambiguously.
 func isImageNotFoundMessage(s string) bool {
 	s = strings.ToLower(s)
 	for _, needle := range []string{
@@ -813,12 +813,10 @@ func isImageNotFoundMessage(s string) bool {
 // Substring match works on every supported transport (unix socket, Windows
 // named pipe, TCP) without depending on internal SDK types.
 //
-// "no such file or directory" and "file does not exist" are intentionally
-// absent: they are generic OS strings that also appear in unrelated errors
-// (missing credential helper, missing certificate, missing bind-mount source)
-// and would produce a false "daemon not running" diagnosis. The daemon-specific
-// phrases below all require the word "daemon", a socket/pipe reference, or the
-// connection endpoint itself, so they cannot fire on unrelated filesystem errors.
+// "no such file or directory" and "file does not exist" are only treated as
+// daemon-unreachable when the error also references a socket or named-pipe
+// path. This prevents generic filesystem errors (missing credential helper,
+// missing certificate) from being misclassified as connectivity problems.
 func isDaemonUnreachable(err error) bool {
 	if err == nil {
 		return false
@@ -830,15 +828,20 @@ func isDaemonUnreachable(err error) bool {
 		"docker daemon is not running",
 		"connection refused",
 		"connect: permission denied",
-		// Windows named-pipe connect failure includes the pipe path
 		"error during connect",
-		// moby SDK wraps dial errors with the endpoint URL; matching on
-		// "/var/run/docker.sock" or "pipe/docker_engine" would be too
-		// specific, so we key on the SDK's "Cannot connect" prefix instead.
 	} {
 		if strings.Contains(s, needle) {
 			return true
 		}
+	}
+	// "no such file or directory" / "file does not exist" are genuine
+	// daemon-unreachable signals only when they appear in the context of a
+	// Unix socket or Windows named-pipe path. Without that guard they fire
+	// on unrelated filesystem errors (missing credential helpers, certs, etc.).
+	socketMissing := strings.Contains(s, "no such file or directory") || strings.Contains(s, "file does not exist")
+	hasPipePath := strings.Contains(s, ".sock") || strings.Contains(s, "/pipe/") || strings.Contains(s, "podman.sock")
+	if socketMissing && hasPipePath {
+		return true
 	}
 	return false
 }

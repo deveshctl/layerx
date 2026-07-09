@@ -36,10 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File extraction (`x` key) no longer silently overwrites a dangling symlink
   at the destination path. If a broken symlink exists at the target, the
   filename is bumped (e.g. `foo.env.1`) rather than replacing the link.
-- `isDaemonUnreachable` no longer fires on generic OS errors such as "no such
-  file or directory" from a missing credential helper or certificate. The check
-  now requires daemon-specific phrasing, reducing false "Is Docker running?"
-  messages when the daemon is fine.
+- `isDaemonUnreachable` no longer fires on generic filesystem errors such as
+  "no such file or directory" from a missing credential helper or certificate.
+  Those strings now only trigger the daemon-unreachable path when they appear
+  alongside a socket or named-pipe path (`.sock`, `/pipe/`), matching the
+  actual moby SDK error format for a missing daemon socket.
 - `isImageNotFoundMessage` no longer matches the bare substring "not found",
   which previously misclassified credential-helper and route errors as
   image-not-found failures.

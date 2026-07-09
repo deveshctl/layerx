@@ -140,7 +140,7 @@ func TestCacheDTO_RoundTrip_AllPersistableFields(t *testing.T) {
 	}}
 
 	cacheRoot := t.TempDir()
-	digest := "sha256:driftguard"
+	digest := "sha256:" + strings.Repeat("d", 64)
 	require.NoError(t, saveCache(cacheRoot, digest, "", layers, nil))
 	rehydrated, ok, err := loadCache(cacheRoot, digest)
 	require.NoError(t, err)
@@ -238,7 +238,7 @@ func TestCacheDir_RejectsUnusableOverride(t *testing.T) {
 
 func TestSaveLoadCache_RoundTrip(t *testing.T) {
 	root := t.TempDir()
-	digest := "sha256:abcdef"
+	digest := "sha256:" + strings.Repeat("a", 64)
 
 	layers := []Layer{
 		{
@@ -259,7 +259,7 @@ func TestSaveLoadCache_RoundTrip(t *testing.T) {
 
 func TestLoadCache_Miss_NoFile(t *testing.T) {
 	root := t.TempDir()
-	got, ok, err := loadCache(root, "sha256:nope")
+	got, ok, err := loadCache(root, "sha256:"+strings.Repeat("e", 64))
 	require.NoError(t, err)
 	assert.False(t, ok)
 	assert.Nil(t, got)
@@ -267,7 +267,7 @@ func TestLoadCache_Miss_NoFile(t *testing.T) {
 
 func TestLoadCache_SchemaMismatch_DeletesAndMisses(t *testing.T) {
 	root := t.TempDir()
-	digest := "sha256:badschema"
+	digest := "sha256:" + strings.Repeat("b", 64)
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
@@ -294,14 +294,14 @@ func TestLoadCache_SchemaMismatch_DeletesAndMisses(t *testing.T) {
 
 func TestLoadCache_DigestMismatch_DeletesAndMisses(t *testing.T) {
 	root := t.TempDir()
-	dirDigest := "sha256:aaaaaa"
+	dirDigest := "sha256:" + strings.Repeat("a", 64)
 	path, err := cachePath(root, dirDigest)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 
 	f, err := os.Create(path)
 	require.NoError(t, err)
-	other, err := normalizeDigest("sha256:bbbbbb")
+	other, err := normalizeDigest("sha256:" + strings.Repeat("c", 64))
 	require.NoError(t, err)
 	env := cacheEnvelope{
 		Digest:        other,
@@ -321,7 +321,7 @@ func TestLoadCache_DigestMismatch_DeletesAndMisses(t *testing.T) {
 
 func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 	root := t.TempDir()
-	digest := "sha256:corrupt"
+	digest := "sha256:" + strings.Repeat("f", 64)
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
@@ -336,7 +336,7 @@ func TestLoadCache_CorruptFile_DeletesAndMisses(t *testing.T) {
 
 func TestSaveCache_NoTempFileLingers(t *testing.T) {
 	root := t.TempDir()
-	digest := "sha256:keep"
+	digest := "sha256:" + strings.Repeat("1", 64)
 	require.NoError(t, saveCache(root, digest, "", nil, nil))
 
 	path, err := cachePath(root, digest)
@@ -351,16 +351,18 @@ func TestSaveCache_NoTempFileLingers(t *testing.T) {
 }
 
 func TestNormalizeDigest_StripsSha256Prefix(t *testing.T) {
-	got, err := normalizeDigest("sha256:abcdef")
+	hex := strings.Repeat("a", 64)
+	got, err := normalizeDigest("sha256:" + hex)
 	require.NoError(t, err)
-	assert.Equal(t, "abcdef", got)
+	assert.Equal(t, hex, got)
 
-	got, err = normalizeDigest("abcdef")
+	got, err = normalizeDigest(hex)
 	require.NoError(t, err)
-	assert.Equal(t, "abcdef", got)
+	assert.Equal(t, hex, got)
 }
 
 func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
+	hex64 := strings.Repeat("a", 64)
 	cases := []string{
 		"",
 		"sha256:",
@@ -372,6 +374,16 @@ func TestNormalizeDigest_RejectsUnsafe(t *testing.T) {
 		"foo/bar",
 		`foo\bar`,
 		"prefix..suffix",
+		// Length-outside-64 must reject: BUG-13 defense against arbitrary
+		// directory names being treated as cache entries.
+		"abcdef",
+		strings.Repeat("a", 63),
+		strings.Repeat("a", 65),
+		// Uppercase hex is not canonical form (Docker/OCI digests are lowercase).
+		strings.Repeat("A", 64),
+		// Non-hex ASCII inside a 64-char string.
+		strings.Repeat("g", 64),
+		hex64[:63] + "!",
 	}
 	for _, c := range cases {
 		_, err := normalizeDigest(c)
@@ -395,7 +407,7 @@ func TestLoadCache_TransientIOError_KeepsFile(t *testing.T) {
 		t.Skip("running as root; chmod 0o000 does not block open")
 	}
 	root := t.TempDir()
-	digest := "sha256:transient"
+	digest := "sha256:" + strings.Repeat("2", 64)
 	path, err := cachePath(root, digest)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))

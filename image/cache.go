@@ -239,20 +239,25 @@ func cachePath(root, digest string) (string, error) {
 	return filepath.Join(root, norm, "layers.gob"), nil
 }
 
-// normalizeDigest strips the "sha256:" prefix when present and validates that
-// the remainder is exactly 64 lowercase hex characters — the canonical form
-// of a Docker/OCI content-addressable layer digest.
+// normalizeDigest strips the "sha256:" prefix when present and enforces the
+// canonical form of a Docker/OCI content digest: exactly 64 lowercase
+// hexadecimal characters. Anything else is rejected.
 //
-// Accepting only the strict hex form prevents pruneCache from treating
-// arbitrary directory names (e.g. a mispointed LAYERX_CACHE_DIR that shares
-// a parent with unrelated data) as evictable cache entries.
+// The strict form is a defense against `LAYERX_CACHE_DIR` misconfiguration.
+// PruneCache uses this validator to decide which subdirectories are cache
+// entries eligible for eviction; a loose validator that accepts arbitrary
+// names (e.g. "scratch-work", "README") would let prune delete unrelated
+// user data if the cache root points at a shared parent directory.
 func normalizeDigest(digest string) (string, error) {
 	rest, _ := strings.CutPrefix(digest, "sha256:")
 	if len(rest) != 64 {
 		return "", errBadDigest
 	}
-	for _, c := range rest {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
+		isDigit := c >= '0' && c <= '9'
+		isHex := c >= 'a' && c <= 'f'
+		if !isDigit && !isHex {
 			return "", errBadDigest
 		}
 	}
