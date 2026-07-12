@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -53,6 +54,9 @@ func TestFriendlyCLIError_DaemonNotRunning_DockerEngineWithHost(t *testing.T) {
 	}
 	msg := friendlyCLIError(err)
 	assert.Contains(t, msg, "Docker daemon at tcp://remote.example:2376")
+	// Both engines support reading a saved-image archive from disk, so
+	// every daemon-down line offers that fallback.
+	assert.Contains(t, msg, "archive")
 }
 
 func TestFriendlyCLIError_DaemonNotRunning_UnknownEngine(t *testing.T) {
@@ -104,10 +108,25 @@ func TestFriendlyCLIError_InvalidArchive(t *testing.T) {
 }
 
 func TestFriendlyCLIError_ArchiveInfra(t *testing.T) {
-	err := &image.ErrArchiveInfra{Op: "spooling image archive", Cause: errors.New("no space left on device")}
+	// A genuine out-of-space error keeps the disk-space hint. Wrapping
+	// syscall.ENOSPC mirrors what os file writes surface on a full disk.
+	err := &image.ErrArchiveInfra{
+		Op:    "spooling image archive",
+		Cause: fmt.Errorf("write temp: %w", syscall.ENOSPC),
+	}
 	msg := friendlyCLIError(err)
 	assert.Contains(t, msg, "spooling image archive")
-	assert.Contains(t, msg, "no space left on device")
+	assert.Contains(t, msg, "free up disk space")
+}
+
+func TestFriendlyCLIError_ArchiveInfra_NonDiskError(t *testing.T) {
+	// A non-ENOSPC infra failure (e.g. an I/O error on a network mount)
+	// must NOT claim the disk is full — the hint would misdirect the user.
+	err := &image.ErrArchiveInfra{Op: "spooling image archive", Cause: errors.New("input/output error")}
+	msg := friendlyCLIError(err)
+	assert.Contains(t, msg, "spooling image archive")
+	assert.Contains(t, msg, "input/output error")
+	assert.NotContains(t, msg, "free up disk space")
 }
 
 func TestFriendlyCLIError_PodmanSocketNotSet_Darwin(t *testing.T) {

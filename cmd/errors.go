@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"syscall"
 
 	"github.com/deveshctl/layerx/image"
 	"github.com/deveshctl/layerx/image/engine"
@@ -39,7 +40,13 @@ func friendlyCLIError(err error) string {
 		return fmt.Sprintf("not a valid image archive %q (expected docker-save or OCI layout tarball)", e.Path)
 	}
 	if e, ok := errors.AsType[*image.ErrArchiveInfra](err); ok {
-		return fmt.Sprintf("could not %s: %v (free up disk space or set TMPDIR)", e.Op, e.Cause)
+		// The disk-space hint is only trustworthy when the cause is
+		// actually a full disk; appending it to an I/O error on a network
+		// mount misdirects the user. Show it only on ENOSPC.
+		if errors.Is(e.Cause, syscall.ENOSPC) {
+			return fmt.Sprintf("could not %s: %v (free up disk space or set TMPDIR)", e.Op, e.Cause)
+		}
+		return fmt.Sprintf("could not %s: %v", e.Op, e.Cause)
 	}
 	if e, ok := errors.AsType[*image.ErrPodmanSocketNotSet](err); ok {
 		return fmt.Sprintf("--engine podman on %s: no Podman connection configured "+
@@ -87,22 +94,26 @@ func presentCLIError(w io.Writer, err error) error {
 // the resolver did not know its engine name, so a test double or a
 // FromEnv-only resolver still produces a sensible message.
 func daemonNotRunningLine(e *image.ErrDaemonNotRunning) string {
+	// Both engines are optional: layerx reads a `docker save` / `podman save`
+	// / OCI-layout archive straight from disk. Point every daemon-down path
+	// at that fallback so a user without a running engine is not dead-ended.
+	const archiveHint = " Or pass a saved-image archive path instead (no engine needed)."
 	engine := e.Engine
 	switch engine {
 	case "docker":
 		if e.Host != "" {
-			return fmt.Sprintf("Docker daemon at %s is not reachable. Is Docker running there?", e.Host)
+			return fmt.Sprintf("Docker daemon at %s is not reachable. Is Docker running there?", e.Host) + archiveHint
 		}
-		return "Docker daemon is not reachable. Is Docker running?"
+		return "Docker daemon is not reachable. Is Docker running?" + archiveHint
 	case "podman":
 		if e.Host != "" {
-			return fmt.Sprintf("Podman connection at %s is not reachable. Check the connection with `podman system connection list` / `podman info`.", e.Host)
+			return fmt.Sprintf("Podman connection at %s is not reachable. Check the connection with `podman system connection list` / `podman info`.", e.Host) + archiveHint
 		}
-		return "Podman is not reachable. Check the connection with `podman system connection list` / `podman info`."
+		return "Podman is not reachable. Check the connection with `podman system connection list` / `podman info`." + archiveHint
 	default:
 		if e.Host != "" {
-			return fmt.Sprintf("Container engine at %s is not reachable.", e.Host)
+			return fmt.Sprintf("Container engine at %s is not reachable.", e.Host) + archiveHint
 		}
-		return "Container engine is not reachable."
+		return "Container engine is not reachable." + archiveHint
 	}
 }

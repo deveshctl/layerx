@@ -1601,7 +1601,16 @@ func (m model) renderRightPanel(width, height int) string {
 }
 
 func (m model) viewError() tea.View {
-	errStyle := lipgloss.NewStyle().Foreground(removedColor).Bold(true)
+	// Bound the message width so a long error (e.g. a daemon-down line with
+	// its archive-mode hint) wraps instead of overflowing a narrow terminal.
+	wrapWidth := 60
+	if m.width > 0 && m.width-4 < wrapWidth {
+		wrapWidth = m.width - 4
+	}
+	if wrapWidth < 1 {
+		wrapWidth = 1
+	}
+	errStyle := lipgloss.NewStyle().Foreground(removedColor).Bold(true).Width(wrapWidth)
 	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
@@ -2144,22 +2153,25 @@ func (m *model) viewVisibleHeight() int {
 
 func friendlyError(err error) string {
 	if daemonErr, ok := errors.AsType[*image.ErrDaemonNotRunning](err); ok {
+		// Both engines are optional: layerx reads a saved-image archive
+		// straight from disk, so a daemon-down user is not dead-ended.
+		const archiveHint = " Or run layerx on a saved-image archive instead (no engine needed)."
 		switch daemonErr.Engine {
 		case "docker":
 			if daemonErr.Host != "" {
-				return fmt.Sprintf("Docker daemon at %s is not reachable. Please check the daemon and try again.", daemonErr.Host)
+				return fmt.Sprintf("Docker daemon at %s is not reachable. Please check the daemon and try again.", daemonErr.Host) + archiveHint
 			}
-			return "Docker is not running. Please start Docker and try again."
+			return "Docker is not running. Please start Docker and try again." + archiveHint
 		case "podman":
 			if daemonErr.Host != "" {
-				return fmt.Sprintf("Podman connection at %s is not reachable. Please check the connection and try again.", daemonErr.Host)
+				return fmt.Sprintf("Podman connection at %s is not reachable. Please check the connection and try again.", daemonErr.Host) + archiveHint
 			}
-			return "Podman is not reachable. Please check the connection and try again."
+			return "Podman is not reachable. Please check the connection and try again." + archiveHint
 		default:
 			if daemonErr.Host != "" {
-				return fmt.Sprintf("Container engine at %s is not reachable. Please check the endpoint and try again.", daemonErr.Host)
+				return fmt.Sprintf("Container engine at %s is not reachable. Please check the endpoint and try again.", daemonErr.Host) + archiveHint
 			}
-			return "Container engine is not reachable. Please check the endpoint and try again."
+			return "Container engine is not reachable. Please check the endpoint and try again." + archiveHint
 		}
 	}
 	if pullErr, ok := errors.AsType[*image.ErrPullFailed](err); ok {
