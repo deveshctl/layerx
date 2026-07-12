@@ -571,6 +571,23 @@ func TestViewErrorContainsErrorMessage(t *testing.T) {
 	assert.Contains(t, content, "Docker is not running")
 }
 
+// TestViewErrorWrapsLongMessage asserts a long daemon-down message (the
+// engine-down line plus its archive-mode hint) wraps within the bounded
+// width instead of overflowing a standard 80-column terminal on one line.
+func TestViewErrorWrapsLongMessage(t *testing.T) {
+	m := NewModel(Config{ImageRef: "test:latest"})
+	m.width = 80
+	m.height = 24
+	m.state = stateError
+	m.errMsg = "Docker is not running. Please start Docker and try again. " +
+		"Or run layerx on a saved-image archive instead (no engine needed)."
+	v := m.View()
+	content := viewContent(v)
+	assert.Contains(t, content, "Docker is not running")
+	assert.Contains(t, content, "archive")
+	assert.LessOrEqual(t, maxPanelLineWidth(content), m.width)
+}
+
 // --- View: ready state -------------------------------------------------------
 
 func TestViewReadyContainsBrandAndImageRef(t *testing.T) {
@@ -690,6 +707,9 @@ func TestFriendlyErrorDaemonNotRunning_DockerEngine(t *testing.T) {
 	}
 	msg := friendlyError(err)
 	assert.Contains(t, msg, "Docker is not running")
+	// Every daemon-down path points at the archive fallback so a user
+	// without a running engine is not dead-ended in the TUI.
+	assert.Contains(t, msg, "archive")
 }
 
 func TestFriendlyErrorDaemonNotRunning_PodmanEngine(t *testing.T) {

@@ -49,10 +49,10 @@ A few practical notes:
 
 - The JSON is written atomically (temp file in the target directory →
   `fsync` → rename), so partial writes never reach the destination path.
-- The success message `Written to <path>` goes to **stderr**, not stdout.
-  This keeps stdout reserved for any pipeline that combines `--json` with
-  another stdout-producing flow (it doesn't in v1, but the convention
-  matters).
+- The success message `layerx: wrote analysis to <path>` goes to **stderr**,
+  not stdout. This keeps stdout reserved for any pipeline that combines
+  `--json` with another stdout-producing flow (it doesn't in v1, but the
+  convention matters).
 - There is no `--json -` (stdout) option. Write to a regular file, then
   pipe its contents (`cat out.json | jq …`). The export uses an atomic
   temp-file-and-rename, which is incompatible with character devices like

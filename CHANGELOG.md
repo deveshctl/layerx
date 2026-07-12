@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lowercase hexadecimal characters after the `sha256:` prefix. This prevents
   `layerx cache prune` from deleting unrelated directories when
   `LAYERX_CACHE_DIR` points at a shared parent directory.
+- When a container engine (Docker or Podman) is not reachable, the error now
+  points at archive mode — you can inspect a saved-image archive straight from
+  disk without any engine running. Applies to both the CLI message and the
+  interactive error screen.
+- The interactive error screen now wraps long messages to the terminal width
+  instead of letting them overflow on one line.
+- The "could not …" archive infrastructure error only suggests freeing disk
+  space or setting `TMPDIR` when the underlying cause is actually a full disk;
+  other I/O failures no longer show a misleading disk-space hint.
+- The `--json` write confirmation now reads `layerx: wrote analysis to <path>`,
+  matching the `layerx:` prefix used elsewhere on stderr.
 
 ### Fixed
 - File extraction (`x` key) no longer silently overwrites a dangling symlink

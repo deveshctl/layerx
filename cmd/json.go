@@ -98,7 +98,7 @@ func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) erro
 		return fmt.Errorf("writing %s: %w", outputPath, err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Written to %s\n", outputPath)
+	fmt.Fprintf(os.Stderr, "layerx: wrote analysis to %s\n", outputPath)
 	return nil
 }
 
