@@ -43,6 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `--json` write confirmation now reads `layerx: wrote analysis to <path>`,
   matching the `layerx:` prefix used elsewhere on stderr.
 
+### Security
+- Layer analysis now caps each decompressed layer at 16 GiB, closing a
+  gzip-bomb path where a tiny compressed blob could expand without bound and
+  exhaust memory during `layerx <archive>`. The extraction path already
+  enforced this cap; the analysis path now matches it.
+- Archive descriptors (`manifest.json`, image config, legacy root `*.json`)
+  are now capped at 64 MiB and reject a tar header that overstates its size,
+  preventing a crafted archive from forcing an unbounded allocation before any
+  layer is read.
+- The image-save stream from a container engine is now capped at 64 GiB while
+  spooling to a temp file, so a rogue or compromised `DOCKER_HOST` cannot fill
+  the local disk with an endless response.
+
 ### Fixed
 - File extraction (`x` key) no longer silently overwrites a dangling symlink
   at the destination path. If a broken symlink exists at the target, the
