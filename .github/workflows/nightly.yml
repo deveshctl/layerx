@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26'
+          go-version: '1.26.5'
       # Longer-budget fuzz across the same targets PRs run. 5 minutes per
       # target is enough to surface coverage-guided crashes the 30s PR smoke
       # cannot. Crashes are surfaced by go test's non-zero exit; failing
@@ -32,6 +32,6 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26'
+          go-version: '1.26.5'
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
