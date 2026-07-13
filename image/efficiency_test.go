@@ -320,24 +320,28 @@ func TestEfficiencyFromAnalysis_MatchesEfficiency(t *testing.T) {
 //
 //	L0: /bin/app = 1000, /lib/shared.so = 500
 //	L1: /bin/app = 1200 (rewrite, same run), /etc/config = 300 (new)
-//	L2: /bin/app = 1500 (rewrite, same run), /etc/config = 300 (unchanged)
+//	L2: /bin/app = 1500 (rewrite, same run), /etc/config = 300 (rewrite)
 //
-// Per-path runs and waste:
+// Per-path runs and waste. Stack classifies a path present in both the
+// cumulative tree and the new layer as Modified regardless of whether its
+// bytes changed — there is no identical-size shortcut for files — so a file
+// re-emitted at the same size still opens a fresh Added/Modified occurrence
+// that pathRuns records:
 //   - /bin/app: one run [(L0,1000),(L1,1200),(L2,1500)]. All but the last
 //     occurrence are shadowed → waste = 1000 + 1200 = 2200; 3 byte-contributing
 //     occurrences.
 //   - /lib/shared.so: single occurrence → no waste.
-//   - /etc/config: L1 Added (300); L2 is unchanged carryover (identical size),
-//     which pathRuns does not record → run [(L1,300)] → no waste.
+//   - /etc/config: L1 Added (300), L2 Modified (300) → run [(L1,300),(L2,300)];
+//     the shadowed L1 copy → waste = 300; 2 occurrences.
 //
 // Totals:
-//   - WastedBytes = 2200.
+//   - WastedBytes = 2200 + 300 = 2500.
 //   - liveBytes (final stacked tree) = /bin/app 1500 + /lib/shared.so 500 +
 //     /etc/config 300 = 2300.
-//   - totalBytes = 2300 + 2200 = 4500.
-//   - Score = 1 - 2200/4500 = 0.51111….
-//   - WastedFiles = exactly one entry (/bin/app); the zero-waste paths are
-//     omitted.
+//   - totalBytes = 2300 + 2500 = 4800.
+//   - Score = 1 - 2500/4800 = 0.47916….
+//   - WastedFiles = two entries, sorted by TotalWasted desc: /bin/app (2200)
+//     then /etc/config (300); /lib/shared.so is omitted (zero waste).
 func TestEfficiency_Golden(t *testing.T) {
 	layers := []Layer{
 		{Index: 0, Size: 1500, Tree: makeTree(
@@ -356,11 +360,14 @@ func TestEfficiency_Golden(t *testing.T) {
 
 	result := Efficiency(layers)
 
-	assert.Equal(t, int64(2200), result.WastedBytes)
-	assert.InDelta(t, 1.0-2200.0/4500.0, result.Score, 1e-9)
+	assert.Equal(t, int64(2500), result.WastedBytes)
+	assert.InDelta(t, 1.0-2500.0/4800.0, result.Score, 1e-9)
 
-	require.Len(t, result.WastedFiles, 1)
+	require.Len(t, result.WastedFiles, 2)
 	assert.Equal(t, "/bin/app", result.WastedFiles[0].Path)
 	assert.Equal(t, int64(2200), result.WastedFiles[0].TotalWasted)
 	assert.Equal(t, 3, result.WastedFiles[0].LayerCount)
+	assert.Equal(t, "/etc/config", result.WastedFiles[1].Path)
+	assert.Equal(t, int64(300), result.WastedFiles[1].TotalWasted)
+	assert.Equal(t, 2, result.WastedFiles[1].LayerCount)
 }
