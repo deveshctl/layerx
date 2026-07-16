@@ -2454,3 +2454,105 @@ func TestSplitMode_FilterAppliesToBothPanes(t *testing.T) {
 		assert.Contains(t, strings.ToLower(f.Path), "nginx")
 	}
 }
+
+// --- Page navigation (#76) ---------------------------------------------------
+
+// setupModelTallTree returns a ready model whose selected layer has many
+// root-level files and a deliberately short viewport, so a page step is a
+// handful of rows rather than larger than the whole list. This lets the page
+// math and its boundaries be observed instead of always clamping to an end.
+func setupModelTallTree(fileCount int) model {
+	root := image.NewFileTree()
+	for i := range fileCount {
+		name := fmt.Sprintf("file%03d", i)
+		root.Root.AddChild(&image.FileNode{
+			Name: name,
+			Path: "/" + name,
+			Size: int64(i + 1),
+		})
+	}
+	layers := []image.Layer{{Index: 0, ID: "tall", Command: "RUN touch files", Tree: root}}
+
+	m := NewModel(Config{ImageRef: "test:latest"})
+	m.width = 120
+	// height 20 → treeVisibleHeightFor(focusTree) = 20 - 8 - 1 = 11 rows.
+	m.height = 20
+	m.state = stateReady
+	m.analysis = &image.Analysis{
+		ImageRef:     "test:latest",
+		Layers:       layers,
+		StackedTrees: image.Stack(layers),
+	}
+	m.focus = focusTree
+	return m
+}
+
+func TestPageDownKeyIsWired(t *testing.T) {
+	m := setupModelTallTree(100)
+	before := m.treeCursor
+	m = send(m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	assert.Greater(t, m.treeCursor, before, "ctrl+f should advance the tree cursor")
+}
+
+func TestPageDownPgDnAliasIsWired(t *testing.T) {
+	m := setupModelTallTree(100)
+	before := m.treeCursor
+	m = send(m, keyPressSpecial(tea.KeyPgDown))
+	assert.Greater(t, m.treeCursor, before, "PgDn should advance the tree cursor")
+}
+
+func TestFullPageMovesByVisibleHeight(t *testing.T) {
+	m := setupModelTallTree(100)
+	h := m.treeVisibleHeightFor(focusTree)
+	require.Positive(t, h)
+	m.moveByPage(1, false)
+	assert.Equal(t, h, m.treeCursor, "full page should advance by one viewport height")
+}
+
+func TestHalfPageMovesByHalfVisibleHeight(t *testing.T) {
+	m := setupModelTallTree(100)
+	h := m.treeVisibleHeightFor(focusTree)
+	require.Positive(t, h)
+	m.moveByPage(1, true)
+	assert.Equal(t, h/2, m.treeCursor, "half page should advance by half a viewport height")
+}
+
+func TestPageDownClampsAtLastItem(t *testing.T) {
+	m := setupModelTallTree(5) // fewer items than a page
+	files := m.displayTreeFor(focusTree)
+	m.moveByPage(1, false)
+	assert.Equal(t, len(files)-1, m.treeCursor, "page down past the end clamps to the last item")
+}
+
+func TestPageUpClampsAtFirstItem(t *testing.T) {
+	m := setupModelTallTree(100)
+	m.treeCursor = 3
+	m.moveByPage(-1, false) // a full page back from row 3 undershoots 0
+	assert.Equal(t, 0, m.treeCursor, "page up past the start clamps to the first item")
+}
+
+func TestPageDownThenUpIsReversible(t *testing.T) {
+	m := setupModelTallTree(100)
+	h := m.treeVisibleHeightFor(focusTree)
+	m.moveByPage(1, false)
+	m.moveByPage(1, false)
+	assert.Equal(t, 2*h, m.treeCursor)
+	m.moveByPage(-1, false)
+	assert.Equal(t, h, m.treeCursor, "a page up should undo a page down of the same size")
+}
+
+func TestPageOnLayersPaneChangesSelectedLayer(t *testing.T) {
+	m := setupModel() // 3 layers, focus starts on layers
+	m.focus = focusLayers
+	m.layerCursor = 0
+	m.moveByPage(1, false)
+	assert.Positive(t, m.layerCursor, "paging the layers pane advances the selected layer")
+	assert.Equal(t, 0, m.treeCursor, "changing layer resets the tree cursor")
+}
+
+func TestPageOnEmptyTreeIsNoop(t *testing.T) {
+	m := setupModelTallTree(0)
+	m.focus = focusTree
+	m.moveByPage(1, false)
+	assert.Equal(t, 0, m.treeCursor, "paging an empty tree must not move or panic")
+}

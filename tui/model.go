@@ -685,6 +685,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveToBottom()
 			return m, nil
 
+		case key.Matches(msg, m.keys.HalfPageDown):
+			m.moveByPage(1, true)
+			return m, nil
+
+		case key.Matches(msg, m.keys.HalfPageUp):
+			m.moveByPage(-1, true)
+			return m, nil
+
+		case key.Matches(msg, m.keys.PageDown):
+			m.moveByPage(1, false)
+			return m, nil
+
+		case key.Matches(msg, m.keys.PageUp):
+			m.moveByPage(-1, false)
+			return m, nil
+
 		case key.Matches(msg, m.keys.Copy):
 			layers := m.layers()
 			if m.layerCursor < len(layers) {
@@ -1309,6 +1325,66 @@ func (m *model) moveToBottom() {
 			m.adjustTreeScrollFor(focusTreeAgg)
 		}
 	}
+}
+
+// moveByPage jumps the focused pane's cursor by a screenful. dir is +1 for
+// down/forward and -1 for up/back; when fraction is true the jump is half a
+// page (the ^d/^u motion), otherwise a full page (^f/^b/PgDn/PgUp). The step
+// is derived from the pane's own visible height so it stays correct in split
+// mode and on resize. The cursor is clamped to the item range and the pane's
+// scroll offset is brought back into view, matching moveDown/moveUp. On the
+// layers pane a page jump changes the selected layer, so the tree is reset to
+// follow it exactly as a single-step move would.
+func (m *model) moveByPage(dir int, fraction bool) {
+	step := func(visibleHeight int) int {
+		if visibleHeight < 1 {
+			visibleHeight = 1
+		}
+		if fraction {
+			return max(visibleHeight/2, 1)
+		}
+		return visibleHeight
+	}
+
+	switch m.focus {
+	case focusLayers:
+		layers := m.layers()
+		if len(layers) == 0 {
+			return
+		}
+		target := clampIndex(m.layerCursor+dir*step(m.layerVisibleHeight()), len(layers))
+		if target == m.layerCursor {
+			return
+		}
+		m.layerCursor = target
+		m.resetTreeForLayerChange()
+		m.adjustLayerScroll()
+	case focusTree:
+		files := m.displayTreeFor(focusTree)
+		if len(files) == 0 {
+			return
+		}
+		m.treeCursor = clampIndex(m.treeCursor+dir*step(m.treeVisibleHeightFor(focusTree)), len(files))
+		m.adjustTreeScrollFor(focusTree)
+	case focusTreeAgg:
+		files := m.displayTreeFor(focusTreeAgg)
+		if len(files) == 0 {
+			return
+		}
+		m.aggCursor = clampIndex(m.aggCursor+dir*step(m.treeVisibleHeightFor(focusTreeAgg)), len(files))
+		m.adjustTreeScrollFor(focusTreeAgg)
+	}
+}
+
+// clampIndex keeps i within [0, n-1] for a non-empty range.
+func clampIndex(i, n int) int {
+	if i < 0 {
+		return 0
+	}
+	if i >= n {
+		return n - 1
+	}
+	return i
 }
 
 // adjustTreeScrollFor brings the cursor of the named pane into its visible

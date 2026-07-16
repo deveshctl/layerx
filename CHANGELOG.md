@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Page and half-page navigation in the interactive file tree and layers pane:
+  `Ctrl-d` / `Ctrl-u` jump half a screen down / up, and `Ctrl-f` / `Ctrl-b`
+  (also `PgDn` / `PgUp`) jump a full screen, complementing the existing
+  `g` / `G` and `j` / `k` motions.
 - `--config PATH` persistent flag lets you point any subcommand at a specific
   `.layerx.yaml` regardless of the working directory. Useful for monorepos and
   scripts that invoke `layerx ci` from a subdirectory.

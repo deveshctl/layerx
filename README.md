@@ -87,7 +87,7 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 - **File extraction** (`x`) — pull any single file out of any layer, straight to disk.
 - Clipboard integration (`y`, `Y`) — copy a path or a file's contents to the system clipboard, over SSH and tmux.
 - Sort by size, filter by name, hide unchanged files, jump to the layer that introduced the biggest waste (`w`).
-- Split-pane aggregated view — combine multiple layers into one virtual tree.
+- Split-pane view (`A`) — the selected layer's changes on top, the cumulative filesystem up to that layer below, both following the same layer selection.
 
 ### Multi-engine, multi-source
 
@@ -250,6 +250,8 @@ source <(layerx completion bash)
 | `Tab`       | Switch panel (layers ↔ file tree)                            |
 | `j` / `k`   | Move up / down                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
+| `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
+| `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
 | `h` / `l`   | Scroll left / right (file viewer, long lines)                |
 | `Enter`     | Open file viewer; expand or collapse a folder                |
 | `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |
@@ -262,9 +264,22 @@ source <(layerx completion bash)
 | `S`         | Cycle layer size column: change → stored → stored+change     |
 | `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
 | `x`         | Extract focused file to disk                                 |
-| `A`         | Toggle aggregated (split-pane) view                          |
+| `A`         | Toggle split view (layer changes over cumulative filesystem)  |
 | `?`         | Toggle help overlay                                          |
 | `q`         | Quit                                                         |
+
+### Split view (`A`)
+
+Press `A` to split the file tree into two stacked panes:
+
+- **Top — Layer Δ.** Only what the selected layer changed: files it added, modified, or removed.
+- **Bottom — Cumulative.** The full filesystem as it exists after that layer is applied, with every earlier layer merged in.
+
+Both halves track the layer you have selected. `Tab` moves focus to the layers pane; move up and down there and both panes update to the new layer together. `Tab` again cycles focus through the two tree panes so you can scroll and open files in either.
+
+This is a layer-against-its-own-history view — top shows the delta, bottom shows the result — not a diff between two arbitrary layers. Press `A` again to return to the single tree.
+
+Full walkthrough, worked example, and the mechanics of each pane: [docs/split-view.md](docs/split-view.md).
 
 ---
 
