@@ -32,6 +32,14 @@ const MaxSaveSize = 2 << 30 // 2 GiB
 // claims a single blob is petabytes.
 const MaxLayerBlobSize = 16 << 30 // 16 GiB
 
+// MaxMetadataSize bounds the small text descriptors read whole into memory
+// during archive resolution: manifest.json, the image config, and any
+// root-level *.json (legacy config payloads). Real descriptors are a few KiB;
+// a hostile tar can declare an 8 GiB manifest.json header and OOM the process
+// via io.ReadAll before any layer is touched. 64 MiB is orders of magnitude
+// above any legitimate descriptor while cheap to reject.
+const MaxMetadataSize = 64 << 20 // 64 MiB
+
 type FileContent struct {
 	Path      string
 	Data      []byte
@@ -332,7 +340,7 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		_ = os.Remove(spoolPath)
 	}
 
-	if _, err := copyCtx(ctx, spool, rc); err != nil {
+	if _, err := spoolFromDaemon(ctx, spool, rc); err != nil {
 		cleanup()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, nil, nil, err
@@ -398,11 +406,7 @@ func readManifestFromSpool(spool *os.File) ([]byte, error) {
 			return nil, fmt.Errorf("reading image archive: %w", err)
 		}
 		if hdr.Name == "manifest.json" {
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("reading manifest.json: %w", err)
-			}
-			return data, nil
+			return readMetadataEntry(tr, hdr.Size, "manifest.json")
 		}
 	}
 }

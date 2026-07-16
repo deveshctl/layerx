@@ -308,3 +308,66 @@ func TestEfficiencyFromAnalysis_MatchesEfficiency(t *testing.T) {
 	assert.InDelta(t, fromLayers.Score, fromAnalysis.Score, 0.0001)
 	assert.Equal(t, fromLayers.WastedFiles, fromAnalysis.WastedFiles)
 }
+
+// TestEfficiency_Golden pins every EfficiencyResult field for one fixed
+// multi-layer fixture, with each expected number derived below. Unlike the
+// focused tests above (each isolating one behaviour), this locks the whole
+// result — WastedBytes, Score, and the ordered WastedFiles slice — so a
+// refactor that silently changes the denominator (e.g. reverting to raw
+// cumulative bytes) or the waste accounting fails loudly here.
+//
+// Fixture (three layers):
+//
+//	L0: /bin/app = 1000, /lib/shared.so = 500
+//	L1: /bin/app = 1200 (rewrite, same run), /etc/config = 300 (new)
+//	L2: /bin/app = 1500 (rewrite, same run), /etc/config = 300 (rewrite)
+//
+// Per-path runs and waste. Stack classifies a path present in both the
+// cumulative tree and the new layer as Modified regardless of whether its
+// bytes changed — there is no identical-size shortcut for files — so a file
+// re-emitted at the same size still opens a fresh Added/Modified occurrence
+// that pathRuns records:
+//   - /bin/app: one run [(L0,1000),(L1,1200),(L2,1500)]. All but the last
+//     occurrence are shadowed → waste = 1000 + 1200 = 2200; 3 byte-contributing
+//     occurrences.
+//   - /lib/shared.so: single occurrence → no waste.
+//   - /etc/config: L1 Added (300), L2 Modified (300) → run [(L1,300),(L2,300)];
+//     the shadowed L1 copy → waste = 300; 2 occurrences.
+//
+// Totals:
+//   - WastedBytes = 2200 + 300 = 2500.
+//   - liveBytes (final stacked tree) = /bin/app 1500 + /lib/shared.so 500 +
+//     /etc/config 300 = 2300.
+//   - totalBytes = 2300 + 2500 = 4800.
+//   - Score = 1 - 2500/4800 = 0.47916….
+//   - WastedFiles = two entries, sorted by TotalWasted desc: /bin/app (2200)
+//     then /etc/config (300); /lib/shared.so is omitted (zero waste).
+func TestEfficiency_Golden(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 1500, Tree: makeTree(
+			makeDir("bin", "/bin", makeFile("app", "/bin/app", 1000)),
+			makeDir("lib", "/lib", makeFile("shared.so", "/lib/shared.so", 500)),
+		)},
+		{Index: 1, Size: 1500, Tree: makeTree(
+			makeDir("bin", "/bin", makeFile("app", "/bin/app", 1200)),
+			makeDir("etc", "/etc", makeFile("config", "/etc/config", 300)),
+		)},
+		{Index: 2, Size: 1800, Tree: makeTree(
+			makeDir("bin", "/bin", makeFile("app", "/bin/app", 1500)),
+			makeDir("etc", "/etc", makeFile("config", "/etc/config", 300)),
+		)},
+	}
+
+	result := Efficiency(layers)
+
+	assert.Equal(t, int64(2500), result.WastedBytes)
+	assert.InDelta(t, 1.0-2500.0/4800.0, result.Score, 1e-9)
+
+	require.Len(t, result.WastedFiles, 2)
+	assert.Equal(t, "/bin/app", result.WastedFiles[0].Path)
+	assert.Equal(t, int64(2200), result.WastedFiles[0].TotalWasted)
+	assert.Equal(t, 3, result.WastedFiles[0].LayerCount)
+	assert.Equal(t, "/etc/config", result.WastedFiles[1].Path)
+	assert.Equal(t, int64(300), result.WastedFiles[1].TotalWasted)
+	assert.Equal(t, 2, result.WastedFiles[1].LayerCount)
+}

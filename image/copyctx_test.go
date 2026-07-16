@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 )
@@ -139,5 +140,40 @@ func TestCopyCtx_ReadError(t *testing.T) {
 	}
 	if dst.Len() != len(chunk) {
 		t.Fatalf("dst received %d bytes, want %d", dst.Len(), len(chunk))
+	}
+}
+
+func TestSpoolFromDaemon_HappyPath(t *testing.T) {
+	src := bytes.NewReader(bytes.Repeat([]byte("layerx"), 200_000)) // ~1.2 MB
+	want := src.Len()
+	var dst bytes.Buffer
+
+	n, err := spoolFromDaemon(context.Background(), &dst, src)
+	if err != nil {
+		t.Fatalf("spoolFromDaemon: unexpected error: %v", err)
+	}
+	if int(n) != want {
+		t.Fatalf("spoolFromDaemon returned %d bytes, want %d", n, want)
+	}
+	if dst.Len() != want {
+		t.Fatalf("dst received %d bytes, want %d", dst.Len(), want)
+	}
+}
+
+// infiniteReader models a rogue daemon that never stops streaming. It fills
+// every buffer and never returns EOF; spoolFromDaemon's internal LimitReader
+// is what must bound it. Bytes are discarded, so the test allocates nothing
+// beyond the copy buffer regardless of MaxArchiveSize.
+type infiniteReader struct{}
+
+func (infiniteReader) Read(p []byte) (int, error) { return len(p), nil }
+
+func TestSpoolFromDaemon_RejectsUnboundedStream(t *testing.T) {
+	n, err := spoolFromDaemon(context.Background(), io.Discard, infiniteReader{})
+	if err == nil {
+		t.Fatalf("spoolFromDaemon accepted an unbounded stream; want cap error")
+	}
+	if n <= MaxArchiveSize {
+		t.Fatalf("spoolFromDaemon returned %d bytes, want > MaxArchiveSize (%d)", n, int64(MaxArchiveSize))
 	}
 }

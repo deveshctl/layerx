@@ -548,7 +548,7 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	defer os.Remove(spoolPath)
 	defer spool.Close()
 
-	if _, err := copyCtx(ctx, spool, r); err != nil {
+	if _, err := spoolFromDaemon(ctx, spool, r); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}
@@ -645,7 +645,12 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decompressing layer %s: %w", hdr.Name, err)
 		}
-		tree, parseErr := ParseLayerTar(dec)
+		// Cap the decompressed body. tar.Reader bounds the compressed entry,
+		// but a gzip bomb can expand a small blob into an arbitrarily large
+		// tar. MaxLayerBlobSize matches the ceiling findFileInLayer enforces
+		// on the same reader so the analysis path is as bomb-resistant as the
+		// extraction path.
+		tree, parseErr := ParseLayerTar(io.LimitReader(dec, MaxLayerBlobSize+1))
 		dec.Close()
 		if parseErr != nil {
 			return nil, fmt.Errorf("parsing layer %s: %w", hdr.Name, parseErr)
@@ -682,15 +687,15 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 
 		switch {
 		case hdr.Name == "manifest.json":
-			data, err := io.ReadAll(tr)
+			data, err := readMetadataEntry(tr, hdr.Size, hdr.Name)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("reading manifest.json: %w", err)
+				return nil, nil, nil, err
 			}
 			manifestData = data
 		case strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/"):
-			data, err := io.ReadAll(tr)
+			data, err := readMetadataEntry(tr, hdr.Size, hdr.Name)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("reading %s: %w", hdr.Name, err)
+				return nil, nil, nil, err
 			}
 			rootJSON[hdr.Name] = data
 		default:
@@ -698,6 +703,25 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 		}
 	}
 	return manifestData, rootJSON, headers, nil
+}
+
+// readMetadataEntry reads a small archive descriptor (manifest.json, config,
+// legacy root *.json) into memory, capped at MaxMetadataSize. It fails fast
+// when the tar header overstates the size and enforces the same ceiling on the
+// stream in case the header understates it — a hostile archive can lie in
+// either direction. name is used only for the error message.
+func readMetadataEntry(tr io.Reader, declaredSize int64, name string) ([]byte, error) {
+	if declaredSize > MaxMetadataSize {
+		return nil, fmt.Errorf("invalid image archive: %s too large: %d bytes (limit %d)", name, declaredSize, MaxMetadataSize)
+	}
+	data, err := io.ReadAll(io.LimitReader(tr, MaxMetadataSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", name, err)
+	}
+	if int64(len(data)) > MaxMetadataSize {
+		return nil, fmt.Errorf("invalid image archive: %s too large: exceeds %d bytes", name, MaxMetadataSize)
+	}
+	return data, nil
 }
 
 func readEntryFromSpool(spool *os.File, name string) ([]byte, error) {
@@ -714,7 +738,7 @@ func readEntryFromSpool(spool *os.File, name string) ([]byte, error) {
 			return nil, fmt.Errorf("reading image archive: %w", err)
 		}
 		if hdr.Name == name {
-			return io.ReadAll(tr)
+			return readMetadataEntry(tr, hdr.Size, name)
 		}
 	}
 }

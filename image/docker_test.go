@@ -154,6 +154,49 @@ func TestParseLayers_MissingManifest(t *testing.T) {
 	assert.Contains(t, err.Error(), "manifest.json not found")
 }
 
+// tarWithForgedHeaderSize writes a single entry whose tar header DECLARES
+// declaredSize bytes while the body only carries len(body). A hostile archive
+// uses this to trick an unbounded io.ReadAll into pre-sizing a huge buffer.
+// tw.Close is deliberately skipped: a correct close validates that the full
+// declared size was written and would fail the fixture. parseLayers reads via
+// its own tar.Reader, which surfaces the declared hdr.Size during Next() —
+// that is what readMetadataEntry's fast-fail path checks, before the body is
+// consumed — so the fixture stays a few bytes on disk while claiming gigabytes.
+func tarWithForgedHeaderSize(t *testing.T, name string, declaredSize int64, body []byte) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: name, Size: declaredSize, Mode: 0644}))
+	_, _ = tw.Write(body)
+	return &buf
+}
+
+func TestParseLayers_ManifestExceedsMetadataCap(t *testing.T) {
+	tarBuf := tarWithForgedHeaderSize(t, "manifest.json", MaxMetadataSize+1, []byte("[]"))
+
+	_, err := parseLayers(context.Background(), tarBuf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "manifest.json too large")
+}
+
+// readMetadataEntry must also reject a stream that overruns the cap when the
+// header understated the size (a lying header in the opposite direction).
+func TestReadMetadataEntry_StreamOverrunRejected(t *testing.T) {
+	// Header claims 1 byte; body is MaxMetadataSize+1 bytes. The io.LimitReader
+	// truncates and the post-read length check flags the overrun.
+	oversized := bytes.Repeat([]byte("x"), int(MaxMetadataSize)+1)
+	_, err := readMetadataEntry(bytes.NewReader(oversized), 1, "config.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config.json too large")
+}
+
+func TestReadMetadataEntry_AcceptsSmallDescriptor(t *testing.T) {
+	body := []byte(`{"ok":true}`)
+	got, err := readMetadataEntry(bytes.NewReader(body), int64(len(body)), "manifest.json")
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
+}
+
 func TestParseLayers_MalformedManifest(t *testing.T) {
 	tarBuf := buildTar(t, map[string][]byte{
 		"manifest.json": []byte("not valid json{{{"),
