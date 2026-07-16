@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.5.3] - 2026-07-16
+
+Configurable `.layerx.yaml` discovery, engine config env-var support, richer
+file-tree navigation, and further hardening against crafted archives and rogue
+daemons.
+
 ### Added
 - Page and half-page navigation in the interactive file tree and layers pane:
   `Ctrl-d` / `Ctrl-u` jump half a screen down / up, and `Ctrl-f` / `Ctrl-b`
