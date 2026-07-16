@@ -250,6 +250,8 @@ source <(layerx completion bash)
 | `Tab`       | Switch panel (layers ↔ file tree)                            |
 | `j` / `k`   | Move up / down                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
+| `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
+| `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
 | `h` / `l`   | Scroll left / right (file viewer, long lines)                |
 | `Enter`     | Open file viewer; expand or collapse a folder                |
 | `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |

@@ -10,6 +10,10 @@ type keyMap struct {
 	Down         key.Binding
 	Top          key.Binding
 	Bottom       key.Binding
+	HalfPageDown key.Binding
+	HalfPageUp   key.Binding
+	PageDown     key.Binding
+	PageUp       key.Binding
 	Left         key.Binding
 	Right        key.Binding
 	Switch       key.Binding
@@ -50,6 +54,22 @@ func defaultKeys() keyMap {
 		Bottom: key.NewBinding(
 			key.WithKeys("G"),
 			key.WithHelp("G", "bottom"),
+		),
+		HalfPageDown: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("^d", "half page down"),
+		),
+		HalfPageUp: key.NewBinding(
+			key.WithKeys("ctrl+u"),
+			key.WithHelp("^u", "half page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("ctrl+f", "pgdown"),
+			key.WithHelp("^f/PgDn", "page down"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("ctrl+b", "pgup"),
+			key.WithHelp("^b/PgUp", "page up"),
 		),
 		Left: key.NewBinding(
 			key.WithKeys("h", "left"),

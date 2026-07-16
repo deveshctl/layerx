@@ -41,6 +41,8 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"j / k", "Move cursor down / up"},
 				{"g / G", "Jump to first / last item"},
+				{"^d / ^u", "Half page down / up"},
+				{"^f / ^b", "Page down / up (PgDn / PgUp)"},
 				{"Tab", "Switch panel (layers ↔ tree)"},
 			},
 		},
