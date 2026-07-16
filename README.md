@@ -277,6 +277,8 @@ Both halves track the layer you have selected. `Tab` moves focus to the layers p
 
 This is a layer-against-its-own-history view — top shows the delta, bottom shows the result — not a diff between two arbitrary layers. Press `A` again to return to the single tree.
 
+Full walkthrough, worked example, and the mechanics of each pane: [docs/split-view.md](docs/split-view.md).
+
 ---
 
 ## Container engines
