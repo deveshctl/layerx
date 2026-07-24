@@ -27,13 +27,17 @@ func renderPanel(t Theme, content, title string, focused bool, contentWidth, hei
 		borderColor = t.BorderFocus
 	}
 
-	borderFg := styleWithFg(borderColor)
+	// Every glyph the panel emits (borders, corners, title, scroll arrows)
+	// carries PanelBg so the panel body is a full-bleed fill with no
+	// terminal-default background showing through at the edges.
+	borderFg := panelText(t, borderColor)
+	panelBg := lipgloss.NewStyle().Background(t.PanelBg)
 
 	maxTitle := max(contentWidth-3, 0)
 	if ansi.StringWidth(title) > maxTitle {
 		title = ansi.Truncate(title, maxTitle, "…")
 	}
-	titleRendered := lipgloss.NewStyle().Foreground(borderColor).Bold(true).Render(title)
+	titleRendered := panelText(t, borderColor).Bold(true).Render(title)
 
 	topLeft := borderFg.Render("╭")
 	topRight := borderFg.Render("╮")
@@ -43,7 +47,7 @@ func renderPanel(t Theme, content, title string, focused bool, contentWidth, hei
 
 	titleLen := lipgloss.Width(title)
 	fillCount := max(contentWidth-titleLen-3, 0)
-	topBorder := topLeft + borderFg.Render("─") + " " + titleRendered + " " + borderFg.Render(strings.Repeat("─", fillCount)) + topRight
+	topBorder := topLeft + borderFg.Render("─") + borderFg.Render(" ") + titleRendered + borderFg.Render(" ") + borderFg.Render(strings.Repeat("─", fillCount)) + topRight
 
 	bottomBorder := bottomLeft + borderFg.Render(strings.Repeat("─", contentWidth)) + bottomRight
 
@@ -66,13 +70,16 @@ func renderPanel(t Theme, content, title string, focused bool, contentWidth, hei
 
 		sb.WriteString(vLine)
 		sb.WriteString(line)
-		sb.WriteString(strings.Repeat(" ", pad))
+		// Right-pad with PanelBg-backed spaces so the fill reaches the right
+		// border. Plain spaces here would show the terminal background and
+		// leave a bleed gap at every short line's end.
+		sb.WriteString(panelBg.Render(strings.Repeat(" ", pad)))
 
 		rightBorder := vLine
 		if hasAbove && i == 0 {
-			rightBorder = styleWithFg(t.TextDim2).Render("▴")
+			rightBorder = panelText(t, t.TextDim2).Render("▴")
 		} else if hasBelow && i == height-1 {
-			rightBorder = styleWithFg(t.TextDim2).Render("▾")
+			rightBorder = panelText(t, t.TextDim2).Render("▾")
 		}
 		sb.WriteString(rightBorder)
 

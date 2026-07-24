@@ -67,10 +67,12 @@ func TestDefaultTheme_PreservesCurrentPalette(t *testing.T) {
 		got  color.Color
 		want string
 	}{
+		"RootBg":          {th.RootBg, "#1e1e2e"},
+		"PanelBg":         {th.PanelBg, "#313244"},
 		"BorderFocus":     {th.BorderFocus, "#89b4fa"},
 		"BorderBlur":      {th.BorderBlur, "#45475a"},
 		"SelectFg":        {th.SelectFg, "#cdd6f4"},
-		"SelectBg":        {th.SelectBg, "#313244"},
+		"SelectBg":        {th.SelectBg, "#45475a"},
 		"DiffAdd":         {th.DiffAdd, "#a6e3a1"},
 		"DiffModify":      {th.DiffModify, "#f9e2af"},
 		"DiffRemove":      {th.DiffRemove, "#f38ba8"},
@@ -82,7 +84,8 @@ func TestDefaultTheme_PreservesCurrentPalette(t *testing.T) {
 		"Accent":          {th.Accent, "#89b4fa"},
 		"Separator":       {th.Separator, "#313244"},
 		"StatusBg":        {th.StatusBg, "#181825"},
-		"SearchMatchBg":   {th.SearchMatchBg, "#585b70"},
+		"SearchMatchBg":   {th.SearchMatchBg, "#5a4a3a"},
+		"SearchMatchFg":   {th.SearchMatchFg, "#f5e0dc"},
 		"SearchCurrentBg": {th.SearchCurrentBg, "#f9e2af"},
 		"SearchCurrentFg": {th.SearchCurrentFg, "#1e1e2e"},
 	}
@@ -133,14 +136,54 @@ func TestAllThemes_TextIsLegibleOnBackground(t *testing.T) {
 			label  string
 		}{
 			{th.TextPrimary, th.StatusBg, "TextPrimary/StatusBg"},
+			{th.TextPrimary, th.PanelBg, "TextPrimary/PanelBg"},
 			{th.SelectFg, th.SelectBg, "SelectFg/SelectBg"},
+			{th.SearchMatchFg, th.SearchMatchBg, "SearchMatchFg/SearchMatchBg"},
 			{th.SearchCurrentFg, th.SearchCurrentBg, "SearchCurrentFg/SearchCurrentBg"},
 		}
 		for _, p := range pairs {
 			if d := labDistance(p.fg, p.bg); d < minLegibleDistance {
-				t.Errorf("theme %q: %s distance %.1f < %.1f (unreadable)", name, p.label, d, minLegibleDistance)
+				t.Errorf("theme %q: %s distance %.2f < %.2f (unreadable)", name, p.label, d, minLegibleDistance)
 			}
 		}
+	}
+}
+
+// minSurfaceDistinctness is the smallest Lab distance two background tiers may
+// have and still count as visually separable. It is deliberately far below the
+// fg/bg legibility floor (minLegibleDistance): adjacent surface tiers are meant
+// to be *close* — a selected row one perceptual step above its panel — but must
+// never collapse to the same colour. The guard exists to catch the regression
+// where a tier is left unset or accidentally aliased to another, not to enforce
+// a large contrast between surfaces.
+const minSurfaceDistinctness = 0.02
+
+// TestAllThemes_BackgroundHierarchy asserts every registered theme paints a
+// real, layered background — the whole point of theme-driven backgrounds. Root,
+// panel, and selection must all be set and separable, and the selection tier
+// must be distinct from BOTH the panel it sits on and the search-match tint, so
+// a match inside a selected row never blends into the row highlight.
+func TestAllThemes_BackgroundHierarchy(t *testing.T) {
+	for _, name := range ThemeNames() {
+		th, _ := ResolveTheme(name)
+		t.Run(name, func(t *testing.T) {
+			// A zero-value color.Color is nil; a set lipgloss.Color never is.
+			if th.RootBg == nil || th.PanelBg == nil || th.SelectBg == nil || th.SearchMatchBg == nil {
+				t.Fatalf("theme %q leaves a background role unset (Root=%v Panel=%v Select=%v Match=%v)",
+					name, th.RootBg, th.PanelBg, th.SelectBg, th.SearchMatchBg)
+			}
+			// The raised-panel tier must differ from the root canvas, or panels
+			// would not read as raised and the whole layering collapses.
+			if d := labDistance(th.RootBg, th.PanelBg); d < minSurfaceDistinctness {
+				t.Errorf("theme %q: PanelBg not distinct from RootBg (distance %.3f < %.3f)", name, d, minSurfaceDistinctness)
+			}
+			if d := labDistance(th.SelectBg, th.PanelBg); d < minSurfaceDistinctness {
+				t.Errorf("theme %q: SelectBg not distinct from PanelBg (distance %.3f < %.3f)", name, d, minSurfaceDistinctness)
+			}
+			if d := labDistance(th.SelectBg, th.SearchMatchBg); d < minSurfaceDistinctness {
+				t.Errorf("theme %q: SelectBg not distinct from SearchMatchBg (distance %.3f < %.3f)", name, d, minSurfaceDistinctness)
+			}
+		})
 	}
 }
 

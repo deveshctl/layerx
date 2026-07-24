@@ -19,17 +19,22 @@ var (
 
 // fromCatppuccin builds a Theme from a Catppuccin flavor. The role→swatch
 // mapping mirrors defaultTheme (Mocha) so every flavor is internally
-// consistent: Blue drives accents/focus, the Surface ladder drives
-// selection/separators, Subtext/Overlay drive the text-dim ladder, and the
-// diff triad maps to Green/Yellow/Red. ChromaStyle points at the matching
-// "catppuccin-<flavor>" chroma style so the file viewer agrees with the chrome.
+// consistent: Blue drives accents/focus, the Surface ladder drives the
+// background hierarchy (Base root → Surface0 panel → Surface1 selection),
+// Subtext/Overlay drive the text-dim ladder, and the diff triad maps to
+// Green/Yellow/Red. Search-match is a low-prominence Peach tint over Base so
+// it reads distinct from the grey selection. ChromaStyle points at the
+// matching "catppuccin-<flavor>" chroma style so the file viewer agrees with
+// the chrome.
 func fromCatppuccin(name string, f catppuccin.Flavor) Theme {
 	return Theme{
 		Name:            name,
+		RootBg:          f.Base(),
+		PanelBg:         f.Surface0(),
 		BorderFocus:     f.Blue(),
 		BorderBlur:      f.Surface1(),
 		SelectFg:        f.Text(),
-		SelectBg:        f.Surface0(),
+		SelectBg:        f.Surface1(),
 		DiffAdd:         f.Green(),
 		DiffModify:      f.Yellow(),
 		DiffRemove:      f.Red(),
@@ -41,7 +46,8 @@ func fromCatppuccin(name string, f catppuccin.Flavor) Theme {
 		Accent:          f.Blue(),
 		Separator:       f.Surface0(),
 		StatusBg:        f.Mantle(),
-		SearchMatchBg:   f.Surface2(),
+		SearchMatchBg:   blend(f.Base(), f.Peach(), 0.30),
+		SearchMatchFg:   f.Text(),
 		SearchCurrentBg: f.Yellow(),
 		SearchCurrentFg: f.Base(),
 		ChromaStyle:     "catppuccin-" + name,

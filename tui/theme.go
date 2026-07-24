@@ -17,6 +17,15 @@ import (
 type Theme struct {
 	Name string
 
+	// RootBg is the outermost canvas the whole frame is painted on. PanelBg is
+	// the raised panel-body fill, one perceptual step lighter than RootBg so
+	// each pane reads as a card floating above the canvas. SelectBg (below)
+	// steps up again above PanelBg so a selected row stays distinct from the
+	// panel it sits on. Before backgrounds were themed these did not exist and
+	// the terminal's own default background bled through everywhere.
+	RootBg  color.Color
+	PanelBg color.Color
+
 	BorderFocus color.Color
 	BorderBlur  color.Color
 
@@ -38,6 +47,7 @@ type Theme struct {
 	StatusBg  color.Color
 
 	SearchMatchBg   color.Color
+	SearchMatchFg   color.Color
 	SearchCurrentBg color.Color
 	SearchCurrentFg color.Color
 
@@ -51,10 +61,12 @@ func sprintfHex(r, g, b uint8) string { return fmt.Sprintf("#%02x%02x%02x", r, g
 func defaultTheme() Theme {
 	return Theme{
 		Name:            "mocha",
+		RootBg:          lipgloss.Color("#1E1E2E"),
+		PanelBg:         lipgloss.Color("#313244"),
 		BorderFocus:     lipgloss.Color("#89B4FA"),
 		BorderBlur:      lipgloss.Color("#45475A"),
 		SelectFg:        lipgloss.Color("#CDD6F4"),
-		SelectBg:        lipgloss.Color("#313244"),
+		SelectBg:        lipgloss.Color("#45475A"),
 		DiffAdd:         lipgloss.Color("#A6E3A1"),
 		DiffModify:      lipgloss.Color("#F9E2AF"),
 		DiffRemove:      lipgloss.Color("#F38BA8"),
@@ -66,7 +78,8 @@ func defaultTheme() Theme {
 		Accent:          lipgloss.Color("#89B4FA"),
 		Separator:       lipgloss.Color("#313244"),
 		StatusBg:        lipgloss.Color("#181825"),
-		SearchMatchBg:   lipgloss.Color("#585B70"),
+		SearchMatchBg:   lipgloss.Color("#5A4A3A"),
+		SearchMatchFg:   lipgloss.Color("#F5E0DC"),
 		SearchCurrentBg: lipgloss.Color("#F9E2AF"),
 		SearchCurrentFg: lipgloss.Color("#1E1E2E"),
 		ChromaStyle:     "catppuccin-mocha",
@@ -81,8 +94,19 @@ type Styles struct {
 
 func newStyles(t Theme) Styles { return Styles{Theme: t} }
 
-func styleWithFg(c color.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(c)
+// panelText builds a style whose foreground is fg and whose background is the
+// theme's raised-panel colour. Every cell of panel-body content routes through
+// this so no terminal-default background bleeds through — matching the
+// header/status-bar pattern where each segment carries its own background.
+func panelText(t Theme, fg color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(fg).Background(t.PanelBg)
+}
+
+// rootText is the RootBg counterpart of panelText, for content rendered
+// directly on the root canvas rather than inside a panel (the command bar and
+// the separator row live in that band between the panels and the status bar).
+func rootText(t Theme, fg color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(fg).Background(t.RootBg)
 }
 
 // themeRegistry maps a theme name to its complete palette. mocha stays

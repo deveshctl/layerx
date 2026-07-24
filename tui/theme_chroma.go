@@ -62,10 +62,17 @@ func fromChroma(name, styleName string) Theme {
 	fg := chromaColor(st.Get(chroma.Text).Colour)
 	white := lipgloss.Color("#ffffff")
 	black := lipgloss.Color("#000000")
-	sel := blend(bg, white, 0.10)
+	// Background hierarchy: the syntax style gives only one background (bg),
+	// so the raised-panel and selection tiers are derived by nudging bg toward
+	// white in Lab space. panel sits just above the root canvas; selection
+	// steps up again so a selected row reads distinct from the panel.
+	panel := blend(bg, white, 0.06)
+	sel := blend(bg, white, 0.16)
 	accent := chromaColorOr(st.Get(chroma.KeywordType).Colour, fg)
 	return Theme{
 		Name:            name,
+		RootBg:          bg,
+		PanelBg:         panel,
 		BorderFocus:     accent,
 		BorderBlur:      blend(bg, white, 0.18),
 		SelectFg:        fg,
@@ -81,7 +88,11 @@ func fromChroma(name, styleName string) Theme {
 		Accent:          accent,
 		Separator:       blend(bg, white, 0.12),
 		StatusBg:        blend(bg, black, 0.30),
-		SearchMatchBg:   blend(bg, white, 0.25),
+		// Accent-tinted so a match reads distinct from the grey selection
+		// tier; fg stays the style's text colour, kept legible by the blend
+		// staying close to bg. The contrast guard asserts both.
+		SearchMatchBg:   blend(bg, accent, 0.30),
+		SearchMatchFg:   fg,
 		SearchCurrentBg: chromaColorOr(st.Get(chroma.LiteralString).Colour, accent),
 		SearchCurrentFg: bg,
 		ChromaStyle:     styleName,

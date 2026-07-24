@@ -1572,7 +1572,7 @@ func (m model) viewLoading() tea.View {
 
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true).Render("◆ layerx"))
+	lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render("  ")+panelText(m.theme, m.theme.Accent).Bold(true).Render("◆ layerx"))
 	lines = append(lines, "")
 
 	switch m.loadPhase {
@@ -1631,8 +1631,8 @@ func (m model) viewLoading() tea.View {
 	}
 
 	lines = append(lines, "")
-	hintStyle := lipgloss.NewStyle().Foreground(m.theme.TextDim2)
-	lines = append(lines, "  "+hintStyle.Render("Press q or Esc to exit."))
+	hintStyle := panelText(m.theme, m.theme.TextDim2)
+	lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render("  ")+hintStyle.Render("Press q or Esc to exit."))
 	lines = append(lines, "")
 
 	boxWidth := 52
@@ -1652,9 +1652,21 @@ func (m model) viewLoading() tea.View {
 		boxHeight = 7
 	}
 
+	// Lines assembled as plain fmt.Sprintf strings (the phase/progress text)
+	// carry no styling, so their cells would show the terminal background.
+	// Back any line that has no ANSI escape yet with PanelBg; already-styled
+	// lines (brand, hint, progress bar) are left untouched so their own
+	// colours survive.
+	for i, ln := range lines {
+		if ln != "" && !strings.Contains(ln, "\x1b") {
+			lines[i] = panelText(m.theme, m.theme.TextPrimary).Render(ln)
+		}
+	}
+
 	body := strings.Join(lines, "\n")
 	panel := renderPanel(m.theme, body, "Loading", true, boxWidth, boxHeight, false, false)
-	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
+	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(m.theme.RootBg)))
 	return finalizeView(tea.NewView(content))
 }
 
@@ -1702,10 +1714,11 @@ func (m model) viewError() tea.View {
 	if wrapWidth < 1 {
 		wrapWidth = 1
 	}
-	errStyle := lipgloss.NewStyle().Foreground(m.theme.DiffRemove).Bold(true).Width(wrapWidth)
-	hintStyle := lipgloss.NewStyle().Foreground(m.theme.TextDim2)
+	errStyle := rootText(m.theme, m.theme.DiffRemove).Bold(true).Width(wrapWidth)
+	hintStyle := rootText(m.theme, m.theme.TextDim2)
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
-	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(m.theme.RootBg)))
 	return finalizeView(tea.NewView(content))
 }
 
@@ -1732,7 +1745,7 @@ func (m model) viewReady() tea.View {
 	left := renderLayers(m.theme, m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := m.renderRightPanel(rightWidth, panelHeight)
 
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, rootText(m.theme, m.theme.RootBg).Render(" "), right)
 
 	if m.viewState != viewNone {
 		viewer := renderFileView(m.theme, viewerParams{
@@ -1763,10 +1776,15 @@ func (m model) viewReady() tea.View {
 	}
 	commandBar := renderCommandBar(m.theme, cmd, m.width)
 
-	sep := lipgloss.NewStyle().Foreground(m.theme.Separator).Render(strings.Repeat("─", m.width))
+	sep := rootText(m.theme, m.theme.Separator).Render(strings.Repeat("─", m.width))
 	status := m.renderStatusBar(treeFiles)
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar, sep, status)
+	// Back the whole frame with the root canvas so any cell JoinVertical pads
+	// to reach the max line width carries the theme background rather than the
+	// terminal default. Each band (header, panels, command bar, separator,
+	// status) already paints its own background; this catches only the seams.
+	content = lipgloss.NewStyle().Background(m.theme.RootBg).Width(m.width).Height(m.height).Render(content)
 
 	if m.showHelp {
 		content = m.overlayHelp()

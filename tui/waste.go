@@ -247,10 +247,10 @@ func (m model) renderWasteOverlay() string {
 		panelTitle += fmt.Sprintf(" (capped, %d total)", originalCount)
 	}
 
-	titleStyle := lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(m.theme.TextDim2)
-	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(m.theme.TextPrimary)
+	titleStyle := panelText(m.theme, m.theme.Accent).Bold(true)
+	dimStyle := panelText(m.theme, m.theme.TextDim2)
+	keyStyle := panelText(m.theme, m.theme.Accent).Bold(true)
+	descStyle := panelText(m.theme, m.theme.TextPrimary)
 
 	var lines []string
 	lines = append(lines, "")
@@ -265,7 +265,7 @@ func (m model) renderWasteOverlay() string {
 		mid := bodyHeight / 2
 		for i := range bodyHeight {
 			if i == mid {
-				lines = append(lines, strings.Repeat(" ", pad)+dimStyle.Render(empty))
+				lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render(strings.Repeat(" ", pad))+dimStyle.Render(empty))
 			} else {
 				lines = append(lines, "")
 			}
@@ -273,7 +273,7 @@ func (m model) renderWasteOverlay() string {
 	} else {
 		header := fmt.Sprintf("%s wasted across %d files",
 			image.FormatBytes(m.efficiency.WastedBytes), originalCount)
-		lines = append(lines, "  "+titleStyle.Render(header))
+		lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render("  ")+titleStyle.Render(header))
 		lines = append(lines, "")
 
 		visibleHeight := m.wasteVisibleHeight()
@@ -289,28 +289,28 @@ func (m model) renderWasteOverlay() string {
 	var footer string
 	switch {
 	case m.copyConfirm:
-		copied := lipgloss.NewStyle().Foreground(m.theme.DiffAdd).Bold(true).Render("Copied!")
+		copied := panelText(m.theme, m.theme.DiffAdd).Bold(true).Render("Copied!")
 		pad := 0
 		if innerWidth > lipgloss.Width(copied) {
 			pad = (innerWidth - lipgloss.Width(copied)) / 2
 		}
-		footer = strings.Repeat(" ", pad) + copied
+		footer = panelText(m.theme, m.theme.PanelBg).Render(strings.Repeat(" ", pad)) + copied
 		lines = append(lines, footer)
 	case originalCount == 0:
-		footer = keyStyle.Render("Esc") + " " + descStyle.Render("close")
-		lines = append(lines, "  "+footer)
+		footer = keyStyle.Render("Esc") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("close")
+		lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render("  ")+footer)
 	case m.wasteExpanded:
-		footer = keyStyle.Render("Enter") + " " + descStyle.Render("jump") + dimStyle.Render(" │ ") +
-			keyStyle.Render("a") + " " + descStyle.Render("collapse") + dimStyle.Render(" │ ") +
-			keyStyle.Render("y") + " " + descStyle.Render("copy") + dimStyle.Render(" │ ") +
-			keyStyle.Render("Esc") + " " + descStyle.Render("close")
-		lines = append(lines, "  "+footer)
+		footer = keyStyle.Render("Enter") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("jump") + dimStyle.Render(" │ ") +
+			keyStyle.Render("a") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("collapse") + dimStyle.Render(" │ ") +
+			keyStyle.Render("y") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("copy") + dimStyle.Render(" │ ") +
+			keyStyle.Render("Esc") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("close")
+		lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render("  ")+footer)
 	default:
-		footer = keyStyle.Render("Enter") + " " + descStyle.Render("jump") + dimStyle.Render(" │ ") +
-			keyStyle.Render("a") + " " + descStyle.Render("expand") + dimStyle.Render(" │ ") +
-			keyStyle.Render("y") + " " + descStyle.Render("copy") + dimStyle.Render(" │ ") +
-			keyStyle.Render("Esc") + " " + descStyle.Render("close")
-		lines = append(lines, "  "+footer)
+		footer = keyStyle.Render("Enter") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("jump") + dimStyle.Render(" │ ") +
+			keyStyle.Render("a") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("expand") + dimStyle.Render(" │ ") +
+			keyStyle.Render("y") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("copy") + dimStyle.Render(" │ ") +
+			keyStyle.Render("Esc") + panelText(m.theme, m.theme.PanelBg).Render(" ") + descStyle.Render("close")
+		lines = append(lines, panelText(m.theme, m.theme.PanelBg).Render("  ")+footer)
 	}
 	lines = append(lines, "")
 
@@ -321,7 +321,8 @@ func (m model) renderWasteOverlay() string {
 	}
 
 	panel := renderPanel(m.theme, body, panelTitle, true, innerWidth, boxHeight, false, false)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(m.theme.RootBg)))
 }
 
 func formatWasteRow(t Theme, r wasteRow, selected bool, innerWidth int) string {
@@ -378,22 +379,23 @@ func formatWasteRow(t Theme, r wasteRow, selected bool, innerWidth int) string {
 		return lipgloss.NewStyle().Foreground(t.SelectFg).Background(t.SelectBg).Bold(true).Render(line)
 	}
 
-	pathStyle := styleWithFg(t.TextPrimary)
-	wastedStyle := styleWithFg(t.TextDim1)
-	layerStyle := styleWithFg(t.TextDim2)
-	countStyle := styleWithFg(t.TextDim2)
+	pathStyle := panelText(t, t.TextPrimary)
+	wastedStyle := panelText(t, t.TextDim1)
+	layerStyle := panelText(t, t.TextDim2)
+	countStyle := panelText(t, t.TextDim2)
+	bg := panelText(t, t.PanelBg)
 
 	var b strings.Builder
-	b.WriteString(gutter)
+	b.WriteString(bg.Render(gutter))
 	b.WriteString(pathStyle.Render(path))
-	b.WriteString(strings.Repeat(" ", pathPad))
-	b.WriteString(strings.Repeat(" ", gap))
+	b.WriteString(bg.Render(strings.Repeat(" ", pathPad)))
+	b.WriteString(bg.Render(strings.Repeat(" ", gap)))
 	b.WriteString(wastedStyle.Render(padLeft(wastedStr, wastedW)))
 	if wide {
-		b.WriteString(strings.Repeat(" ", gap))
+		b.WriteString(bg.Render(strings.Repeat(" ", gap)))
 		b.WriteString(countStyle.Render(padLeft(countStr, countW)))
 	}
-	b.WriteString(strings.Repeat(" ", gap))
+	b.WriteString(bg.Render(strings.Repeat(" ", gap)))
 	b.WriteString(layerStyle.Render(padLeft(layerStr, layerW)))
 	return b.String()
 }

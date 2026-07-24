@@ -102,8 +102,8 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 		midpoint := contentHeight / 2
 		for i := 0; i < contentHeight; i++ {
 			if i == midpoint {
-				sb.WriteString(pad)
-				sb.WriteString(styleWithFg(in.theme.TextNeutral).Render(msg))
+				sb.WriteString(panelText(in.theme, in.theme.PanelBg).Render(pad))
+				sb.WriteString(panelText(in.theme, in.theme.TextNeutral).Render(msg))
 			}
 			if i < contentHeight-1 {
 				sb.WriteString("\n")
@@ -253,11 +253,11 @@ func renderSplitDivider(t Theme, botFocused bool, contentWidth int, botFiles []*
 		label = fmt.Sprintf(" ▾ Cumulative · %d items ", len(botFiles))
 	}
 
-	labelStyle := lipgloss.NewStyle().Foreground(t.TextNeutral)
-	lineStyle := lipgloss.NewStyle().Foreground(t.Separator)
+	labelStyle := panelText(t, t.TextNeutral)
+	lineStyle := panelText(t, t.Separator)
 	if botFocused {
-		labelStyle = lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
-		lineStyle = lipgloss.NewStyle().Foreground(t.Accent)
+		labelStyle = panelText(t, t.Accent).Bold(true)
+		lineStyle = panelText(t, t.Accent)
 	}
 
 	rendered := labelStyle.Render(label)
@@ -321,19 +321,19 @@ func renderTreeHeader(t Theme, maxWidth int) string {
 	if lipgloss.Width(header) > maxWidth {
 		header = ansi.Truncate(header, maxWidth, "")
 	}
-	return styleWithFg(t.TextDim2).Render(header)
+	return panelText(t, t.TextDim2).Render(header)
 }
 
 func renderFilterBar(t Theme, active bool, query string, matchCount int, maxWidth int) string {
 	if active {
-		prefix := styleWithFg(t.Accent).Render("/ ")
-		cursor := query + "█"
+		prefix := panelText(t, t.Accent).Render("/ ")
+		cursor := panelText(t, t.SelectFg).Render(query + "█")
 		return prefix + cursor
 	}
-	prefix := styleWithFg(t.Accent).Render("/ ")
-	queryStr := styleWithFg(t.SelectFg).Render(query)
-	matches := styleWithFg(t.TextDim2).Render(fmt.Sprintf("  (%d matches)", matchCount))
-	hint := styleWithFg(t.TextNeutral).Render("  [⌫ clear]")
+	prefix := panelText(t, t.Accent).Render("/ ")
+	queryStr := panelText(t, t.SelectFg).Render(query)
+	matches := panelText(t, t.TextDim2).Render(fmt.Sprintf("  (%d matches)", matchCount))
+	hint := panelText(t, t.TextNeutral).Render("  [⌫ clear]")
 
 	line := prefix + queryStr + matches + hint
 	lineWidth := lipgloss.Width(line)
@@ -421,13 +421,13 @@ func formatFileNodeLine(t Theme, f *image.FileNode, selected bool, maxWidth int,
 	var diffGlyph string
 	switch f.DiffType {
 	case image.Added:
-		diffGlyph = styleWithFg(t.DiffAdd).Render("+ ")
+		diffGlyph = panelText(t, t.DiffAdd).Render("+ ")
 	case image.Modified:
-		diffGlyph = styleWithFg(t.DiffModify).Render("~ ")
+		diffGlyph = panelText(t, t.DiffModify).Render("~ ")
 	case image.Removed:
-		diffGlyph = styleWithFg(t.DiffRemove).Render("- ")
+		diffGlyph = panelText(t, t.DiffRemove).Render("- ")
 	default:
-		diffGlyph = "  "
+		diffGlyph = panelText(t, t.PanelBg).Render("  ")
 	}
 
 	if selected {
@@ -458,14 +458,14 @@ func formatFileNodeLine(t Theme, f *image.FileNode, selected bool, maxWidth int,
 
 	var metaCols string
 	if showPerms {
-		permStr := styleWithFg(t.TextDim2).Render(padRight(perms, permCol))
-		uidStr := styleWithFg(t.TextDim2).Render(padRight(uidGid, uidGidCol))
-		sizeStr := styleWithFg(t.TextDim1).Render(padLeft(size, sizeCol))
-		gap := strings.Repeat(" ", colGap)
+		gap := panelText(t, t.PanelBg).Render(strings.Repeat(" ", colGap))
+		permStr := panelText(t, t.TextDim2).Render(padRight(perms, permCol))
+		uidStr := panelText(t, t.TextDim2).Render(padRight(uidGid, uidGidCol))
+		sizeStr := panelText(t, t.TextDim1).Render(padLeft(size, sizeCol))
 		metaCols = permStr + gap + uidStr + gap + sizeStr + gap
 	} else if showSize {
-		sizeStr := styleWithFg(t.TextDim1).Render(padLeft(size, sizeCol))
-		metaCols = sizeStr + strings.Repeat(" ", colGap)
+		sizeStr := panelText(t, t.TextDim1).Render(padLeft(size, sizeCol))
+		metaCols = sizeStr + panelText(t, t.PanelBg).Render(strings.Repeat(" ", colGap))
 	}
 
 	var nameRendered string
@@ -480,21 +480,21 @@ func formatFileNodeLine(t Theme, f *image.FileNode, selected bool, maxWidth int,
 		if prefixRuneLen < len(fullRunes) {
 			nameOnly = string(fullRunes[prefixRuneLen:])
 		}
-		treePrefixRendered := styleWithFg(t.TreeGlyph).Render(treePrefix)
+		treePrefixRendered := panelText(t, t.TreeGlyph).Render(treePrefix)
 		nameOnlyRendered := renderNameWithHighlight(t, nameOnly, filterQuery, diffColorForNode(t, f))
 		nameRendered = treePrefixRendered + nameOnlyRendered
 	}
 
 	var originRendered string
 	if showOrigin {
-		originRendered = styleWithFg(t.TextDim2).Render(originSuffix)
+		originRendered = panelText(t, t.TextDim2).Render(originSuffix)
 	}
 
 	nameRenderedWidth := lipgloss.Width(nameRendered) + lipgloss.Width(originRendered)
 	diffGlyphWidth := lipgloss.Width(diffGlyph)
 	actualNamePad := max(nameSpace-nameRenderedWidth+diffGlyphWidth-2, 0)
 
-	fullLine := diffGlyph + metaCols + nameRendered + originRendered + strings.Repeat(" ", actualNamePad)
+	fullLine := diffGlyph + metaCols + nameRendered + originRendered + panelText(t, t.PanelBg).Render(strings.Repeat(" ", actualNamePad))
 
 	return fullLine
 }
@@ -626,12 +626,12 @@ func diffColorForNode(t Theme, f *image.FileNode) color.Color {
 
 func renderNameWithHighlight(t Theme, name, query string, fg color.Color) string {
 	if query == "" || name == "" {
-		return styleWithFg(fg).Render(name)
+		return panelText(t, fg).Render(name)
 	}
 	lowerName := strings.ToLower(name)
 	lowerQuery := strings.ToLower(query)
 	if !strings.Contains(lowerName, lowerQuery) {
-		return styleWithFg(fg).Render(name)
+		return panelText(t, fg).Render(name)
 	}
 	runes := []rune(name)
 	lowerRunes := []rune(lowerName)
@@ -644,13 +644,16 @@ func renderNameWithHighlight(t Theme, name, query string, fg color.Color) string
 		}
 	}
 	if runeIdx < 0 {
-		return styleWithFg(fg).Render(name)
+		return panelText(t, fg).Render(name)
 	}
 	before := string(runes[:runeIdx])
 	match := string(runes[runeIdx : runeIdx+len(queryRunes)])
 	after := string(runes[runeIdx+len(queryRunes):])
 
-	normal := styleWithFg(fg)
-	highlight := lipgloss.NewStyle().Foreground(fg).Background(t.SearchMatchBg)
+	normal := panelText(t, fg)
+	// Search match uses the accent-tinted SearchMatchBg (a warm tint, not the
+	// grey selection background) with SearchMatchFg, so a filter match reads
+	// as categorically distinct from a selected row.
+	highlight := lipgloss.NewStyle().Foreground(t.SearchMatchFg).Background(t.SearchMatchBg)
 	return normal.Render(before) + highlight.Render(match) + normal.Render(after)
 }

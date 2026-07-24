@@ -110,12 +110,12 @@ type helpStyles struct {
 
 func newHelpStyles(t Theme) helpStyles {
 	return helpStyles{
-		title:   lipgloss.NewStyle().Foreground(t.Accent).Bold(true),
-		section: lipgloss.NewStyle().Foreground(t.DiffModify).Bold(true),
-		key:     lipgloss.NewStyle().Foreground(t.Accent),
-		desc:    lipgloss.NewStyle().Foreground(t.TextPrimary),
-		dim:     lipgloss.NewStyle().Foreground(t.TextDim2),
-		note:    lipgloss.NewStyle().Foreground(t.TextDim2).Italic(true),
+		title:   panelText(t, t.Accent).Bold(true),
+		section: panelText(t, t.DiffModify).Bold(true),
+		key:     panelText(t, t.Accent),
+		desc:    panelText(t, t.TextPrimary),
+		dim:     panelText(t, t.TextDim2),
+		note:    panelText(t, t.TextDim2).Italic(true),
 	}
 }
 
@@ -130,10 +130,11 @@ func padHelpKey(key string) string {
 }
 
 func renderHelpSection(sec helpSection, st helpStyles) string {
+	sp := st.desc.Render(" ")
 	var lines []string
-	lines = append(lines, " "+st.section.Render(sec.title))
+	lines = append(lines, sp+st.section.Render(sec.title))
 	for _, e := range sec.entries {
-		line := " " + st.key.Render(padHelpKey(e.key)) + st.desc.Render(e.desc)
+		line := sp + st.key.Render(padHelpKey(e.key)) + st.desc.Render(e.desc)
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
@@ -192,8 +193,9 @@ func (m model) overlayHelp() string {
 	sections := defaultHelpSections()
 
 	var body strings.Builder
+	sp := st.desc.Render(" ")
 	body.WriteString("\n")
-	body.WriteString(" ")
+	body.WriteString(sp)
 	body.WriteString(st.title.Render("layerx — Keyboard Shortcuts"))
 	body.WriteString("\n\n")
 
@@ -210,7 +212,7 @@ func (m model) overlayHelp() string {
 		parts := make([]string, 0, len(colBodies)*2-1)
 		for i, cb := range colBodies {
 			if i > 0 {
-				parts = append(parts, strings.Repeat(" ", helpColumnGap))
+				parts = append(parts, st.desc.Render(strings.Repeat(" ", helpColumnGap)))
 			}
 			parts = append(parts, padHelpColumn(cb, maxH))
 		}
@@ -220,17 +222,17 @@ func (m model) overlayHelp() string {
 	}
 
 	body.WriteString("\n\n")
-	body.WriteString(" ")
+	body.WriteString(sp)
 	body.WriteString(st.note.Render(
 		"Change = files in the image grew or shrank at this step. " +
 			"Stored = bytes Docker keeps for this layer. " +
 			"Layer 0 Change is the size after the first layer.",
 	))
 	body.WriteString("\n")
-	body.WriteString(" ")
+	body.WriteString(sp)
 	body.WriteString(st.dim.Render("(Sort, filter, and diff-only flatten the file tree.)"))
 	body.WriteString("\n\n")
-	body.WriteString(" ")
+	body.WriteString(sp)
 	body.WriteString(st.dim.Render("Press ? or Esc to close"))
 	body.WriteString("\n")
 
@@ -242,7 +244,8 @@ func (m model) overlayHelp() string {
 	boxHeight := lipgloss.Height(content) + 2
 
 	popup := renderPanel(m.theme, content, "Help", true, boxWidth, boxHeight, false, false)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(m.theme.RootBg)))
 }
 
 func padHelpColumn(col string, height int) string {

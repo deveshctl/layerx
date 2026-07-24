@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (truecolor, 256-colour, 16-colour, or plain text under `NO_COLOR`).
 
 ### Changed
+- Themes now drive panel and root backgrounds, not just foreground and accent
+  colours. Each theme paints a full-bleed background in a layered hierarchy —
+  root canvas, raised panels, selected rows — so the seven themes are visibly
+  distinct rather than differing only in accent colour on the terminal's own
+  background. The default `mocha` look gains its painted backgrounds as part of
+  this change.
+- The search-match highlight now uses a distinct accent-tinted background so a
+  match inside a selected row no longer blends into the row's selection colour.
 - The file viewer's syntax highlighting now matches the active theme rather
   than a fixed scheme, so code colours agree with the surrounding interface.
 - The file-viewer text cursor and the viewer's match counter now follow the
