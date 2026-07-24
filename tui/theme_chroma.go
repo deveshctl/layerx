@@ -74,7 +74,12 @@ func fromChroma(name, styleName string) Theme {
 		RootBg:          bg,
 		PanelBg:         panel,
 		BorderFocus:     accent,
-		BorderBlur:      blend(bg, white, 0.18),
+		// Unfocused border: a muted mid-tone blended most of the way from the
+		// panel background toward the style's own text colour. Blending toward
+		// white (the old 0.18) landed too close to bg and the border dissolved
+		// into the panel; deriving it from fg keeps it in-family with the
+		// style yet far enough in Lab space that panel edges read at a glance.
+		BorderBlur:      blend(bg, fg, 0.55),
 		SelectFg:        fg,
 		SelectBg:        sel,
 		DiffAdd:         chromaColorOr(st.Get(chroma.NameFunction).Colour, fg),
@@ -84,7 +89,7 @@ func fromChroma(name, styleName string) Theme {
 		TextNeutral:     blend(fg, bg, 0.20),
 		TextDim1:        blend(fg, bg, 0.40),
 		TextDim2:        blend(fg, bg, 0.55),
-		TreeGlyph:       blend(bg, white, 0.22),
+		TreeGlyph:       blend(bg, fg, 0.35),
 		Accent:          accent,
 		Separator:       blend(bg, white, 0.12),
 		StatusBg:        blend(bg, black, 0.30),

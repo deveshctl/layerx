@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The file-viewer text cursor and the viewer's match counter now follow the
   active theme's palette instead of relying on terminal reverse-video.
 
+### Fixed
+- Panel borders now stand out from the panel body in every theme. The unfocused
+  border previously used the same near-panel tint as the selection highlight, so
+  panel edges dissolved into the fill and the whole frame looked flat; it now
+  uses a muted mid-tone clearly separated from the panel, matching how
+  established terminal UIs render inactive borders. File-tree connector glyphs
+  were nudged off that same near-invisible tint for the same reason.
+
 ## [v1.5.3] - 2026-07-16
 
 Configurable `.layerx.yaml` discovery, engine config env-var support, richer

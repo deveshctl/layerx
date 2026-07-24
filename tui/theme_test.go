@@ -70,7 +70,7 @@ func TestDefaultTheme_PreservesCurrentPalette(t *testing.T) {
 		"RootBg":          {th.RootBg, "#1e1e2e"},
 		"PanelBg":         {th.PanelBg, "#313244"},
 		"BorderFocus":     {th.BorderFocus, "#89b4fa"},
-		"BorderBlur":      {th.BorderBlur, "#45475a"},
+		"BorderBlur":      {th.BorderBlur, "#a6adc8"},
 		"SelectFg":        {th.SelectFg, "#cdd6f4"},
 		"SelectBg":        {th.SelectBg, "#45475a"},
 		"DiffAdd":         {th.DiffAdd, "#a6e3a1"},
@@ -80,7 +80,7 @@ func TestDefaultTheme_PreservesCurrentPalette(t *testing.T) {
 		"TextNeutral":     {th.TextNeutral, "#a6adc8"},
 		"TextDim1":        {th.TextDim1, "#9399b2"},
 		"TextDim2":        {th.TextDim2, "#6c7086"},
-		"TreeGlyph":       {th.TreeGlyph, "#45475a"},
+		"TreeGlyph":       {th.TreeGlyph, "#6c7086"},
 		"Accent":          {th.Accent, "#89b4fa"},
 		"Separator":       {th.Separator, "#313244"},
 		"StatusBg":        {th.StatusBg, "#181825"},
@@ -187,8 +187,35 @@ func TestAllThemes_BackgroundHierarchy(t *testing.T) {
 	}
 }
 
-func TestNonCatppuccinThemes_Exist(t *testing.T) {
-	for _, n := range []string{"dracula", "gruvbox", "solarized-dark"} {
+// minBorderSeparation is the smallest DistanceLab an unfocused panel border may
+// have from the panel it draws on and still read as an edge. It is far above
+// minSurfaceDistinctness: a border that merely differs from the panel by a hair
+// (the old regression, where BorderBlur was the Surface1 selection tint ~0.09
+// from the panel) visually dissolves into the fill. Every shipped theme scores
+// ~0.37–0.50 here after mapping the unfocused border to a muted mid-tone
+// (Subtext0 for Catppuccin, a bg→fg blend for the chroma-derived themes), so
+// 0.15 admits all of them while rejecting the collapsed case.
+const minBorderSeparation = 0.15
+
+// TestAllThemes_BorderSeparatedFromPanel guards the fix for panels that read as
+// one flat wash: the unfocused border must be clearly separated from the panel
+// body, and the focused border must be tellable apart from the unfocused one so
+// focus is legible.
+func TestAllThemes_BorderSeparatedFromPanel(t *testing.T) {
+	for _, name := range ThemeNames() {
+		th, _ := ResolveTheme(name)
+		t.Run(name, func(t *testing.T) {
+			if d := labDistance(th.BorderBlur, th.PanelBg); d < minBorderSeparation {
+				t.Errorf("theme %q: unfocused border not separated from panel (distance %.3f < %.3f) — panel edge dissolves into the fill", name, d, minBorderSeparation)
+			}
+			if d := labDistance(th.BorderFocus, th.BorderBlur); d < minSurfaceDistinctness {
+				t.Errorf("theme %q: focused and unfocused borders not distinct (distance %.3f < %.3f) — focus is invisible", name, d, minSurfaceDistinctness)
+			}
+		})
+	}
+}
+
+func TestNonCatppuccinThemes_Exist(t *testing.T) {	for _, n := range []string{"dracula", "gruvbox", "solarized-dark"} {
 		if _, err := ResolveTheme(n); err != nil {
 			t.Errorf("theme %q should resolve: %v", n, err)
 		}
