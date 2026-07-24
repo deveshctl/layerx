@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/deveshctl/layerx/config"
 )
 
 func TestSetVersionInfo_FullInfo(t *testing.T) {
@@ -35,6 +37,39 @@ func TestSetVersionInfo_EmptyCommitHidden(t *testing.T) {
 	t.Cleanup(func() { rootCmd.Version = "" })
 	SetVersionInfo("0.1.0", "", "2026-05-25")
 	assert.Equal(t, "0.1.0", rootCmd.Version)
+}
+
+func TestResolveThemeName_Precedence(t *testing.T) {
+	orig := flagTheme
+	t.Cleanup(func() { flagTheme = orig })
+
+	cases := []struct {
+		name   string
+		flag   string
+		cfg    *config.Config
+		want   string
+	}{
+		{"flag beats config", "dracula", &config.Config{Theme: "latte"}, "dracula"},
+		{"config used when no flag", "", &config.Config{Theme: "latte"}, "latte"},
+		{"empty everywhere is default", "", &config.Config{Theme: ""}, ""},
+		{"nil config, flag set", "gruvbox", nil, "gruvbox"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			flagTheme = tc.flag
+			got, err := resolveThemeName(tc.cfg)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveThemeName_InvalidErrors(t *testing.T) {
+	orig := flagTheme
+	t.Cleanup(func() { flagTheme = orig })
+	flagTheme = "does-not-exist"
+	_, err := resolveThemeName(nil)
+	assert.Error(t, err, "an unknown theme name must be rejected, not silently defaulted")
 }
 
 func TestSetVersionInfo_UnknownDateOmitsBuiltSuffix(t *testing.T) {

@@ -8,8 +8,10 @@ require (
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/catppuccin/go v0.3.0
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/goccy/go-yaml v1.19.2
+	github.com/lucasb-eyer/go-colorful v1.4.0
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
 	github.com/opencontainers/image-spec v1.1.1
@@ -38,7 +40,6 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect

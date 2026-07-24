@@ -108,14 +108,14 @@ type helpStyles struct {
 	note    lipgloss.Style
 }
 
-func newHelpStyles() helpStyles {
+func newHelpStyles(t Theme) helpStyles {
 	return helpStyles{
-		title:   lipgloss.NewStyle().Foreground(accentColor).Bold(true),
-		section: lipgloss.NewStyle().Foreground(modifiedColor).Bold(true),
-		key:     lipgloss.NewStyle().Foreground(statusKeyColor),
-		desc:    lipgloss.NewStyle().Foreground(fileNameColor),
-		dim:     lipgloss.NewStyle().Foreground(statusDimColor),
-		note:    lipgloss.NewStyle().Foreground(statusDimColor).Italic(true),
+		title:   lipgloss.NewStyle().Foreground(t.Accent).Bold(true),
+		section: lipgloss.NewStyle().Foreground(t.DiffModify).Bold(true),
+		key:     lipgloss.NewStyle().Foreground(t.Accent),
+		desc:    lipgloss.NewStyle().Foreground(t.TextPrimary),
+		dim:     lipgloss.NewStyle().Foreground(t.TextDim2),
+		note:    lipgloss.NewStyle().Foreground(t.TextDim2).Italic(true),
 	}
 }
 
@@ -188,7 +188,7 @@ const (
 )
 
 func (m model) overlayHelp() string {
-	st := newHelpStyles()
+	st := newHelpStyles(m.theme)
 	sections := defaultHelpSections()
 
 	var body strings.Builder
@@ -241,7 +241,7 @@ func (m model) overlayHelp() string {
 	}
 	boxHeight := lipgloss.Height(content) + 2
 
-	popup := renderPanel(content, "Help", true, boxWidth, boxHeight, false, false)
+	popup := renderPanel(m.theme, content, "Help", true, boxWidth, boxHeight, false, false)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 }
 

@@ -25,6 +25,7 @@
   - [Container image (Docker, Podman, any OCI runtime)](#container-image-docker-podman-any-oci-runtime)
 - [Container engines — Docker, Podman, OCI archives](#container-engines)
 - [Multi-platform images (`--platform`)](#multi-platform-images---platform)
+- [Themes (`--theme`)](#themes---theme)
 - [CI mode & GitHub Actions](#ci-mode)
 - [Compare two images](#compare-two-images)
 - [JSON export](#json-export)
@@ -88,6 +89,7 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 - Clipboard integration (`y`, `Y`) — copy a path or a file's contents to the system clipboard, over SSH and tmux.
 - Sort by size, filter by name, hide unchanged files, jump to the layer that introduced the biggest waste (`w`).
 - Split-pane view (`A`) — the selected layer's changes on top, the cumulative filesystem up to that layer below, both following the same layer selection.
+- **Colour themes** (`--theme`) — recolour the whole interface, syntax highlighting included, with one of seven built-in themes; also settable in `.layerx.yaml`.
 
 ### Multi-engine, multi-source
 
@@ -363,6 +365,24 @@ Accepted shapes (same as `docker --platform`): `OS/ARCH`, `OS/ARCH/VARIANT`, or 
 
 ---
 
+### Themes (`--theme`)
+
+The TUI ships seven colour themes. A theme drives the whole interface at once — panel borders, selection, search highlighting, and the file viewer's syntax highlighting — so nothing looks out of place:
+
+```bash
+# The default is Catppuccin Mocha; pick another explicitly
+layerx --theme dracula nginx:latest
+layerx --theme latte ./build/app.tar     # light background
+```
+
+Built-in themes: `mocha` (default), `latte`, `frappe`, `macchiato`, `dracula`, `gruvbox`, `solarized-dark`. An unknown name is rejected with the list of valid names before the TUI opens.
+
+Make a theme persistent with a `theme:` key in `.layerx.yaml` (see [Configuration](#configuration)); the `--theme` flag overrides the config value for a single run.
+
+Colours adapt automatically to the terminal: truecolor terminals get the full palette, 256- and 16-colour terminals get the nearest match, and `NO_COLOR=1` (or a redirected pipe) produces plain text with layout intact.
+
+---
+
 ## CI mode
 
 ### GitHub Actions
@@ -383,6 +403,10 @@ Drop a `.layerx.yaml` in your project root:
 
 ```yaml
 version: 1
+
+# TUI colour theme (optional): mocha (default), latte, frappe, macchiato,
+# dracula, gruvbox, solarized-dark. Overridden by the --theme flag.
+theme: mocha
 
 rules:
   lowest-efficiency: 0.9

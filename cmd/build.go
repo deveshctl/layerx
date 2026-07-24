@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
@@ -150,10 +151,20 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Honour --theme and the theme: config key on the build-then-inspect
+	// path too. Read config directly (not loadConfig) so a malformed config
+	// doesn't print a spurious error after a successful build — flag-only
+	// resolution is a fine fallback here.
+	cfg, _ := config.Load()
+	theme, err := resolveThemeName(cfg)
+	if err != nil {
+		return err
+	}
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCacheRequested(),
+		Theme:    theme,
 	})
 }
 

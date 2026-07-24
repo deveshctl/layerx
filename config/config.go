@@ -37,6 +37,11 @@ type Config struct {
 	// documented top-level key without rejecting the whole config; semantics
 	// are wired up in M12.
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+
+	// Theme is the name of the TUI colour theme (mocha, latte, frappe,
+	// macchiato, dracula, gruvbox, solarized-dark). Empty means the default
+	// (mocha). A --theme flag overrides this. Validated by the caller in cmd/.
+	Theme string `yaml:"theme,omitempty"`
 }
 
 // rawConfig mirrors Config but captures rules and path-rules as raw AST nodes
@@ -47,6 +52,7 @@ type rawConfig struct {
 	Rules       ast.Node          `yaml:"rules,omitempty"`
 	PathRules   ast.Node          `yaml:"path-rules,omitempty"`
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+	Theme       string            `yaml:"theme,omitempty"`
 }
 
 type RulesConfig struct {
@@ -148,6 +154,7 @@ func LoadFrom(path string) (*Config, error) {
 		Rules:       rules,
 		PathRules:   specs,
 		Keybindings: raw.Keybindings,
+		Theme:       raw.Theme,
 	}
 
 	// Restore the documented "absent version: defaults to 1" contract

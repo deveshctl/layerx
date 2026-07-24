@@ -12,10 +12,11 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
-func renderFileTree(files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
+func renderFileTree(t Theme, files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
 
 	body, hasAbove, hasBelow := renderTreeBody(treePaneInput{
+		theme:        t,
 		files:        files,
 		cursor:       cursor,
 		offset:       offset,
@@ -40,10 +41,11 @@ func renderFileTree(files []*image.FileNode, cursor, offset int, width, height i
 		title = title + " 0/0"
 	}
 
-	return renderPanel(body, title, focused, contentWidth, height, hasAbove, hasBelow)
+	return renderPanel(t, body, title, focused, contentWidth, height, hasAbove, hasBelow)
 }
 
 type treePaneInput struct {
+	theme         Theme
 	files         []*image.FileNode
 	cursor        int
 	offset        int
@@ -81,7 +83,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 	var sb strings.Builder
 
 	if in.showHeader {
-		sb.WriteString(renderTreeHeader(in.contentWidth))
+		sb.WriteString(renderTreeHeader(in.theme, in.contentWidth))
 		sb.WriteString("\n")
 	}
 
@@ -101,7 +103,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 		for i := 0; i < contentHeight; i++ {
 			if i == midpoint {
 				sb.WriteString(pad)
-				sb.WriteString(styleWithFg(unchangedColor).Render(msg))
+				sb.WriteString(styleWithFg(in.theme.TextNeutral).Render(msg))
 			}
 			if i < contentHeight-1 {
 				sb.WriteString("\n")
@@ -115,7 +117,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 		visible := in.files[in.offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(f, in.offset+i == in.cursor, in.contentWidth, in.treeMode, in.collapsed, in.currentLayer, in.filterQuery)
+			line := formatFileNodeLine(in.theme, f, in.offset+i == in.cursor, in.contentWidth, in.treeMode, in.collapsed, in.currentLayer, in.filterQuery)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -130,7 +132,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 
 	if in.showFilterBar {
 		sb.WriteString("\n")
-		sb.WriteString(renderFilterBar(in.filterActive, in.filterQuery, len(in.files), in.contentWidth))
+		sb.WriteString(renderFilterBar(in.theme, in.filterActive, in.filterQuery, len(in.files), in.contentWidth))
 	}
 
 	hasAbove = in.offset > 0
@@ -183,7 +185,7 @@ type splitTreeInput struct {
 // stacked by JoinVertical because a single shared border keeps the
 // horizontal alignment with the layers panel and the file viewer
 // pixel-perfect.
-func renderSplitFileTree(in splitTreeInput) string {
+func renderSplitFileTree(t Theme, in splitTreeInput) string {
 	contentWidth := in.width - 2
 	// in.height is the number of content rows the outer panel exposes
 	// (renderPanel adds the two border rows on top of it). Match the
@@ -193,6 +195,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 	topRows, botRows := splitPanelRows(totalContent)
 
 	topBody, topAbove, topBelow := renderTreeBody(treePaneInput{
+		theme:         t,
 		files:         in.topFiles,
 		cursor:        in.topCursor,
 		offset:        in.topOffset,
@@ -209,6 +212,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 	})
 
 	botBody, botAbove, botBelow := renderTreeBody(treePaneInput{
+		theme:         t,
 		files:         in.botFiles,
 		cursor:        in.botCursor,
 		offset:        in.botOffset,
@@ -224,7 +228,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 		emptyMsg:      "(no entries at this layer)",
 	})
 
-	divider := renderSplitDivider(in.botFocused, contentWidth, in.botFiles, in.botCursor)
+	divider := renderSplitDivider(t, in.botFocused, contentWidth, in.botFiles, in.botCursor)
 
 	body := topBody + "\n" + divider + "\n" + botBody
 
@@ -233,7 +237,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 	focused := in.topFocused || in.botFocused
 	hasAbove := topAbove || botAbove
 	hasBelow := topBelow || botBelow
-	return renderPanel(body, title, focused, contentWidth, in.height, hasAbove, hasBelow)
+	return renderPanel(t, body, title, focused, contentWidth, in.height, hasAbove, hasBelow)
 }
 
 // renderSplitDivider draws the horizontal separator between the two
@@ -241,7 +245,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 // match-count and a focus-weight background when that pane has focus.
 // This places the "▾ Cumulative" affordance on a row that would otherwise
 // be wasted whitespace.
-func renderSplitDivider(botFocused bool, contentWidth int, botFiles []*image.FileNode, botCursor int) string {
+func renderSplitDivider(t Theme, botFocused bool, contentWidth int, botFiles []*image.FileNode, botCursor int) string {
 	label := " ▾ Cumulative "
 	if botFocused && len(botFiles) > 0 {
 		label = fmt.Sprintf(" ▾ Cumulative %d/%d ", botCursor+1, len(botFiles))
@@ -249,11 +253,11 @@ func renderSplitDivider(botFocused bool, contentWidth int, botFiles []*image.Fil
 		label = fmt.Sprintf(" ▾ Cumulative · %d items ", len(botFiles))
 	}
 
-	labelStyle := lipgloss.NewStyle().Foreground(unchangedColor)
-	lineStyle := lipgloss.NewStyle().Foreground(separatorColor)
+	labelStyle := lipgloss.NewStyle().Foreground(t.TextNeutral)
+	lineStyle := lipgloss.NewStyle().Foreground(t.Separator)
 	if botFocused {
-		labelStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-		lineStyle = lipgloss.NewStyle().Foreground(accentColor)
+		labelStyle = lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+		lineStyle = lipgloss.NewStyle().Foreground(t.Accent)
 	}
 
 	rendered := labelStyle.Render(label)
@@ -288,7 +292,7 @@ func buildSplitTitle(in splitTreeInput) string {
 	return topPart + "  ·  " + botPart
 }
 
-func renderTreeHeader(maxWidth int) string {
+func renderTreeHeader(t Theme, maxWidth int) string {
 	const permCol = 10
 	const uidGidCol = 8
 	const sizeCol = 8
@@ -317,19 +321,19 @@ func renderTreeHeader(maxWidth int) string {
 	if lipgloss.Width(header) > maxWidth {
 		header = ansi.Truncate(header, maxWidth, "")
 	}
-	return styleWithFg(metaDimColor).Render(header)
+	return styleWithFg(t.TextDim2).Render(header)
 }
 
-func renderFilterBar(active bool, query string, matchCount int, maxWidth int) string {
+func renderFilterBar(t Theme, active bool, query string, matchCount int, maxWidth int) string {
 	if active {
-		prefix := styleWithFg(accentColor).Render("/ ")
+		prefix := styleWithFg(t.Accent).Render("/ ")
 		cursor := query + "█"
 		return prefix + cursor
 	}
-	prefix := styleWithFg(accentColor).Render("/ ")
-	queryStr := styleWithFg(selectedColor).Render(query)
-	matches := styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d matches)", matchCount))
-	hint := styleWithFg(unchangedColor).Render("  [⌫ clear]")
+	prefix := styleWithFg(t.Accent).Render("/ ")
+	queryStr := styleWithFg(t.SelectFg).Render(query)
+	matches := styleWithFg(t.TextDim2).Render(fmt.Sprintf("  (%d matches)", matchCount))
+	hint := styleWithFg(t.TextNeutral).Render("  [⌫ clear]")
 
 	line := prefix + queryStr + matches + hint
 	lineWidth := lipgloss.Width(line)
@@ -339,7 +343,7 @@ func renderFilterBar(active bool, query string, matchCount int, maxWidth int) st
 	return line
 }
 
-func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
+func formatFileNodeLine(t Theme, f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
 	flat := !treeMode
@@ -417,11 +421,11 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 	var diffGlyph string
 	switch f.DiffType {
 	case image.Added:
-		diffGlyph = styleWithFg(addedColor).Render("+ ")
+		diffGlyph = styleWithFg(t.DiffAdd).Render("+ ")
 	case image.Modified:
-		diffGlyph = styleWithFg(modifiedColor).Render("~ ")
+		diffGlyph = styleWithFg(t.DiffModify).Render("~ ")
 	case image.Removed:
-		diffGlyph = styleWithFg(removedColor).Render("- ")
+		diffGlyph = styleWithFg(t.DiffRemove).Render("- ")
 	default:
 		diffGlyph = "  "
 	}
@@ -449,18 +453,18 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 			metaCols = sizeStr + strings.Repeat(" ", colGap)
 		}
 		fullLine := selGlyph + metaCols + fullName + originSuffix + strings.Repeat(" ", namePad)
-		return lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(fullLine)
+		return lipgloss.NewStyle().Foreground(t.SelectFg).Background(t.SelectBg).Render(fullLine)
 	}
 
 	var metaCols string
 	if showPerms {
-		permStr := styleWithFg(metaDimColor).Render(padRight(perms, permCol))
-		uidStr := styleWithFg(metaDimColor).Render(padRight(uidGid, uidGidCol))
-		sizeStr := styleWithFg(headerDimColor).Render(padLeft(size, sizeCol))
+		permStr := styleWithFg(t.TextDim2).Render(padRight(perms, permCol))
+		uidStr := styleWithFg(t.TextDim2).Render(padRight(uidGid, uidGidCol))
+		sizeStr := styleWithFg(t.TextDim1).Render(padLeft(size, sizeCol))
 		gap := strings.Repeat(" ", colGap)
 		metaCols = permStr + gap + uidStr + gap + sizeStr + gap
 	} else if showSize {
-		sizeStr := styleWithFg(headerDimColor).Render(padLeft(size, sizeCol))
+		sizeStr := styleWithFg(t.TextDim1).Render(padLeft(size, sizeCol))
 		metaCols = sizeStr + strings.Repeat(" ", colGap)
 	}
 
@@ -469,21 +473,21 @@ func formatFileNodeLine(f *image.FileNode, selected bool, maxWidth int, treeMode
 	fullNameRuneLen := len([]rune(fullName))
 
 	if flat || (wasTruncated && prefixRuneLen >= fullNameRuneLen) {
-		nameRendered = renderNameWithHighlight(fullName, filterQuery, diffColorForNode(f))
+		nameRendered = renderNameWithHighlight(t, fullName, filterQuery, diffColorForNode(t, f))
 	} else {
 		fullRunes := []rune(fullName)
 		var nameOnly string
 		if prefixRuneLen < len(fullRunes) {
 			nameOnly = string(fullRunes[prefixRuneLen:])
 		}
-		treePrefixRendered := styleWithFg(treeDimColor).Render(treePrefix)
-		nameOnlyRendered := renderNameWithHighlight(nameOnly, filterQuery, diffColorForNode(f))
+		treePrefixRendered := styleWithFg(t.TreeGlyph).Render(treePrefix)
+		nameOnlyRendered := renderNameWithHighlight(t, nameOnly, filterQuery, diffColorForNode(t, f))
 		nameRendered = treePrefixRendered + nameOnlyRendered
 	}
 
 	var originRendered string
 	if showOrigin {
-		originRendered = styleWithFg(metaDimColor).Render(originSuffix)
+		originRendered = styleWithFg(t.TextDim2).Render(originSuffix)
 	}
 
 	nameRenderedWidth := lipgloss.Width(nameRendered) + lipgloss.Width(originRendered)
@@ -607,20 +611,20 @@ func nodeEffectiveSize(n *image.FileNode) int64 {
 	return total
 }
 
-func diffColorForNode(f *image.FileNode) color.Color {
+func diffColorForNode(t Theme, f *image.FileNode) color.Color {
 	switch f.DiffType {
 	case image.Added:
-		return addedColor
+		return t.DiffAdd
 	case image.Modified:
-		return modifiedColor
+		return t.DiffModify
 	case image.Removed:
-		return removedColor
+		return t.DiffRemove
 	default:
-		return fileNameColor
+		return t.TextPrimary
 	}
 }
 
-func renderNameWithHighlight(name, query string, fg color.Color) string {
+func renderNameWithHighlight(t Theme, name, query string, fg color.Color) string {
 	if query == "" || name == "" {
 		return styleWithFg(fg).Render(name)
 	}
@@ -647,6 +651,6 @@ func renderNameWithHighlight(name, query string, fg color.Color) string {
 	after := string(runes[runeIdx+len(queryRunes):])
 
 	normal := styleWithFg(fg)
-	highlight := lipgloss.NewStyle().Foreground(fg).Background(searchHighlightBg)
+	highlight := lipgloss.NewStyle().Foreground(fg).Background(t.SearchMatchBg)
 	return normal.Render(before) + highlight.Render(match) + normal.Render(after)
 }

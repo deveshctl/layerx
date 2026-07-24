@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
@@ -15,6 +16,7 @@ var (
 	flagJSON      string
 	flagNoCacheFl bool
 	flagConfig    string
+	flagTheme     string
 )
 
 func noCacheRequested() bool {
@@ -55,7 +57,13 @@ so it talks to the same daemon your engine's own CLI would. DOCKER_HOST /
 CONTAINER_HOST still override. Pass --engine to force one engine.
 Platforms: pass --platform OS/ARCH (e.g. linux/arm64) to inspect a specific
 variant of a multi-platform image; layerx pulls and exports only that
-variant. Without --platform, the daemon's default platform is used.`,
+variant. Without --platform, the daemon's default platform is used.
+Themes: pass --theme NAME to recolour the TUI (chrome and file-viewer syntax
+highlighting together). Built-in themes: mocha (default), latte, frappe,
+macchiato, dracula, gruvbox, solarized-dark. Set "theme: NAME" in .layerx.yaml
+to make it persistent; the flag overrides the config value. Colours adapt
+automatically to the terminal's capabilities (truecolor, 256, 16, or none via
+NO_COLOR).`,
 	Example: `  # Inspect an image interactively (Docker or Podman auto-detected)
   layerx nginx:latest
 
@@ -72,6 +80,10 @@ variant. Without --platform, the daemon's default platform is used.`,
   # Inspect a specific platform variant of a multi-platform image
   layerx --platform linux/arm64 nginx:latest
   layerx --platform linux/amd64 alpine:3
+
+  # Pick a colour theme (chrome + syntax highlighting)
+  layerx --theme dracula nginx:latest
+  layerx --theme gruvbox ./build/app.tar
 
   # Export analysis as JSON (skips the TUI; works with archives too)
   layerx --json out.json ./build/app.tar
@@ -100,6 +112,29 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",
 		`target platform for multi-platform images (e.g. "linux/amd64", "linux/arm64", "linux/arm64/v8")`)
 	_ = rootCmd.RegisterFlagCompletionFunc("platform", completePlatform)
+	rootCmd.PersistentFlags().StringVar(&flagTheme, "theme", "",
+		"TUI colour theme: "+strings.Join(tui.ThemeNames(), ", ")+" (default mocha); also settable via 'theme:' in .layerx.yaml")
+	_ = rootCmd.RegisterFlagCompletionFunc("theme", completeTheme)
+}
+
+// completeTheme offers the registered theme names for `--theme` shell
+// completion.
+func completeTheme(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return tui.ThemeNames(), cobra.ShellCompDirectiveNoFileComp
+}
+
+// resolveThemeName applies the precedence flag > config > default and
+// validates the result so a typo errors before the TUI opens rather than
+// silently falling back to the default look.
+func resolveThemeName(cfg *config.Config) (string, error) {
+	theme := flagTheme
+	if theme == "" && cfg != nil {
+		theme = cfg.Theme
+	}
+	if _, err := tui.ResolveTheme(theme); err != nil {
+		return "", err
+	}
+	return theme, nil
 }
 
 type engineValue struct{ v *string }
@@ -226,11 +261,17 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	theme, err := resolveThemeName(cfg)
+	if err != nil {
+		return err
+	}
+
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCache,
 		Platform: activePlatformDisplay(),
+		Theme:    theme,
 	})
 }
 

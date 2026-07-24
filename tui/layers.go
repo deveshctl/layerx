@@ -11,7 +11,7 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
-func renderLayers(layers []image.Layer, cursor int, offset int, width, height int, focused bool, mode sizeColMode, finalLiveSize int64) string {
+func renderLayers(t Theme, layers []image.Layer, cursor int, offset int, width, height int, focused bool, mode sizeColMode, finalLiveSize int64) string {
 	contentWidth := width - 2
 	listHeight := height
 
@@ -32,7 +32,7 @@ func renderLayers(layers []image.Layer, cursor int, offset int, width, height in
 	var sb strings.Builder
 
 	for i, layer := range visible {
-		line := formatLayerLine(layer, offset+i == cursor, contentWidth, effMode, finalLiveSize)
+		line := formatLayerLine(t, layer, offset+i == cursor, contentWidth, effMode, finalLiveSize)
 		sb.WriteString(line)
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
@@ -58,10 +58,10 @@ func renderLayers(layers []image.Layer, cursor int, offset int, width, height in
 	hasBelow := end < len(layers)
 
 	content := sb.String()
-	return renderPanel(content, title, focused, contentWidth, height, hasAbove, hasBelow)
+	return renderPanel(t, content, title, focused, contentWidth, height, hasAbove, hasBelow)
 }
 
-func renderCommandBar(cmd string, width int) string {
+func renderCommandBar(t Theme, cmd string, width int) string {
 	maxLines := 3
 	wrappedLines := wrapCommandLines(cmd, width-2, maxLines)
 
@@ -76,16 +76,16 @@ func renderCommandBar(cmd string, width int) string {
 		}
 	}
 
-	prefix := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("▶ ")
+	prefix := lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Render("▶ ")
 
 	var sb strings.Builder
 	for i := range filled {
 		wl := wrappedLines[i]
 		if i == 0 {
-			styled := highlightInstruction(wl)
+			styled := highlightInstruction(t, wl)
 			sb.WriteString(prefix + styled)
 		} else {
-			sb.WriteString("  " + styleWithFg(commandColor).Render(wl))
+			sb.WriteString("  " + styleWithFg(t.TextNeutral).Render(wl))
 		}
 		if i < filled-1 {
 			sb.WriteString("\n")
@@ -94,16 +94,16 @@ func renderCommandBar(cmd string, width int) string {
 	return sb.String()
 }
 
-func highlightInstruction(line string) string {
+func highlightInstruction(t Theme, line string) string {
 	parts := strings.SplitN(line, " ", 2)
 	if len(parts) == 0 {
 		return ""
 	}
-	instruction := lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render(parts[0])
+	instruction := lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Render(parts[0])
 	if len(parts) == 1 {
 		return instruction
 	}
-	return instruction + " " + styleWithFg(commandColor).Render(parts[1])
+	return instruction + " " + styleWithFg(t.TextNeutral).Render(parts[1])
 }
 
 func wrapCommandLines(cmd string, width int, maxLines int) []string {
@@ -173,17 +173,17 @@ func padLeftRunes(s string, width int) string {
 // deltaColor picks the color for a Δfs value given the final live size.
 // Negative → green (cleanup); ≥ 10% of final → modified/accent (large
 // growth); else → dim default.
-func deltaColor(delta int64, finalLiveSize int64) color.Color {
+func deltaColor(t Theme, delta int64, finalLiveSize int64) color.Color {
 	if delta < 0 {
-		return addedColor
+		return t.DiffAdd
 	}
 	if finalLiveSize > 0 && float64(delta) >= float64(finalLiveSize)*largeStepGrowthFraction {
-		return modifiedColor
+		return t.DiffModify
 	}
-	return headerDimColor
+	return t.TextDim1
 }
 
-func formatLayerLine(l image.Layer, selected bool, maxWidth int, mode sizeColMode, finalLiveSize int64) string {
+func formatLayerLine(t Theme, l image.Layer, selected bool, maxWidth int, mode sizeColMode, finalLiveSize int64) string {
 	index := fmt.Sprintf("#%d", l.Index)
 
 	indexWidth := max(len([]rune(index)), 3)
@@ -210,26 +210,26 @@ func formatLayerLine(l image.Layer, selected bool, maxWidth int, mode sizeColMod
 	}
 
 	if selected {
-		cursor := lipgloss.NewStyle().Foreground(accentColor).Render("▸")
+		cursor := lipgloss.NewStyle().Foreground(t.Accent).Render("▸")
 		plain := " " + index + indexPad + "  " + sizeText + "  " + cmd
 		if lipgloss.Width(plain) > maxWidth-1 {
 			plain = ansi.Truncate(plain, maxWidth-1, "")
 		}
-		inner := cursor + lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Render(plain)
+		inner := cursor + lipgloss.NewStyle().Foreground(t.SelectFg).Background(t.SelectBg).Render(plain)
 		return inner
 	}
 
-	dimHash := styleWithFg(metaDimColor).Render("#")
+	dimHash := styleWithFg(t.TextDim2).Render("#")
 	numStr := fmt.Sprintf("%d", l.Index)
 	numPad := ""
 	if len([]rune(numStr))+1 < indexWidth {
 		numPad = strings.Repeat(" ", indexWidth-len([]rune(numStr))-1)
 	}
 
-	sizeRendered := renderSizeColumn(l, mode, finalLiveSize)
-	cmdRendered := styleWithFg(commandColor).Render(cmd)
+	sizeRendered := renderSizeColumn(t, l, mode, finalLiveSize)
+	cmdRendered := styleWithFg(t.TextNeutral).Render(cmd)
 
-	plain := "   " + dimHash + styleWithFg(fileNameColor).Render(numStr) + numPad + "  " + sizeRendered + "  " + cmdRendered
+	plain := "   " + dimHash + styleWithFg(t.TextPrimary).Render(numStr) + numPad + "  " + sizeRendered + "  " + cmdRendered
 
 	lineWidth := lipgloss.Width(plain)
 	if lineWidth > maxWidth {
@@ -241,23 +241,23 @@ func formatLayerLine(l image.Layer, selected bool, maxWidth int, mode sizeColMod
 // renderSizeColumn produces the colored size column for the unselected
 // row state. Selected rows use the inverted background and skip per-cell
 // coloring to keep the highlight uniform.
-func renderSizeColumn(l image.Layer, mode sizeColMode, finalLiveSize int64) string {
+func renderSizeColumn(t Theme, l image.Layer, mode sizeColMode, finalLiveSize int64) string {
 	switch mode {
 	case sizeColBlob:
 		blob := image.FormatBytes(l.Size)
 		w := max(len([]rune(blob)), 7)
-		return styleWithFg(headerDimColor).Render(padLeftRunes(blob, w))
+		return styleWithFg(t.TextDim1).Render(padLeftRunes(blob, w))
 	case sizeColBoth:
 		blob := image.FormatBytes(l.Size)
 		delta := image.FormatSignedBytes(l.NetDelta)
 		bw := max(len([]rune(blob)), 7)
 		dw := max(len([]rune(delta)), 7)
-		blobR := styleWithFg(headerDimColor).Render(padLeftRunes(blob, bw))
-		deltaR := styleWithFg(deltaColor(l.NetDelta, finalLiveSize)).Render(padLeftRunes(delta, dw))
+		blobR := styleWithFg(t.TextDim1).Render(padLeftRunes(blob, bw))
+		deltaR := styleWithFg(deltaColor(t, l.NetDelta, finalLiveSize)).Render(padLeftRunes(delta, dw))
 		return blobR + " " + deltaR
 	default:
 		delta := image.FormatSignedBytes(l.NetDelta)
 		w := max(len([]rune(delta)), 7)
-		return styleWithFg(deltaColor(l.NetDelta, finalLiveSize)).Render(padLeftRunes(delta, w))
+		return styleWithFg(deltaColor(t, l.NetDelta, finalLiveSize)).Render(padLeftRunes(delta, w))
 	}
 }

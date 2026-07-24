@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--theme NAME` flag and a `theme:` key in `.layerx.yaml` select the TUI
+  colour theme. One theme drives the whole interface — panel chrome, selection,
+  search highlighting, and the file viewer's syntax highlighting — so they stay
+  coherent. Built-in themes: `mocha` (default), `latte`, `frappe`, `macchiato`,
+  `dracula`, `gruvbox`, and `solarized-dark`. The flag overrides the config
+  value; an unknown name is rejected with the list of valid names before the
+  TUI opens. Colours adapt automatically to the terminal's capabilities
+  (truecolor, 256-colour, 16-colour, or plain text under `NO_COLOR`).
+
+### Changed
+- The file viewer's syntax highlighting now matches the active theme rather
+  than a fixed scheme, so code colours agree with the surrounding interface.
+- The file-viewer text cursor and the viewer's match counter now follow the
+  active theme's palette instead of relying on terminal reverse-video.
+
 ## [v1.5.3] - 2026-07-16
 
 Configurable `.layerx.yaml` discovery, engine config env-var support, richer
