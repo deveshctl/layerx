@@ -9,11 +9,14 @@ import (
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
-// minLegibleDistance is the smallest perceptual (CIE76 Lab) distance a
-// foreground/background pair may have and still be considered readable. Tuned
-// against the shipped themes on real terminals (Gate C); the contrast guard
-// test enforces it across every registered theme.
-const minLegibleDistance = 25.0
+// minLegibleDistance is the smallest perceptual distance a foreground/
+// background pair may have and still be considered readable. The scale is
+// go-colorful's DistanceLab, whose Lab L channel is normalised to [0,1] — so
+// black↔white is ~1.0, NOT the 0..100 CIE76 range. Every shipped theme's
+// text/background pairs score ~0.4–0.9 on this scale (mocha, the long-shipped
+// default, included), so 0.20 admits all legible pairs while still rejecting a
+// near-identical fg/bg (distance ≈ 0).
+const minLegibleDistance = 0.20
 
 // labDistance returns the perceptual distance between two colours in CIE Lab
 // space. Used by the contrast guard to reject any theme whose text would be
