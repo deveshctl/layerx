@@ -40,3 +40,4 @@ internal-docs/
 
 # Vendor (we use modules, not vendoring)
 /vendor/
+tui/testdata/visual/
