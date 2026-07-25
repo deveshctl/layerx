@@ -247,10 +247,11 @@ func (m model) renderWasteOverlay() string {
 		panelTitle += fmt.Sprintf(" (capped, %d total)", originalCount)
 	}
 
-	titleStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(statusDimColor)
-	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(fileNameColor)
+	t := m.theme
+	titleStyle := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(t.StatusDim)
+	keyStyle := lipgloss.NewStyle().Foreground(t.StatusKey).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(t.FileName)
 
 	var lines []string
 	lines = append(lines, "")
@@ -280,7 +281,7 @@ func (m model) renderWasteOverlay() string {
 		start := min(m.wasteOffset, len(rows))
 		end := min(start+visibleHeight, len(rows))
 		for i := start; i < end; i++ {
-			lines = append(lines, formatWasteRow(rows[i], i == m.wasteCursor, innerWidth))
+			lines = append(lines, formatWasteRow(t, rows[i], i == m.wasteCursor, innerWidth))
 		}
 	}
 
@@ -289,7 +290,7 @@ func (m model) renderWasteOverlay() string {
 	var footer string
 	switch {
 	case m.copyConfirm:
-		copied := lipgloss.NewStyle().Foreground(addedColor).Bold(true).Render("Copied!")
+		copied := lipgloss.NewStyle().Foreground(t.Added).Bold(true).Render("Copied!")
 		pad := 0
 		if innerWidth > lipgloss.Width(copied) {
 			pad = (innerWidth - lipgloss.Width(copied)) / 2
@@ -320,11 +321,11 @@ func (m model) renderWasteOverlay() string {
 		boxHeight = m.height - 2
 	}
 
-	panel := renderPanel(body, panelTitle, true, innerWidth, boxHeight, false, false)
+	panel := renderPanel(t, body, panelTitle, true, innerWidth, boxHeight, false, false)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 }
 
-func formatWasteRow(r wasteRow, selected bool, innerWidth int) string {
+func formatWasteRow(t Theme, r wasteRow, selected bool, innerWidth int) string {
 	const (
 		gutterW   = 2
 		wastedW   = 9
@@ -375,13 +376,13 @@ func formatWasteRow(r wasteRow, selected bool, innerWidth int) string {
 				strings.Repeat(" ", gap) + padLeft(wastedStr, wastedW) +
 				strings.Repeat(" ", gap) + padLeft(layerStr, layerW)
 		}
-		return lipgloss.NewStyle().Foreground(selectedColor).Background(selectedBgColor).Bold(true).Render(line)
+		return lipgloss.NewStyle().Foreground(t.Selected).Background(t.SelectedBg).Bold(true).Render(line)
 	}
 
-	pathStyle := styleWithFg(fileNameColor)
-	wastedStyle := styleWithFg(headerDimColor)
-	layerStyle := styleWithFg(metaDimColor)
-	countStyle := styleWithFg(metaDimColor)
+	pathStyle := styleWithFg(t.FileName)
+	wastedStyle := styleWithFg(t.HeaderDim)
+	layerStyle := styleWithFg(t.MetaDim)
+	countStyle := styleWithFg(t.MetaDim)
 
 	var b strings.Builder
 	b.WriteString(gutter)

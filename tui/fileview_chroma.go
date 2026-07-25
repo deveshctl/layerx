@@ -17,10 +17,13 @@ var (
 	chromaStyle *chroma.Style
 )
 
-func initChroma() {
+func initChroma(styleName string) {
 	chromaInit.Do(func() {
 		chromaFmt = formatters.Get("terminal256")
-		chromaStyle = chromastyles.Get("monokai")
+		chromaStyle = chromastyles.Get(styleName)
+		if chromaStyle == nil {
+			chromaStyle = chromastyles.Get("monokai")
+		}
 	})
 }
 
@@ -28,7 +31,7 @@ func initChroma() {
 // runtime can run tokenisation off the Update goroutine. The returned
 // message carries requestID so the receiver can discard a stale highlight
 // when the user has navigated to a different file in the meantime.
-func highlightFileCmd(requestID uint64, path string, data []byte) tea.Cmd {
+func highlightFileCmd(requestID uint64, path string, data []byte, chromaStyleName string) tea.Cmd {
 	// Snapshot the input — Cmds run after Update returns and the underlying
 	// FileContent.Data slice is part of model state that another extract
 	// could swap out before this Cmd executes.
@@ -37,13 +40,13 @@ func highlightFileCmd(requestID uint64, path string, data []byte) tea.Cmd {
 	return func() tea.Msg {
 		return highlightedMsg{
 			requestID: requestID,
-			lines:     highlightFileLines(pathCopy, dataCopy),
+			lines:     highlightFileLines(pathCopy, dataCopy, chromaStyleName),
 		}
 	}
 }
 
-func highlightFileLines(path string, data []byte) []string {
-	initChroma()
+func highlightFileLines(path string, data []byte, styleName string) []string {
+	initChroma(styleName)
 	if chromaFmt == nil || chromaStyle == nil {
 		return nil
 	}

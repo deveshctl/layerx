@@ -228,6 +228,7 @@ type model struct {
 	wasteRows     []wasteRow
 	sizeMode      sizeColMode
 	noCache       bool
+	theme         Theme
 
 	fetchCtx    context.Context
 	fetchCancel context.CancelFunc
@@ -246,6 +247,7 @@ func NewModel(cfg Config) model {
 		statFile:    os.Lstat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
+		theme:       TokyoNight(),
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
@@ -411,7 +413,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// renderer is used until highlightedMsg arrives, then the colored
 		// lines swap in.
 		if msg.content != nil && !msg.content.Binary && len(msg.content.Data) > 0 {
-			return m, highlightFileCmd(msg.requestID, msg.content.Path, msg.content.Data)
+			return m, highlightFileCmd(msg.requestID, msg.content.Path, msg.content.Data, m.theme.ChromaStyle)
 		}
 		return m, nil
 
@@ -1556,7 +1558,7 @@ func (m model) viewLoading() tea.View {
 
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("◆ layerx"))
+	lines = append(lines, "  "+lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true).Render("◆ layerx"))
 	lines = append(lines, "")
 
 	switch m.loadPhase {
@@ -1581,8 +1583,8 @@ func (m model) viewLoading() tea.View {
 				}
 				if barWidth >= 4 {
 					filled := barWidth * pct / 100
-					bar := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", filled)) +
-						lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", barWidth-filled))
+					bar := lipgloss.NewStyle().Foreground(m.theme.Accent).Render(strings.Repeat("━", filled)) +
+						lipgloss.NewStyle().Foreground(m.theme.Separator).Render(strings.Repeat("─", barWidth-filled))
 					detail += fmt.Sprintf("  [%s]%s", bar, bytesText)
 				} else {
 					detail += bytesText
@@ -1615,7 +1617,7 @@ func (m model) viewLoading() tea.View {
 	}
 
 	lines = append(lines, "")
-	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	hintStyle := lipgloss.NewStyle().Foreground(m.theme.StatusDim)
 	lines = append(lines, "  "+hintStyle.Render("Press q or Esc to exit."))
 	lines = append(lines, "")
 
@@ -1637,7 +1639,7 @@ func (m model) viewLoading() tea.View {
 	}
 
 	body := strings.Join(lines, "\n")
-	panel := renderPanel(body, "Loading", true, boxWidth, boxHeight, false, false)
+	panel := renderPanel(m.theme, body, "Loading", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 	return finalizeView(tea.NewView(content))
 }
@@ -1649,7 +1651,7 @@ func (m model) viewLoading() tea.View {
 func (m model) renderRightPanel(width, height int) string {
 	if !m.aggregated {
 		treeFiles := m.displayTreeFor(focusTree)
-		return renderFileTree(treeFiles, m.treeCursor, m.treeOffset,
+		return renderFileTree(m.theme, treeFiles, m.treeCursor, m.treeOffset,
 			width, height, m.focus == focusTree, m.filterActive,
 			m.filterQuery, m.useTreeCollapse(), false,
 			m.treeCollapsed, m.layerCursor)
@@ -1657,6 +1659,7 @@ func (m model) renderRightPanel(width, height int) string {
 	topFiles := m.displayTreeFor(focusTree)
 	botFiles := m.displayTreeFor(focusTreeAgg)
 	return renderSplitFileTree(splitTreeInput{
+		theme:        m.theme,
 		width:        width,
 		height:       height,
 		currentLayer: m.layerCursor,
@@ -1686,8 +1689,8 @@ func (m model) viewError() tea.View {
 	if wrapWidth < 1 {
 		wrapWidth = 1
 	}
-	errStyle := lipgloss.NewStyle().Foreground(removedColor).Bold(true).Width(wrapWidth)
-	hintStyle := lipgloss.NewStyle().Foreground(statusDimColor)
+	errStyle := lipgloss.NewStyle().Foreground(m.theme.Removed).Bold(true).Width(wrapWidth)
+	hintStyle := lipgloss.NewStyle().Foreground(m.theme.StatusDim)
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 	return finalizeView(tea.NewView(content))
@@ -1713,7 +1716,7 @@ func (m model) viewReady() tea.View {
 	panelHeight := m.height - chromeRows
 	header := m.renderHeader()
 	treeFiles := m.displayTree()
-	left := renderLayers(m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
+	left := renderLayers(m.theme, m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := m.renderRightPanel(rightWidth, panelHeight)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
@@ -1736,6 +1739,7 @@ func (m model) viewReady() tea.View {
 			searchCursor:  m.viewSearchCursor,
 			searchActive:  m.viewSearchActive,
 			highlightedLines: m.viewHighlightedLines,
+			theme:            m.theme,
 		})
 		panels = viewer
 	}
@@ -1745,9 +1749,9 @@ func (m model) viewReady() tea.View {
 	if m.layerCursor < len(layers) {
 		cmd = layers[m.layerCursor].Command
 	}
-	commandBar := renderCommandBar(cmd, m.width)
+	commandBar := renderCommandBar(m.theme, cmd, m.width)
 
-	sep := lipgloss.NewStyle().Foreground(separatorColor).Render(strings.Repeat("─", m.width))
+	sep := lipgloss.NewStyle().Foreground(m.theme.Separator).Render(strings.Repeat("─", m.width))
 	status := m.renderStatusBar(treeFiles)
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar, sep, status)
@@ -1785,26 +1789,26 @@ func (m model) leftPanelWidth() int {
 }
 
 func (m model) renderHeader() string {
-	glyph := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("◆")
-	brand := lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Bold(true).Render(" layerx")
-	sep := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor).Render(" │ ")
-	imageName := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Render(m.imageRef)
+	glyph := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("◆")
+	brand := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true).Render(" layerx")
+	sep := lipgloss.NewStyle().Foreground(m.theme.HeaderSep).Background(m.theme.StatusBg).Render(" │ ")
+	imageName := lipgloss.NewStyle().Foreground(m.theme.Selected).Background(m.theme.StatusBg).Render(m.imageRef)
 	left := glyph + brand + sep + imageName
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant
 	// is on screen — easy to misread an arm64 layout as amd64.
 	if m.platform != "" {
-		platformStyle := lipgloss.NewStyle().Foreground(headerDimColor).Background(statusBgColor)
+		platformStyle := lipgloss.NewStyle().Foreground(m.theme.HeaderDim).Background(m.theme.StatusBg)
 		left += sep + platformStyle.Render(m.platform)
 	}
 
 	totalSize := image.FormatBytes(m.analysis.TotalSize)
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
-	right := lipgloss.NewStyle().Foreground(headerDimColor).Background(statusBgColor).Render(layerCount + " · " + totalSize)
+	right := lipgloss.NewStyle().Foreground(m.theme.HeaderDim).Background(m.theme.StatusBg).Render(layerCount + " · " + totalSize)
 
 	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
 
-	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	bgStyle := lipgloss.NewStyle().Background(m.theme.StatusBg)
 	return bgStyle.Render(" " + left + strings.Repeat(" ", gap) + right)
 }
 
@@ -1812,9 +1816,9 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	if m.viewState != viewNone {
 		return m.renderViewerStatusBar()
 	}
-	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Background(statusBgColor).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
-	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.StatusKey).Background(m.theme.StatusBg).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(m.theme.StatusDim).Background(m.theme.StatusBg)
+	sepStyle := lipgloss.NewStyle().Foreground(m.theme.HeaderSep).Background(m.theme.StatusBg)
 
 	type hint struct{ key, desc string }
 	var hints []hint
@@ -1874,10 +1878,10 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	layers := m.layers()
 	var right string
 	if m.statusMsg != "" {
-		msgStyle := lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Bold(true)
+		msgStyle := lipgloss.NewStyle().Foreground(m.theme.Modified).Background(m.theme.StatusBg).Bold(true)
 		right = msgStyle.Render(m.statusMsg) + " "
 	} else if m.copyConfirm {
-		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
+		copiedStyle := lipgloss.NewStyle().Foreground(m.theme.Added).Background(m.theme.StatusBg).Bold(true)
 		right = copiedStyle.Render("Copied!") + " "
 	} else {
 		badges := ""
@@ -1887,19 +1891,19 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			if m.efficiency.WastedBytes > 0 {
 				effStr += " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
 			}
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("["+effStr+"]") + " "
+			badges += lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("["+effStr+"]") + " "
 		}
 		if m.diffOnly {
-			badges += lipgloss.NewStyle().Foreground(modifiedColor).Background(statusBgColor).Render("[diff]") + " "
+			badges += lipgloss.NewStyle().Foreground(m.theme.Modified).Background(m.theme.StatusBg).Render("[diff]") + " "
 		}
 		if m.aggregated {
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[split]") + " "
+			badges += lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("[split]") + " "
 		}
 		switch m.sortMode {
 		case sortDesc:
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[↓size]") + " "
+			badges += lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("[↓size]") + " "
 		case sortAsc:
-			badges += lipgloss.NewStyle().Foreground(accentColor).Background(statusBgColor).Render("[↑size]") + " "
+			badges += lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("[↑size]") + " "
 		}
 
 		layerNum := fmt.Sprintf("%d", m.layerCursor+1)
@@ -1908,7 +1912,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		if m.layerCursor < len(layers) {
 			size = image.FormatBytes(layers[m.layerCursor].Size)
 		}
-		rightHighlight := lipgloss.NewStyle().Foreground(selectedColor).Background(statusBgColor).Bold(true).Render("Layer " + layerNum)
+		rightHighlight := lipgloss.NewStyle().Foreground(m.theme.Selected).Background(m.theme.StatusBg).Bold(true).Render("Layer " + layerNum)
 		sizeLabel := "stored " + size
 		if m.focus == focusLayers && m.layerCursor < len(layers) {
 			switch m.sizeMode {
@@ -1918,20 +1922,20 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 				sizeLabel = "stored " + size + " · change " + image.FormatSignedBytes(layers[m.layerCursor].NetDelta)
 			}
 		}
-		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor).Render("/" + layerTotal + " · " + sizeLabel)
+		rightDim := lipgloss.NewStyle().Foreground(m.theme.StatusDim).Background(m.theme.StatusBg).Render("/" + layerTotal + " · " + sizeLabel)
 		right = badges + rightHighlight + rightDim + " "
 	}
 
 	gap := max(m.width-lipgloss.Width(hintStr)-lipgloss.Width(right), 0)
 
-	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	bgStyle := lipgloss.NewStyle().Background(m.theme.StatusBg)
 	return bgStyle.Render(hintStr + strings.Repeat(" ", gap) + right)
 }
 
 func (m model) renderViewerStatusBar() string {
-	keyStyle := lipgloss.NewStyle().Foreground(statusKeyColor).Background(statusBgColor).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
-	sepStyle := lipgloss.NewStyle().Foreground(headerSepColor).Background(statusBgColor)
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.StatusKey).Background(m.theme.StatusBg).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(m.theme.StatusDim).Background(m.theme.StatusBg)
+	sepStyle := lipgloss.NewStyle().Foreground(m.theme.HeaderSep).Background(m.theme.StatusBg)
 
 	hints := " " +
 		keyStyle.Render("j/k") + " " + descStyle.Render("up/down") + " " +
@@ -1950,10 +1954,10 @@ func (m model) renderViewerStatusBar() string {
 
 	var right string
 	if m.copyConfirm {
-		copiedStyle := lipgloss.NewStyle().Foreground(addedColor).Background(statusBgColor).Bold(true)
+		copiedStyle := lipgloss.NewStyle().Foreground(m.theme.Added).Background(m.theme.StatusBg).Bold(true)
 		right = copiedStyle.Render("Copied!") + " "
 	} else if len(m.viewSearchMatches) > 0 {
-		matchStyle := lipgloss.NewStyle().Foreground(searchCurrentBg).Background(statusBgColor).Bold(true)
+		matchStyle := lipgloss.NewStyle().Foreground(m.theme.SearchCurrentBg).Background(m.theme.StatusBg).Bold(true)
 		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
 	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
 		total := fileViewLineCount(m.viewContent)
@@ -1962,13 +1966,13 @@ func (m model) renderViewerStatusBar() string {
 		if total > 0 {
 			pct = line * 100 / total
 		}
-		rightDim := lipgloss.NewStyle().Foreground(statusDimColor).Background(statusBgColor)
+		rightDim := lipgloss.NewStyle().Foreground(m.theme.StatusDim).Background(m.theme.StatusBg)
 		right = rightDim.Render(fmt.Sprintf("Line %d/%d (%d%%) ", line, total, pct))
 	}
 
 	gap := max(m.width-lipgloss.Width(hints)-lipgloss.Width(right), 0)
 
-	bgStyle := lipgloss.NewStyle().Background(statusBgColor)
+	bgStyle := lipgloss.NewStyle().Background(m.theme.StatusBg)
 	return bgStyle.Render(hints + strings.Repeat(" ", gap) + right)
 }
 

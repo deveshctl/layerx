@@ -12,7 +12,7 @@ import (
 
 func TestHighlightFileLinesGoSource(t *testing.T) {
 	src := []byte("package main\n\nfunc main() {}\n")
-	lines := highlightFileLines("main.go", src)
+	lines := highlightFileLines("main.go", src, "monokai")
 	require.NotNil(t, lines)
 	require.Len(t, lines, 3)
 	assert.True(t, strings.Contains(lines[0], "\x1b["), "expected ANSI color codes in highlighted output")
@@ -20,7 +20,7 @@ func TestHighlightFileLinesGoSource(t *testing.T) {
 
 func TestHighlightFileLinesUnknownExtension(t *testing.T) {
 	src := []byte("#!/bin/sh\necho hello\n")
-	lines := highlightFileLines("run.sh", src)
+	lines := highlightFileLines("run.sh", src, "monokai")
 	require.NotNil(t, lines)
 	assert.True(t, strings.Contains(lines[0], "\x1b["))
 }
@@ -28,6 +28,7 @@ func TestHighlightFileLinesUnknownExtension(t *testing.T) {
 func TestRenderFileViewSyntaxHighlighting(t *testing.T) {
 	src := []byte("package main\n")
 	body := renderFileView(viewerParams{
+		theme: CatppuccinMocha(),
 		content: &image.FileContent{
 			Path: "app.go",
 			Data: src,
@@ -36,7 +37,7 @@ func TestRenderFileViewSyntaxHighlighting(t *testing.T) {
 		offset:           0,
 		width:            80,
 		height:           10,
-		highlightedLines: highlightFileLines("app.go", src),
+		highlightedLines: highlightFileLines("app.go", src, "monokai"),
 	})
 	assert.Contains(t, body, "\x1b[")
 }
@@ -44,6 +45,7 @@ func TestRenderFileViewSyntaxHighlighting(t *testing.T) {
 func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 	data := []byte(strings.Repeat("# comment line with some text\n", 74))
 	body := renderFileView(viewerParams{
+		theme: CatppuccinMocha(),
 		content: &image.FileContent{
 			Path: "/etc/security/pam_env.conf",
 			Data: data,
@@ -52,7 +54,7 @@ func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 		offset:           36,
 		width:            120,
 		height:           30,
-		highlightedLines: highlightFileLines("/etc/security/pam_env.conf", data),
+		highlightedLines: highlightFileLines("/etc/security/pam_env.conf", data, "monokai"),
 	})
 
 	maxW := 0
@@ -67,6 +69,7 @@ func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {
 	src := []byte("package main\n")
 	body := renderFileView(viewerParams{
+		theme: CatppuccinMocha(),
 		content: &image.FileContent{
 			Path: "app.go",
 			Data: src,
@@ -76,7 +79,7 @@ func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {
 		width:            80,
 		height:           10,
 		searchQuery:      "main",
-		highlightedLines: highlightFileLines("app.go", src),
+		highlightedLines: highlightFileLines("app.go", src, "monokai"),
 	})
 	assert.NotContains(t, body, "\x1b[38;5;")
 }
@@ -87,6 +90,7 @@ func TestRenderFileView_TitleTruncation_WideChar(t *testing.T) {
 	// end in an ellipsis. Use ansi.Truncate's behavior as the contract.
 	wideCmd := strings.Repeat("中", 30)
 	body := renderFileView(viewerParams{
+		theme: CatppuccinMocha(),
 		content: &image.FileContent{
 			Path: "/etc/hosts",
 			Data: []byte("a\n"),
@@ -133,6 +137,7 @@ func TestRenderFileView_TrailingNewlineLineCount(t *testing.T) {
 	// lines for "a\nb\n" — trailing newline is a terminator, not a separator.
 	data := []byte("a\nb\n")
 	body := renderFileView(viewerParams{
+		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "x.txt", Data: data, Size: int64(len(data))},
 		offset:  0,
 		width:   80,
@@ -186,6 +191,7 @@ func TestRenderFileView_HOffset_ShowsLeftMarker(t *testing.T) {
 	prefix := strings.Repeat("a", 100)
 	data := []byte(prefix + "MARKER suffix")
 	body := renderFileView(viewerParams{
+		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))},
 		offset:  0,
 		hOffset: 80,
@@ -199,6 +205,7 @@ func TestRenderFileView_HOffset_ShowsLeftMarker(t *testing.T) {
 func TestRenderFileView_HOffsetZero_NoLeftMarker(t *testing.T) {
 	data := []byte("short line\n")
 	body := renderFileView(viewerParams{
+		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "/x.txt", Data: data, Size: int64(len(data))},
 		offset:  0,
 		hOffset: 0,
@@ -213,6 +220,7 @@ func TestRenderFileView_HOffsetZero_NoLeftMarker(t *testing.T) {
 func TestRenderFileView_HOffset_StillRespectsWidth(t *testing.T) {
 	data := []byte(strings.Repeat("x", 500) + "\n")
 	body := renderFileView(viewerParams{
+		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "/x.txt", Data: data, Size: int64(len(data))},
 		offset:  0,
 		hOffset: 50,
@@ -232,6 +240,7 @@ func TestRenderFileView_LongLineMatchVisibleAfterScroll(t *testing.T) {
 	data := []byte(prefix + "needle and rest")
 	matches := [][2]int{{0, 200}}
 	body := renderFileView(viewerParams{
+		theme:         CatppuccinMocha(),
 		content:       &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))},
 		offset:        0,
 		hOffset:       170, // chosen so column 200 falls within an 80-col view
@@ -250,8 +259,9 @@ func TestRenderFileView_LongLineMatchVisibleAfterScroll(t *testing.T) {
 // supposed to be escape-aware; this test guards that property.
 func TestRenderFileView_HOffset_PreservesChromaOutput(t *testing.T) {
 	src := []byte("package main\nfunc main() { var x = " + strings.Repeat("y", 200) + " }\n")
-	highlighted := highlightFileLines("app.go", src)
+	highlighted := highlightFileLines("app.go", src, "monokai")
 	body := renderFileView(viewerParams{
+		theme:            CatppuccinMocha(),
 		content:          &image.FileContent{Path: "app.go", Data: src, Size: int64(len(src))},
 		offset:           0,
 		hOffset:          50,
