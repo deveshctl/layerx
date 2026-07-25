@@ -30,6 +30,8 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
+
+	dimg "github.com/deveshctl/layerx/image"
 )
 
 //go:embed testdata/fonts/DejaVuSansMono.ttf
@@ -173,8 +175,9 @@ func fillRect(img *image.RGBA, r image.Rectangle, c color.Color) {
 	}
 }
 
-// TestVisualDiagnostic writes one PNG per theme of a tree-focused ready frame
-// (selection highlight + diff glyphs visible). No-op without -visual.
+// TestVisualDiagnostic writes several PNG frames per theme so colour, contrast,
+// and alignment can be reviewed across the main screens (list+selection,
+// file viewer, split view) and at a narrow width. No-op without -visual.
 func TestVisualDiagnostic(t *testing.T) {
 	if !*writeVisual {
 		t.Skip("run with -visual to write testdata/visual PNGs")
@@ -202,24 +205,10 @@ func TestVisualDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	names := make([]string, 0)
-	for n := range themeRegistry() {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	for _, n := range names {
-		th, _ := ResolveTheme(n)
-		m := goldenModelWithTheme(t, th)
-		m.analysis = testAnalysisWithDiffs()
-		m.focus = focusTree
-		m.layerCursor = len(m.analysis.Layers) - 1
-		m.clampCursors()
-
+	write := func(name string, m model) {
 		grid := parseANSIGrid(m.View().Content)
-		img := renderGridPNG(grid, face, cellW, cellH, ascent, th.RootBg, th.TextPrimary)
-
-		path := filepath.Join(dir, "theme_"+n+".png")
+		img := renderGridPNG(grid, face, cellW, cellH, ascent, m.theme.RootBg, m.theme.TextPrimary)
+		path := filepath.Join(dir, name+".png")
 		f, err := os.Create(path)
 		if err != nil {
 			t.Fatal(err)
@@ -229,6 +218,63 @@ func TestVisualDiagnostic(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.Close()
-		fmt.Printf("wrote %s (%dx%d cells, %dx%d px)\n", path, len(grid[0]), len(grid), img.Bounds().Dx(), img.Bounds().Dy())
+		fmt.Printf("wrote %s (%dx%d px)\n", path, img.Bounds().Dx(), img.Bounds().Dy())
+	}
+
+	names := make([]string, 0)
+	for n := range themeRegistry() {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, n := range names {
+		th, _ := ResolveTheme(n)
+
+		// Frame 1: tree focused, selection + diff glyphs, layers list.
+		m1 := goldenModelWithTheme(t, th)
+		m1.analysis = testAnalysisWithDiffs()
+		m1.focus = focusTree
+		m1.layerCursor = len(m1.analysis.Layers) - 1
+		m1.clampCursors()
+		write("theme_"+n, m1)
+
+		// Frame 2: layers panel focused (selection on the left list).
+		m2 := goldenModelWithTheme(t, th)
+		m2.analysis = testAnalysisWithDiffs()
+		m2.focus = focusLayers
+		m2.layerCursor = 1
+		m2.clampCursors()
+		write("theme_"+n+"_layers", m2)
+
+		// Frame 3: split / aggregated view (both sub-panes + divider).
+		m3 := goldenModelWithTheme(t, th)
+		m3.analysis = testAnalysisWithDiffs()
+		m3.aggregated = true
+		m3.focus = focusTree
+		m3.layerCursor = len(m3.analysis.Layers) - 1
+		m3.clampCursors()
+		write("theme_"+n+"_split", m3)
+
+		// Frame 4: file viewer open on a source file (syntax highlighting +
+		// viewer status bar).
+		m4 := goldenModelWithTheme(t, th)
+		m4.analysis = testAnalysisWithDiffs()
+		m4.viewState = viewReady
+		m4.viewContent = &dimg.FileContent{
+			Path: "/etc/nginx.conf",
+			Data: []byte("user nginx;\nworker_processes auto;\n\nevents {\n    worker_connections 1024;\n}\n\nhttp {\n    include /etc/nginx/mime.types;\n    sendfile on;\n    server {\n        listen 80;\n        server_name localhost;\n        location / {\n            root /usr/share/nginx/html;\n        }\n    }\n}\n"),
+		}
+		m4.viewOriginLayer = 1
+		m4.viewOriginCmd = "RUN apt-get install -y nginx"
+		write("theme_"+n+"_viewer", m4)
+
+		// Frame 5: narrow width, to catch status-bar overflow / truncation.
+		m5 := goldenModelWithTheme(t, th)
+		m5.analysis = testAnalysisWithDiffs()
+		m5.width = 80
+		m5.focus = focusTree
+		m5.layerCursor = len(m5.analysis.Layers) - 1
+		m5.clampCursors()
+		write("theme_"+n+"_narrow", m5)
 	}
 }

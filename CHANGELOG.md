@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are now derived for legibility against the status-bar background rather than
   reusing panel-tuned colours. Previously the descriptions were barely readable
   and the separator pipes rendered near-black on the darker status bar.
+- The status bar no longer wraps onto a second line on mid-width terminals. The
+  key-hint list now measures against the space left by the right-hand status
+  block and collapses to keys-only (then clips) when the full form would not
+  fit, instead of overflowing and pushing text onto a second row.
 
 ### Internal
 - Added a test-only visual diagnostic that renders each theme's TUI frame to a

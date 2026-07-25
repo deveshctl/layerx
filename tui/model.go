@@ -1890,19 +1890,19 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		}
 	}
 
-	var hintStr string
-	if compact {
-		parts := make([]string, len(hints))
-		for i, h := range hints {
-			parts[i] = keyStyle.Render(h.key)
+	buildHints := func(compact bool) string {
+		if compact {
+			parts := make([]string, len(hints))
+			for i, h := range hints {
+				parts[i] = keyStyle.Render(h.key)
+			}
+			return " " + strings.Join(parts, " ")
 		}
-		hintStr = " " + strings.Join(parts, " ")
-	} else {
 		var parts []string
 		for _, h := range hints {
 			parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
 		}
-		hintStr = " " + strings.Join(parts, " "+sepStyle.Render("│")+" ")
+		return " " + strings.Join(parts, " "+sepStyle.Render("│")+" ")
 	}
 
 	layers := m.layers()
@@ -1956,7 +1956,22 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		right = badges + rightHighlight + rightDim + " "
 	}
 
-	gap := max(m.width-lipgloss.Width(hintStr)-lipgloss.Width(right), 0)
+	// Fit the hint list to the width that remains after the right-hand block.
+	// A fixed width threshold ignored the right block entirely, so on a
+	// mid-width terminal the full hints + right block overflowed and the bar
+	// wrapped to a second line ("helpLayer 2/2 …"). Choose the widest form that
+	// fits: full → keys-only → keys-only clipped.
+	rightW := lipgloss.Width(right)
+	var hintStr string
+	if full := buildHints(false); lipgloss.Width(full)+rightW <= m.width {
+		hintStr = full
+	} else {
+		hintStr = buildHints(true)
+		if lipgloss.Width(hintStr)+rightW > m.width {
+			hintStr = ansi.Truncate(hintStr, max(m.width-rightW, 0), "")
+		}
+	}
+	gap := max(m.width-lipgloss.Width(hintStr)-rightW, 0)
 
 	bgStyle := lipgloss.NewStyle().Background(m.theme.StatusBg)
 	return bgStyle.Render(hintStr + strings.Repeat(" ", gap) + right)
