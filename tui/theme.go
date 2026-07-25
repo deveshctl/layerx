@@ -93,7 +93,247 @@ func CatppuccinMocha() Theme {
 	}
 }
 
-// TokyoNight is a cool deep-blue dark theme.
+// Kanagawa is a warm dark theme inspired by the colours of Katsushika
+// Hokusai's "The Great Wave" — deep indigo base with gold, sakura, and
+// jade accents.
+func Kanagawa() Theme {
+	return Theme{
+		Accent:          lipgloss.Color("#7E9CD8"), // wave blue
+		FocusedBorder:   lipgloss.Color("#7E9CD8"),
+		UnfocusedBorder: lipgloss.Color("#2A2A37"),
+
+		Selected:   lipgloss.Color("#DCD7BA"), // fuji white
+		SelectedBg: lipgloss.Color("#2D4F67"), // wave teal selection
+
+		Added:     lipgloss.Color("#76946A"), // spring green
+		Modified:  lipgloss.Color("#DCA561"), // carp yellow
+		Removed:   lipgloss.Color("#C34043"), // samurai red
+		Unchanged: lipgloss.Color("#727169"), // fuji grey
+
+		Separator: lipgloss.Color("#1F1F28"),
+		Command:   lipgloss.Color("#938AA9"), // spring violet
+		StatusKey: lipgloss.Color("#7E9CD8"),
+		StatusDim: lipgloss.Color("#54546D"), // wave grey
+		StatusBg:  lipgloss.Color("#12121A"), // darker than MainBg
+		HeaderDim: lipgloss.Color("#717C7C"), // autumn grey
+		HeaderSep: lipgloss.Color("#1F1F28"),
+		FileName:  lipgloss.Color("#DCD7BA"),
+
+		MetaDim:   lipgloss.Color("#54546D"),
+		TreeDim:   lipgloss.Color("#2A2A37"),
+		ScrollDim: lipgloss.Color("#54546D"),
+
+		SearchHighlightBg: lipgloss.Color("#2D4F67"),
+		SearchCurrentBg:   lipgloss.Color("#DCA561"), // carp yellow
+		SearchCurrentFg:   lipgloss.Color("#1F1F28"),
+
+		MainBg: lipgloss.Color("#1F1F28"), // sumi ink
+
+		ChromaStyle: "monokai",
+	}
+}
+
+// GruvboxDark is a retro earthy theme with warm amber, orange, and green
+// accents on a dark brown base.
+func GruvboxDark() Theme {
+	return Theme{
+		Accent:          lipgloss.Color("#83A598"),
+		FocusedBorder:   lipgloss.Color("#83A598"),
+		UnfocusedBorder: lipgloss.Color("#3C3836"),
+
+		Selected:   lipgloss.Color("#EBDBB2"),
+		SelectedBg: lipgloss.Color("#504945"),
+
+		Added:     lipgloss.Color("#B8BB26"),
+		Modified:  lipgloss.Color("#FABD2F"),
+		Removed:   lipgloss.Color("#FB4934"),
+		Unchanged: lipgloss.Color("#A89984"),
+
+		Separator: lipgloss.Color("#282828"),
+		Command:   lipgloss.Color("#D5C4A1"),
+		StatusKey: lipgloss.Color("#83A598"),
+		StatusDim: lipgloss.Color("#665C54"),
+		StatusBg:  lipgloss.Color("#1C1C1C"),
+		HeaderDim: lipgloss.Color("#928374"),
+		HeaderSep: lipgloss.Color("#282828"),
+		FileName:  lipgloss.Color("#EBDBB2"),
+
+		MetaDim:   lipgloss.Color("#665C54"),
+		TreeDim:   lipgloss.Color("#3C3836"),
+		ScrollDim: lipgloss.Color("#665C54"),
+
+		SearchHighlightBg: lipgloss.Color("#504945"),
+		SearchCurrentBg:   lipgloss.Color("#FABD2F"),
+		SearchCurrentFg:   lipgloss.Color("#282828"),
+
+		MainBg: lipgloss.Color("#282828"),
+
+		ChromaStyle: "gruvbox",
+	}
+}
+
+// RosePine is a soft, muted dark theme with dusty rose, mauve, and pine
+// green on a deep midnight base.
+func RosePine() Theme {
+	return Theme{
+		Accent:          lipgloss.Color("#C4A7E7"), // iris
+		FocusedBorder:   lipgloss.Color("#C4A7E7"),
+		UnfocusedBorder: lipgloss.Color("#26233A"),
+
+		Selected:   lipgloss.Color("#E0DEF4"), // text
+		SelectedBg: lipgloss.Color("#403D52"), // highlight med
+
+		Added:     lipgloss.Color("#31748F"), // pine
+		Modified:  lipgloss.Color("#F6C177"), // gold
+		Removed:   lipgloss.Color("#EB6F92"), // love
+		Unchanged: lipgloss.Color("#6E6A86"), // subtle
+
+		Separator: lipgloss.Color("#1F1D2E"),
+		Command:   lipgloss.Color("#908CAA"), // muted
+		StatusKey: lipgloss.Color("#C4A7E7"),
+		StatusDim: lipgloss.Color("#6E6A86"),
+		StatusBg:  lipgloss.Color("#16131E"),
+		HeaderDim: lipgloss.Color("#817C9C"),
+		HeaderSep: lipgloss.Color("#1F1D2E"),
+		FileName:  lipgloss.Color("#E0DEF4"),
+
+		MetaDim:   lipgloss.Color("#6E6A86"),
+		TreeDim:   lipgloss.Color("#26233A"),
+		ScrollDim: lipgloss.Color("#6E6A86"),
+
+		SearchHighlightBg: lipgloss.Color("#403D52"),
+		SearchCurrentBg:   lipgloss.Color("#F6C177"),
+		SearchCurrentFg:   lipgloss.Color("#1F1D2E"),
+
+		MainBg: lipgloss.Color("#191724"), // base
+
+		ChromaStyle: "monokai",
+	}
+}
+
+// Dracula is a high-contrast purple/pink theme with vibrant cyan and green
+// accents on a near-black background.
+func Dracula() Theme {
+	return Theme{
+		Accent:          lipgloss.Color("#BD93F9"), // purple
+		FocusedBorder:   lipgloss.Color("#BD93F9"),
+		UnfocusedBorder: lipgloss.Color("#44475A"),
+
+		Selected:   lipgloss.Color("#F8F8F2"), // foreground
+		SelectedBg: lipgloss.Color("#44475A"), // selection
+
+		Added:     lipgloss.Color("#50FA7B"), // green
+		Modified:  lipgloss.Color("#FFB86C"), // orange
+		Removed:   lipgloss.Color("#FF5555"), // red
+		Unchanged: lipgloss.Color("#6272A4"), // comment
+
+		Separator: lipgloss.Color("#21222C"),
+		Command:   lipgloss.Color("#8BE9FD"), // cyan
+		StatusKey: lipgloss.Color("#BD93F9"),
+		StatusDim: lipgloss.Color("#6272A4"),
+		StatusBg:  lipgloss.Color("#191A21"),
+		HeaderDim: lipgloss.Color("#6272A4"),
+		HeaderSep: lipgloss.Color("#21222C"),
+		FileName:  lipgloss.Color("#F8F8F2"),
+
+		MetaDim:   lipgloss.Color("#6272A4"),
+		TreeDim:   lipgloss.Color("#44475A"),
+		ScrollDim: lipgloss.Color("#6272A4"),
+
+		SearchHighlightBg: lipgloss.Color("#44475A"),
+		SearchCurrentBg:   lipgloss.Color("#FFB86C"),
+		SearchCurrentFg:   lipgloss.Color("#282A36"),
+
+		MainBg: lipgloss.Color("#282A36"),
+
+		ChromaStyle: "dracula",
+	}
+}
+
+// Oxocarbon is an IBM Carbon-inspired theme — cool charcoal base with
+// cyan, teal, and lilac accents.
+func Oxocarbon() Theme {
+	return Theme{
+		Accent:          lipgloss.Color("#78A9FF"), // blue
+		FocusedBorder:   lipgloss.Color("#78A9FF"),
+		UnfocusedBorder: lipgloss.Color("#393939"),
+
+		Selected:   lipgloss.Color("#F2F4F8"), // text
+		SelectedBg: lipgloss.Color("#353535"), // selection
+
+		Added:     lipgloss.Color("#42BE65"), // green
+		Modified:  lipgloss.Color("#FFD700"), // yellow
+		Removed:   lipgloss.Color("#FF7EB6"), // pink/red
+		Unchanged: lipgloss.Color("#8D8D8D"), // subtle
+
+		Separator: lipgloss.Color("#1E1E1E"),
+		Command:   lipgloss.Color("#3DDBD9"), // teal/cyan
+		StatusKey: lipgloss.Color("#78A9FF"),
+		StatusDim: lipgloss.Color("#525252"),
+		StatusBg:  lipgloss.Color("#161616"),
+		HeaderDim: lipgloss.Color("#6F6F6F"),
+		HeaderSep: lipgloss.Color("#1E1E1E"),
+		FileName:  lipgloss.Color("#F2F4F8"),
+
+		MetaDim:   lipgloss.Color("#525252"),
+		TreeDim:   lipgloss.Color("#393939"),
+		ScrollDim: lipgloss.Color("#525252"),
+
+		SearchHighlightBg: lipgloss.Color("#353535"),
+		SearchCurrentBg:   lipgloss.Color("#FFD700"),
+		SearchCurrentFg:   lipgloss.Color("#1E1E1E"),
+
+		MainBg: lipgloss.Color("#1E1E1E"),
+
+		ChromaStyle: "monokai",
+	}
+}
+
+// Everforest is a calm, muted green forest theme — warm dark base with
+// soft greens, yellows, and reds that are easy on the eyes.
+// Nord is an arctic, blue-grey theme — cool polar night base with frost
+// blue accents and aurora green, yellow, and red for diff states.
+// OneDark is the classic Atom One Dark theme — balanced warm/cool dark
+// base with blue, cyan, green, and orange accents.
+// Cyberdream is a high-contrast neon synthwave theme — near-black base
+// with electric cyan, magenta, and lime accents.
+func Cyberdream() Theme {
+	return Theme{
+		Accent:          lipgloss.Color("#00BFFF"), // electric cyan
+		FocusedBorder:   lipgloss.Color("#00BFFF"),
+		UnfocusedBorder: lipgloss.Color("#2A2A3D"),
+
+		Selected:   lipgloss.Color("#FFFFFF"),
+		SelectedBg: lipgloss.Color("#2A2A3D"),
+
+		Added:     lipgloss.Color("#00FF9C"), // neon green
+		Modified:  lipgloss.Color("#FFD700"), // electric gold
+		Removed:   lipgloss.Color("#FF355E"), // neon red
+		Unchanged: lipgloss.Color("#5A5A7A"),
+
+		Separator: lipgloss.Color("#16161F"),
+		Command:   lipgloss.Color("#BD00FF"), // neon purple
+		StatusKey: lipgloss.Color("#00BFFF"),
+		StatusDim: lipgloss.Color("#3D3D5C"),
+		StatusBg:  lipgloss.Color("#0D0D14"),
+		HeaderDim: lipgloss.Color("#4A4A6A"),
+		HeaderSep: lipgloss.Color("#16161F"),
+		FileName:  lipgloss.Color("#E0E0FF"),
+
+		MetaDim:   lipgloss.Color("#3D3D5C"),
+		TreeDim:   lipgloss.Color("#2A2A3D"),
+		ScrollDim: lipgloss.Color("#3D3D5C"),
+
+		SearchHighlightBg: lipgloss.Color("#2A2A3D"),
+		SearchCurrentBg:   lipgloss.Color("#FFD700"),
+		SearchCurrentFg:   lipgloss.Color("#16161F"),
+
+		MainBg: lipgloss.Color("#16161F"),
+
+		ChromaStyle: "monokai",
+	}
+}
+
 func TokyoNight() Theme {
 	return Theme{
 		Accent:          lipgloss.Color("#7AA2F7"),

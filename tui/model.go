@@ -247,7 +247,7 @@ func NewModel(cfg Config) model {
 		statFile:    os.Lstat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
-		theme:       TokyoNight(),
+		theme:       Cyberdream(),
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
