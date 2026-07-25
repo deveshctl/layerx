@@ -15,6 +15,7 @@ var (
 	flagJSON      string
 	flagNoCacheFl bool
 	flagConfig    string
+	flagTheme     string
 )
 
 func noCacheRequested() bool {
@@ -95,6 +96,7 @@ func init() {
 	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "", "path to .layerx.yaml config file (default: walk up from CWD, then $XDG_CONFIG_HOME/layerx/config.yaml)")
+	rootCmd.Flags().StringVar(&flagTheme, "theme", "", `colour theme for the TUI: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream (default: tokyo-night; overrides theme: in .layerx.yaml)`)
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto". Each engine honours its own active context/connection ("docker context use", "podman system connection default"); DOCKER_HOST / CONTAINER_HOST env vars still override`)
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",
@@ -121,6 +123,15 @@ func (e *engineValue) Set(s string) error {
 	default:
 		return fmt.Errorf("invalid engine %q (expected docker, podman, or auto)", s)
 	}
+}
+
+// resolveTheme picks the effective theme name: --theme flag wins over the
+// config file value; empty string means use the built-in default.
+func resolveTheme(fromConfig, fromFlag string) string {
+	if fromFlag != "" {
+		return fromFlag
+	}
+	return fromConfig
 }
 
 func SetVersionInfo(v, c, d string) {
@@ -231,6 +242,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		Resolver: resolver,
 		NoCache:  noCache,
 		Platform: activePlatformDisplay(),
+		Theme:    resolveTheme(cfg.Theme, flagTheme),
 	})
 }
 

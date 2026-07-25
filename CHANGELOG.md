@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Eight built-in colour themes selectable via `--theme` flag or `theme:` in
+  `.layerx.yaml`: `tokyo-night` (default), `catppuccin-mocha`, `kanagawa`,
+  `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`.
+
 ## [v1.5.3] - 2026-07-16
 
 Configurable `.layerx.yaml` discovery, engine config env-var support, richer

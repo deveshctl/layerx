@@ -24,6 +24,11 @@ type Config struct {
 	// must error rather than guess.
 	Version int `yaml:"version,omitempty"`
 
+	// Theme selects the TUI colour theme. Valid values: catppuccin-mocha,
+	// tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon,
+	// cyberdream. Empty string means the built-in default (tokyo-night).
+	Theme string `yaml:"theme,omitempty"`
+
 	Rules RulesConfig `yaml:"rules"`
 
 	// PathRules is populated by the loader's normalize() pass. It is NOT
@@ -243,6 +248,21 @@ func (c *Config) validate() error {
 	if c.Version != 0 && c.Version != 1 {
 		return fmt.Errorf("version: only schema version 1 is supported; got %d", c.Version)
 	}
+	if c.Theme != "" {
+		validThemes := map[string]bool{
+			"catppuccin-mocha": true,
+			"tokyo-night":      true,
+			"kanagawa":         true,
+			"gruvbox-dark":     true,
+			"rose-pine":        true,
+			"dracula":          true,
+			"oxocarbon":        true,
+			"cyberdream":       true,
+		}
+		if !validThemes[c.Theme] {
+			return fmt.Errorf("theme: unknown theme %q; valid themes: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream", c.Theme)
+		}
+	}
 	le := c.Rules.LowestEfficiency
 	if math.IsNaN(le) || math.IsInf(le, 0) || le < 0 || le > 1 {
 		return fmt.Errorf("rules.lowest-efficiency must be a finite number in [0, 1]; got %v", le)
@@ -261,6 +281,8 @@ func validationSection(msg string) string {
 	switch {
 	case strings.HasPrefix(msg, "version:"):
 		return SectionVersion
+	case strings.HasPrefix(msg, "theme:"):
+		return "theme"
 	case strings.HasPrefix(msg, "rules."):
 		return SectionRules
 	default:

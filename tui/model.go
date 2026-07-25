@@ -27,6 +27,10 @@ type Config struct {
 	// is on screen. Resolver behaviour is governed by image.WithPlatform,
 	// not this field.
 	Platform string
+	// Theme is the name of the colour theme to use. Empty string means the
+	// built-in default (tokyo-night). Valid values match the names accepted
+	// by the theme: key in .layerx.yaml.
+	Theme string
 }
 
 type focus int
@@ -234,6 +238,29 @@ type model struct {
 	fetchCancel context.CancelFunc
 }
 
+// themeFor resolves a theme name (as accepted by --theme / .layerx.yaml)
+// to a Theme value. Unknown or empty names fall back to TokyoNight.
+func themeFor(name string) Theme {
+	switch name {
+	case "catppuccin-mocha":
+		return CatppuccinMocha()
+	case "kanagawa":
+		return Kanagawa()
+	case "gruvbox-dark":
+		return GruvboxDark()
+	case "rose-pine":
+		return RosePine()
+	case "dracula":
+		return Dracula()
+	case "oxocarbon":
+		return Oxocarbon()
+	case "cyberdream":
+		return Cyberdream()
+	default:
+		return TokyoNight()
+	}
+}
+
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -247,7 +274,7 @@ func NewModel(cfg Config) model {
 		statFile:    os.Lstat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
-		theme:       Cyberdream(),
+		theme:       themeFor(cfg.Theme),
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
