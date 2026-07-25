@@ -1552,7 +1552,7 @@ func (m model) View() tea.View {
 
 func (m model) viewLoading() tea.View {
 	if m.width > 0 && m.width < 10 {
-		return finalizeView(tea.NewView("loading…"))
+		return finalizeView(tea.NewView("loading…"), m.theme.MainBg)
 	}
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 
@@ -1641,7 +1641,7 @@ func (m model) viewLoading() tea.View {
 	body := strings.Join(lines, "\n")
 	panel := renderPanel(m.theme, body, "Loading", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
-	return finalizeView(tea.NewView(content))
+	return finalizeView(tea.NewView(content), m.theme.MainBg)
 }
 
 // renderRightPanel paints the file-tree side of the screen. In single-pane
@@ -1693,13 +1693,13 @@ func (m model) viewError() tea.View {
 	hintStyle := lipgloss.NewStyle().Foreground(m.theme.StatusDim)
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
-	return finalizeView(tea.NewView(content))
+	return finalizeView(tea.NewView(content), m.theme.MainBg)
 }
 
 func (m model) viewReady() tea.View {
 	if m.width < 50 {
 		return finalizeView(tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Terminal too narrow\n(need 50+ cols)")))
+			"Terminal too narrow\n(need 50+ cols)")), m.theme.MainBg)
 	}
 
 	// chromeRows: header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1)
@@ -1707,7 +1707,7 @@ func (m model) viewReady() tea.View {
 	const minPanelRows = 3
 	if m.height < chromeRows+minPanelRows {
 		return finalizeView(tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Terminal too short\n(need 11+ rows)")))
+			"Terminal too short\n(need 11+ rows)")), m.theme.MainBg)
 	}
 
 	leftWidth := m.leftPanelWidth()
@@ -1766,9 +1766,9 @@ func (m model) viewReady() tea.View {
 	// Release mouse capture when the file viewer is open so the terminal
 	// handles mouse events natively, enabling text selection by click+drag.
 	if m.viewState != viewNone {
-		return finalizeViewNoMouse(tea.NewView(content))
+		return finalizeViewNoMouse(tea.NewView(content), m.theme.MainBg)
 	}
-	return finalizeView(tea.NewView(content))
+	return finalizeView(tea.NewView(content), m.theme.MainBg)
 }
 
 func (m model) leftPanelWidth() int {

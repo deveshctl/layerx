@@ -46,6 +46,11 @@ type Theme struct {
 	SearchCurrentBg   color.Color
 	SearchCurrentFg   color.Color
 
+	// Overall terminal background (set via tea.WithBackgroundColor).
+	// Gives the whole UI a consistent base so header/footer bars feel
+	// grounded rather than floating on pure black.
+	MainBg color.Color
+
 	// Chroma syntax highlight theme name (passed to chroma styles.Get)
 	ChromaStyle string
 }
@@ -82,6 +87,8 @@ func CatppuccinMocha() Theme {
 		SearchCurrentBg:   lipgloss.Color("#F9E2AF"),
 		SearchCurrentFg:   lipgloss.Color("#1E1E2E"),
 
+		MainBg: lipgloss.Color("#1E1E2E"),
+
 		ChromaStyle: "monokai",
 	}
 }
@@ -101,13 +108,16 @@ func TokyoNight() Theme {
 		Removed:   lipgloss.Color("#F7768E"),
 		Unchanged: lipgloss.Color("#A9B1D6"),
 
-		Separator: lipgloss.Color("#283457"),
+		// #1F2335 is just above MainBg — subtle dividers that don't disappear
+		Separator: lipgloss.Color("#1F2335"),
 		Command:   lipgloss.Color("#A9B1D6"),
 		StatusKey: lipgloss.Color("#7AA2F7"),
-		StatusDim: lipgloss.Color("#565F89"),
-		StatusBg:  lipgloss.Color("#16161E"),
+		// Slightly brighter than before so key labels stay legible on StatusBg
+		StatusDim: lipgloss.Color("#6272A4"),
+		// Darker than MainBg — header/footer feel grounded, not floating
+		StatusBg:  lipgloss.Color("#13131A"),
 		HeaderDim: lipgloss.Color("#737AA2"),
-		HeaderSep: lipgloss.Color("#283457"),
+		HeaderSep: lipgloss.Color("#1F2335"),
 		FileName:  lipgloss.Color("#C0CAF5"),
 
 		MetaDim:   lipgloss.Color("#565F89"),
@@ -117,6 +127,9 @@ func TokyoNight() Theme {
 		SearchHighlightBg: lipgloss.Color("#3D4C7A"),
 		SearchCurrentBg:   lipgloss.Color("#E0AF68"),
 		SearchCurrentFg:   lipgloss.Color("#1A1B26"),
+
+		// Base surface — slightly above pure black, ties the whole UI together
+		MainBg: lipgloss.Color("#1A1B26"),
 
 		ChromaStyle: "tokyonight-dark",
 	}
