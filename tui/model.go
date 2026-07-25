@@ -244,6 +244,8 @@ func themeFor(name string) Theme {
 	switch name {
 	case "catppuccin-mocha":
 		return CatppuccinMocha()
+	case "tokyo-night":
+		return TokyoNight()
 	case "kanagawa":
 		return Kanagawa()
 	case "gruvbox-dark":
