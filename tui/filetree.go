@@ -453,6 +453,14 @@ func formatFileNodeLine(t Theme, f *image.FileNode, selected bool, maxWidth int,
 			metaCols = sizeStr + strings.Repeat(" ", colGap)
 		}
 		fullLine := selGlyph + metaCols + fullName + originSuffix + strings.Repeat(" ", namePad)
+		// Pad to the full inner width so the selection bar spans the whole panel
+		// rather than stopping at the name column — a short bar reads as "nothing
+		// selected".
+		if pad := maxWidth - lipgloss.Width(fullLine); pad > 0 {
+			fullLine += strings.Repeat(" ", pad)
+		} else if pad < 0 {
+			fullLine = ansi.Truncate(fullLine, maxWidth, "")
+		}
 		return lipgloss.NewStyle().Foreground(t.SelectFg).Background(t.SelectBg).Render(fullLine)
 	}
 

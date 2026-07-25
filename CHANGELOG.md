@@ -38,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uses a muted mid-tone clearly separated from the panel, matching how
   established terminal UIs render inactive borders. File-tree connector glyphs
   were nudged off that same near-invisible tint for the same reason.
+- The selected row now paints a full-width, accent-tinted highlight bar across
+  the whole panel instead of a faint grey background that stopped at the end of
+  the text — the selection was previously almost invisible, especially on the
+  light theme. The selection colour is derived from each theme's accent so it
+  reads instantly while staying in-palette.
+- Status-bar and header text (key hints, descriptions, separators, image name)
+  are now derived for legibility against the status-bar background rather than
+  reusing panel-tuned colours. Previously the descriptions were barely readable
+  and the separator pipes rendered near-black on the darker status bar.
 
 ### Internal
 - Added a test-only visual diagnostic that renders each theme's TUI frame to a

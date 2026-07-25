@@ -248,7 +248,7 @@ func NewModel(cfg Config) model {
 	// the TUI over a colour name.
 	th, err := ResolveTheme(cfg.Theme)
 	if err != nil {
-		th = defaultTheme()
+		th = refine(defaultTheme())
 	}
 	return model{
 		state:       stateLoading,
@@ -1821,20 +1821,20 @@ func (m model) leftPanelWidth() int {
 func (m model) renderHeader() string {
 	glyph := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("◆")
 	brand := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true).Render(" layerx")
-	sep := lipgloss.NewStyle().Foreground(m.theme.Separator).Background(m.theme.StatusBg).Render(" │ ")
-	imageName := lipgloss.NewStyle().Foreground(m.theme.SelectFg).Background(m.theme.StatusBg).Render(m.imageRef)
+	sep := lipgloss.NewStyle().Foreground(m.theme.statusSepFg()).Background(m.theme.StatusBg).Render(" │ ")
+	imageName := lipgloss.NewStyle().Foreground(m.theme.statusBrandFg()).Background(m.theme.StatusBg).Render(m.imageRef)
 	left := glyph + brand + sep + imageName
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant
 	// is on screen — easy to misread an arm64 layout as amd64.
 	if m.platform != "" {
-		platformStyle := lipgloss.NewStyle().Foreground(m.theme.TextDim1).Background(m.theme.StatusBg)
+		platformStyle := lipgloss.NewStyle().Foreground(m.theme.statusDescFg()).Background(m.theme.StatusBg)
 		left += sep + platformStyle.Render(m.platform)
 	}
 
 	totalSize := image.FormatBytes(m.analysis.TotalSize)
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
-	right := lipgloss.NewStyle().Foreground(m.theme.TextDim1).Background(m.theme.StatusBg).Render(layerCount + " · " + totalSize)
+	right := lipgloss.NewStyle().Foreground(m.theme.statusDescFg()).Background(m.theme.StatusBg).Render(layerCount + " · " + totalSize)
 
 	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
 
@@ -1846,9 +1846,9 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	if m.viewState != viewNone {
 		return m.renderViewerStatusBar()
 	}
-	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(m.theme.TextDim2).Background(m.theme.StatusBg)
-	sepStyle := lipgloss.NewStyle().Foreground(m.theme.Separator).Background(m.theme.StatusBg)
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.statusKeyFg()).Background(m.theme.StatusBg).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(m.theme.statusDescFg()).Background(m.theme.StatusBg)
+	sepStyle := lipgloss.NewStyle().Foreground(m.theme.statusSepFg()).Background(m.theme.StatusBg)
 
 	type hint struct{ key, desc string }
 	var hints []hint
@@ -1942,7 +1942,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		if m.layerCursor < len(layers) {
 			size = image.FormatBytes(layers[m.layerCursor].Size)
 		}
-		rightHighlight := lipgloss.NewStyle().Foreground(m.theme.SelectFg).Background(m.theme.StatusBg).Bold(true).Render("Layer " + layerNum)
+		rightHighlight := lipgloss.NewStyle().Foreground(m.theme.statusBrandFg()).Background(m.theme.StatusBg).Bold(true).Render("Layer " + layerNum)
 		sizeLabel := "stored " + size
 		if m.focus == focusLayers && m.layerCursor < len(layers) {
 			switch m.sizeMode {
@@ -1952,7 +1952,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 				sizeLabel = "stored " + size + " · change " + image.FormatSignedBytes(layers[m.layerCursor].NetDelta)
 			}
 		}
-		rightDim := lipgloss.NewStyle().Foreground(m.theme.TextDim2).Background(m.theme.StatusBg).Render("/" + layerTotal + " · " + sizeLabel)
+		rightDim := lipgloss.NewStyle().Foreground(m.theme.statusDescFg()).Background(m.theme.StatusBg).Render("/" + layerTotal + " · " + sizeLabel)
 		right = badges + rightHighlight + rightDim + " "
 	}
 
@@ -1963,9 +1963,9 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 }
 
 func (m model) renderViewerStatusBar() string {
-	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(m.theme.TextDim2).Background(m.theme.StatusBg)
-	sepStyle := lipgloss.NewStyle().Foreground(m.theme.Separator).Background(m.theme.StatusBg)
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.statusKeyFg()).Background(m.theme.StatusBg).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(m.theme.statusDescFg()).Background(m.theme.StatusBg)
+	sepStyle := lipgloss.NewStyle().Foreground(m.theme.statusSepFg()).Background(m.theme.StatusBg)
 
 	hints := " " +
 		keyStyle.Render("j/k") + " " + descStyle.Render("up/down") + " " +

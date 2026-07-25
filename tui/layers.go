@@ -217,13 +217,20 @@ func formatLayerLine(t Theme, l image.Layer, selected bool, maxWidth int, mode s
 	}
 
 	if selected {
-		cursor := lipgloss.NewStyle().Foreground(t.Accent).Render("▸")
+		sel := lipgloss.NewStyle().Foreground(t.SelectFg).Background(t.SelectBg)
+		cursor := lipgloss.NewStyle().Foreground(t.Accent).Background(t.SelectBg).Bold(true).Render("▸")
 		plain := " " + index + indexPad + "  " + sizeText + "  " + cmd
+		// Pad the row to the full inner width so the selection background spans
+		// the whole panel — a partial bar (text-width only) reads as "nothing
+		// selected" against a low-contrast selection colour. -1 accounts for the
+		// cursor glyph that precedes it.
 		if lipgloss.Width(plain) > maxWidth-1 {
 			plain = ansi.Truncate(plain, maxWidth-1, "")
 		}
-		inner := cursor + lipgloss.NewStyle().Foreground(t.SelectFg).Background(t.SelectBg).Render(plain)
-		return inner
+		if pad := maxWidth - 1 - lipgloss.Width(plain); pad > 0 {
+			plain += strings.Repeat(" ", pad)
+		}
+		return cursor + sel.Render(plain)
 	}
 
 	dimHash := panelText(t, t.TextDim2).Render("   #")

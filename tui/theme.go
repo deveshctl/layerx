@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
 // Theme is the complete set of colour roles the TUI renders with. Each field
@@ -55,6 +56,28 @@ type Theme struct {
 }
 
 func sprintfHex(r, g, b uint8) string { return fmt.Sprintf("#%02x%02x%02x", r, g, b) }
+
+// statusKeyFg / statusDescFg / statusSepFg / statusBrandFg are the status-bar
+// text roles, derived from StatusBg rather than reused from the panel palette.
+// The old code drew descriptions in TextDim2 and separators in Separator —
+// both tuned against the panel background — so on the darker StatusBg the
+// descriptions were barely legible and the separator pipes rendered near-black.
+// Deriving them from StatusBg guarantees a readable contrast on every theme.
+func (t Theme) statusKeyFg() color.Color  { return t.Accent }
+func (t Theme) statusDescFg() color.Color { return blend(t.StatusBg, statusInk(t.StatusBg), 0.62) }
+func (t Theme) statusSepFg() color.Color  { return blend(t.StatusBg, statusInk(t.StatusBg), 0.38) }
+func (t Theme) statusBrandFg() color.Color {
+	return blend(t.StatusBg, statusInk(t.StatusBg), 0.92)
+}
+
+// statusInk returns the ink direction (white on dark bars, black on light)
+// used to derive readable status-bar text.
+func statusInk(bg color.Color) color.Color {
+	if isLightBg(bg) {
+		return black()
+	}
+	return white()
+}
 
 // defaultTheme is Catppuccin Mocha, reproducing the exact palette shipped
 // before theming existed. Changing any value here changes the default look.
@@ -116,22 +139,89 @@ func rootText(t Theme, fg color.Color) lipgloss.Style {
 // chroma syntax styles (see theme_chroma.go).
 func themeRegistry() map[string]Theme {
 	return map[string]Theme{
-		"mocha":          defaultTheme(),
-		"latte":          fromCatppuccin("latte", catppuccinLatte),
-		"frappe":         fromCatppuccin("frappe", catppuccinFrappe),
-		"macchiato":      fromCatppuccin("macchiato", catppuccinMacchiato),
-		"dracula":        fromChroma("dracula", "dracula"),
-		"gruvbox":        fromChroma("gruvbox", "gruvbox"),
-		"solarized-dark": fromChroma("solarized-dark", "solarized-dark"),
+		"mocha":          refine(defaultTheme()),
+		"latte":          refine(fromCatppuccin("latte", catppuccinLatte)),
+		"frappe":         refine(fromCatppuccin("frappe", catppuccinFrappe)),
+		"macchiato":      refine(fromCatppuccin("macchiato", catppuccinMacchiato)),
+		"dracula":        refine(fromChroma("dracula", "dracula")),
+		"gruvbox":        refine(fromChroma("gruvbox", "gruvbox")),
+		"solarized-dark": refine(fromChroma("solarized-dark", "solarized-dark")),
 	}
 }
+
+// refine derives the interaction colours every theme kept getting wrong when
+// authored by hand or from a syntax style: a selection bar that actually reads
+// as selected, and a status bar whose text is legible on its own background.
+// Applied uniformly so all themes share the same visual grammar.
+//
+//   - SelectBg becomes an accent-tinted surface (blend of panel→accent), the
+//     lazygit convention — a saturated selection reads instantly, where a grey
+//     one perceptual step above the panel disappears.
+//   - SelectFg is forced to whichever of the theme's brightest text or a
+//     contrast colour is more legible on the new SelectBg.
+//   - StatusBg is pulled to a clear offset from PanelBg (darker on dark themes,
+//     lighter on light) so the bar is a distinct band, not a muddy continuation.
+//
+// isLight decides direction from the root canvas luminance so light themes
+// (latte) get the mirror treatment instead of the dark-tuned one.
+func refine(t Theme) Theme {
+	light := isLightBg(t.RootBg)
+
+	// Accent-tinted selection. 0.42 keeps the panel's character while pushing
+	// far enough toward the accent to be unmistakable; the guard below bumps it
+	// if a low-chroma accent still lands too close to the panel.
+	sel := blend(t.PanelBg, t.Accent, 0.42)
+	if labDistance(sel, t.PanelBg) < 0.14 {
+		// Accent too close to the panel (grey/low-sat theme): step the surface
+		// itself instead so selection never collapses into the fill.
+		if light {
+			sel = blend(t.PanelBg, black(), 0.16)
+		} else {
+			sel = blend(t.PanelBg, white(), 0.20)
+		}
+	}
+	t.SelectBg = sel
+
+	// High-contrast selection text: prefer the theme's bright text, fall back to
+	// pure white/black when it isn't legible enough on the tinted selection.
+	if labDistance(t.SelectFg, sel) < 0.45 {
+		if isLightBg(sel) {
+			t.SelectFg = blend(sel, black(), 0.85)
+		} else {
+			t.SelectFg = blend(sel, white(), 0.90)
+		}
+	}
+
+	// Status bar as a distinct band from the panels.
+	if labDistance(t.StatusBg, t.PanelBg) < 0.06 {
+		if light {
+			t.StatusBg = blend(t.PanelBg, black(), 0.12)
+		} else {
+			t.StatusBg = blend(t.PanelBg, black(), 0.40)
+		}
+	}
+
+	return t
+}
+
+func white() color.Color { return lipgloss.Color("#ffffff") }
+func black() color.Color { return lipgloss.Color("#000000") }
+
+// isLightBg reports whether c is a light colour (perceptual L* > 0.5), used to
+// mirror the dark-tuned derivations for light themes.
+func isLightBg(c color.Color) bool {
+	cf, _ := colorful.MakeColor(c)
+	l, _, _ := cf.Lab()
+	return l > 0.5
+}
+
 
 // ResolveTheme returns the named theme. "" yields the default. An unknown name
 // is an error listing valid names — we never silently fall back, because a
 // silent fallback is exactly how a user's typo produces the wrong look.
 func ResolveTheme(name string) (Theme, error) {
 	if name == "" {
-		return defaultTheme(), nil
+		return refine(defaultTheme()), nil
 	}
 	reg := themeRegistry()
 	if th, ok := reg[name]; ok {
