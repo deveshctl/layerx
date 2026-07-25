@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   established terminal UIs render inactive borders. File-tree connector glyphs
   were nudged off that same near-invisible tint for the same reason.
 
+### Internal
+- Added a test-only visual diagnostic that renders each theme's TUI frame to a
+  PNG so colour, contrast, and alignment can be reviewed directly. Gated behind
+  a test flag; never part of the shipped binary.
+
 ## [v1.5.3] - 2026-07-16
 
 Configurable `.layerx.yaml` discovery, engine config env-var support, richer
