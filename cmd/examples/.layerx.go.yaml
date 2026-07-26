@@ -3,6 +3,17 @@
 # distroless and have very little legitimate slack.
 version: 1
 
+# TUI colour theme.
+# Precedence (highest to lowest):
+#   1. --theme flag on the command line
+#   2. theme: in this file
+#   3. built-in default (tokyo-night)
+#
+# Available themes: tokyo-night, catppuccin-mocha, kanagawa, gruvbox-dark,
+#                   rose-pine, dracula, oxocarbon, cyberdream
+#
+# theme: tokyo-night
+
 rules:
   lowest-efficiency: 0.95
   highest-user-wasted-percent: 0.05

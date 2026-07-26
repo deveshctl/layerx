@@ -18,9 +18,21 @@ var sectionHelp = map[string]string{
   rules:           CI efficiency thresholds (layerx ci, CI=true)
   path-rules:      path-scoped CI rules (block, deny-waste, max-layer-count)
   version:         schema version (currently 1)
+  theme:           TUI colour theme (see below)
 
 See docs/configuration.md for the full reference.
 Run "layerx init --flavour generic" to write a starter file.`,
+	SectionTheme: `theme — TUI colour theme selection:
+
+  theme: tokyo-night       # default
+
+Available themes: tokyo-night, catppuccin-mocha, kanagawa, gruvbox-dark,
+                  rose-pine, dracula, oxocarbon, cyberdream
+
+Precedence (highest to lowest):
+  1. --theme flag on the command line
+  2. theme: in .layerx.yaml
+  3. built-in default (tokyo-night)`,
 	SectionRules: `rules — global CI efficiency thresholds (used by "layerx ci" and CI=true):
 
   rules:

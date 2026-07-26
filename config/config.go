@@ -284,7 +284,7 @@ func validationSection(msg string) string {
 	case strings.HasPrefix(msg, "version:"):
 		return SectionVersion
 	case strings.HasPrefix(msg, "theme:"):
-		return "theme"
+		return SectionTheme
 	case strings.HasPrefix(msg, "rules."):
 		return SectionRules
 	default:
