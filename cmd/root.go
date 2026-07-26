@@ -15,6 +15,7 @@ var (
 	flagJSON      string
 	flagNoCacheFl bool
 	flagConfig    string
+	flagTheme     string
 )
 
 func noCacheRequested() bool {
@@ -45,6 +46,11 @@ bare form behave as "layerx ci" with config-file (or default) thresholds;
 threshold flags (--lowest-efficiency, --highest-wasted-bytes,
 --highest-user-wasted-percent) are not accepted on this path — use
 "layerx ci --lowest-efficiency 0.95 IMAGE" to pass thresholds directly.
+
+Theme: pass --theme to select a TUI colour scheme (default: tokyo-night).
+Valid values: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine,
+dracula, oxocarbon, cyberdream. Persists across runs when set via theme: in
+.layerx.yaml; --theme overrides the config-file value for a single run.
 
 Cache: results are cached per image digest. Use --no-cache to bypass for
 a single run; "layerx cache list" inspects entries and "layerx cache prune"
@@ -79,6 +85,9 @@ variant. Without --platform, the daemon's default platform is used.`,
   # Run efficiency checks (also triggered by CI=true)
   layerx ci nginx:latest
 
+  # Use a different colour theme
+  layerx --theme dracula nginx:latest
+
   # Use Podman instead of Docker (Linux: socket auto-detected)
   layerx --engine podman alpine:3`,
 	Args: cobra.ExactArgs(1),
@@ -95,11 +104,13 @@ func init() {
 	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
 	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
 	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "", "path to .layerx.yaml config file (default: walk up from CWD, then $XDG_CONFIG_HOME/layerx/config.yaml)")
+	rootCmd.Flags().StringVar(&flagTheme, "theme", "", "colour theme for the TUI (default: tokyo-night; valid: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream). Overrides theme: in .layerx.yaml.")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
 		`container engine to use: "docker", "podman", or "auto". Each engine honours its own active context/connection ("docker context use", "podman system connection default"); DOCKER_HOST / CONTAINER_HOST env vars still override`)
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",
 		`target platform for multi-platform images (e.g. "linux/amd64", "linux/arm64", "linux/arm64/v8")`)
 	_ = rootCmd.RegisterFlagCompletionFunc("platform", completePlatform)
+	_ = rootCmd.RegisterFlagCompletionFunc("theme", completeTheme)
 }
 
 type engineValue struct{ v *string }
@@ -121,6 +132,30 @@ func (e *engineValue) Set(s string) error {
 	default:
 		return fmt.Errorf("invalid engine %q (expected docker, podman, or auto)", s)
 	}
+}
+
+var validThemes = map[string]bool{
+	"catppuccin-mocha": true,
+	"tokyo-night":      true,
+	"kanagawa":         true,
+	"gruvbox-dark":     true,
+	"rose-pine":        true,
+	"dracula":          true,
+	"oxocarbon":        true,
+	"cyberdream":       true,
+}
+
+// resolveTheme picks the effective theme name: --theme flag wins over the
+// config file value; empty string means use the built-in default.
+// Returns an error if the flag value is not a recognised theme name.
+func resolveTheme(fromConfig, fromFlag string) (string, error) {
+	if fromFlag != "" {
+		if !validThemes[fromFlag] {
+			return "", fmt.Errorf("unknown theme %q; valid themes: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream", fromFlag)
+		}
+		return fromFlag, nil
+	}
+	return fromConfig, nil
 }
 
 func SetVersionInfo(v, c, d string) {
@@ -226,11 +261,17 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	theme, err := resolveTheme(cfg.Theme, flagTheme)
+	if err != nil {
+		return err
+	}
+
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCache,
 		Platform: activePlatformDisplay(),
+		Theme:    theme,
 	})
 }
 

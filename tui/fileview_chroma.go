@@ -12,23 +12,28 @@ import (
 )
 
 var (
-	chromaInit  sync.Once
-	chromaFmt   chroma.Formatter
-	chromaStyle *chroma.Style
+	chromaFmtOnce sync.Once
+	chromaFmt     chroma.Formatter
 )
 
-func initChroma() {
-	chromaInit.Do(func() {
+// chromaStyleFor resolves a chroma style by name, falling back to "monokai"
+// when the name is not registered. The formatter is initialized once (it is
+// stateless); the style is resolved per-call so theme changes are honoured.
+func chromaStyleFor(styleName string) *chroma.Style {
+	chromaFmtOnce.Do(func() {
 		chromaFmt = formatters.Get("terminal256")
-		chromaStyle = chromastyles.Get("monokai")
 	})
+	if s := chromastyles.Get(styleName); s != nil {
+		return s
+	}
+	return chromastyles.Get("monokai")
 }
 
 // highlightFileCmd wraps highlightFileLines in a tea.Cmd so the bubbletea
 // runtime can run tokenisation off the Update goroutine. The returned
 // message carries requestID so the receiver can discard a stale highlight
 // when the user has navigated to a different file in the meantime.
-func highlightFileCmd(requestID uint64, path string, data []byte) tea.Cmd {
+func highlightFileCmd(requestID uint64, path string, data []byte, chromaStyleName string) tea.Cmd {
 	// Snapshot the input — Cmds run after Update returns and the underlying
 	// FileContent.Data slice is part of model state that another extract
 	// could swap out before this Cmd executes.
@@ -37,14 +42,14 @@ func highlightFileCmd(requestID uint64, path string, data []byte) tea.Cmd {
 	return func() tea.Msg {
 		return highlightedMsg{
 			requestID: requestID,
-			lines:     highlightFileLines(pathCopy, dataCopy),
+			lines:     highlightFileLines(pathCopy, dataCopy, chromaStyleName),
 		}
 	}
 }
 
-func highlightFileLines(path string, data []byte) []string {
-	initChroma()
-	if chromaFmt == nil || chromaStyle == nil {
+func highlightFileLines(path string, data []byte, styleName string) []string {
+	style := chromaStyleFor(styleName)
+	if chromaFmt == nil || style == nil {
 		return nil
 	}
 
@@ -65,7 +70,7 @@ func highlightFileLines(path string, data []byte) []string {
 	}
 
 	var buf strings.Builder
-	if err := chromaFmt.Format(&buf, chromaStyle, it); err != nil {
+	if err := chromaFmt.Format(&buf, style, it); err != nil {
 		return nil
 	}
 

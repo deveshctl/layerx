@@ -8,41 +8,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var (
-	accentColor          = lipgloss.Color("#89B4FA")
-	focusedBorderColor   = lipgloss.Color("#89B4FA")
-	unfocusedBorderColor = lipgloss.Color("#45475A")
-
-	selectedColor   = lipgloss.Color("#CDD6F4")
-	selectedBgColor = lipgloss.Color("#313244")
-	addedColor      = lipgloss.Color("#A6E3A1")
-	modifiedColor   = lipgloss.Color("#F9E2AF")
-	removedColor    = lipgloss.Color("#F38BA8")
-	unchangedColor  = lipgloss.Color("#A6ADC8")
-
-	separatorColor = lipgloss.Color("#313244")
-	commandColor   = lipgloss.Color("#A6ADC8")
-	statusKeyColor = lipgloss.Color("#89B4FA")
-	statusDimColor = lipgloss.Color("#6C7086")
-	statusBgColor  = lipgloss.Color("#181825")
-	headerDimColor = lipgloss.Color("#9399B2")
-	headerSepColor = lipgloss.Color("#313244")
-	fileNameColor  = lipgloss.Color("#BAC2DE")
-
-	metaDimColor   = lipgloss.Color("#6C7086")
-	treeDimColor   = lipgloss.Color("#45475A")
-	scrollDimColor = lipgloss.Color("#6C7086")
-
-	searchHighlightBg = lipgloss.Color("#585B70")
-	searchCurrentBg   = lipgloss.Color("#F9E2AF")
-	searchCurrentFg   = lipgloss.Color("#1E1E2E")
-)
-
 // largeStepGrowthFraction is the threshold above which a positive Δfs
 // is colored as a notable size increase. 0.10 = 10% of final live size.
 const largeStepGrowthFraction = 0.10
 
-func renderPanel(content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
+func renderPanel(t Theme, content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
 	// Defensive: callers can compute negative widths/heights when the
 	// terminal is unusually small (m.width-2 with m.width=1, etc.).
 	// strings.Repeat panics on negative counts; clamp here so every code
@@ -53,9 +23,9 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 	if height < 0 {
 		height = 0
 	}
-	borderColor := unfocusedBorderColor
+	borderColor := t.UnfocusedBorder
 	if focused {
-		borderColor = focusedBorderColor
+		borderColor = t.FocusedBorder
 	}
 
 	borderFg := styleWithFg(borderColor)
@@ -101,9 +71,9 @@ func renderPanel(content, title string, focused bool, contentWidth, height int, 
 
 		rightBorder := vLine
 		if hasAbove && i == 0 {
-			rightBorder = styleWithFg(scrollDimColor).Render("▴")
+			rightBorder = styleWithFg(t.ScrollDim).Render("▴")
 		} else if hasBelow && i == height-1 {
-			rightBorder = styleWithFg(scrollDimColor).Render("▾")
+			rightBorder = styleWithFg(t.ScrollDim).Render("▾")
 		}
 		sb.WriteString(rightBorder)
 

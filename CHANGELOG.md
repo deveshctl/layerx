@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Eight built-in colour themes selectable via `--theme` flag or `theme:` in
+  `.layerx.yaml`: `tokyo-night` (default), `catppuccin-mocha`, `kanagawa`,
+  `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`.
+- All `layerx init` starter templates include a commented `theme:` block
+  showing available values and precedence order.
+- `--theme` flag now tab-completes all valid theme names in bash, zsh, fish,
+  and PowerShell.
+- `--theme` flag help and config error hints now document theme precedence
+  (`--theme` flag > `theme:` in file > built-in default).
+
+### Fixed
+- `theme:` in `.layerx.yaml` was silently ignored due to `rawConfig` missing
+  the field; it now loads and validates correctly.
+- `--theme` flag with an unrecognised value now exits with a clear error
+  instead of silently falling back to `tokyo-night`.
+- `layerx build` now honours `--theme` and `theme:` in `.layerx.yaml`; previously
+  the theme was always tokyo-night regardless of configuration.
+- Syntax highlighting now uses the correct chroma style for each theme; previously
+  the style from the first file opened was locked in for the entire session, so
+  `gruvbox-dark` and `dracula` users always saw tokyo-night syntax colours.
+- A type error on the `theme:` key in `.layerx.yaml` (e.g. `theme: 123`) now
+  shows the targeted theme error hint instead of a generic config message.
+
 ## [v1.5.3] - 2026-07-16
 
 Configurable `.layerx.yaml` discovery, engine config env-var support, richer

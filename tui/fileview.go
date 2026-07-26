@@ -30,6 +30,7 @@ type viewerParams struct {
 	// highlighting hasn't been computed yet or is unavailable. When non-nil and
 	// no search is active, it is used directly to skip per-frame chroma work.
 	highlightedLines []string
+	theme            Theme
 }
 
 func renderFileView(p viewerParams) string {
@@ -40,11 +41,11 @@ func renderFileView(p viewerParams) string {
 		frame := spinnerFrames[p.spinnerFrame%len(spinnerFrames)]
 		msg := frame + " Extracting file…"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center, msg)
-		return renderPanel(body, "File Viewer", true, contentWidth, p.height, false, false)
+		return renderPanel(p.theme, body, "File Viewer", true, contentWidth, p.height, false, false)
 	}
 
 	if p.content == nil {
-		return renderPanel("", "File Viewer", true, contentWidth, p.height, false, false)
+		return renderPanel(p.theme, "", "File Viewer", true, contentWidth, p.height, false, false)
 	}
 
 	title := p.content.Path
@@ -60,16 +61,16 @@ func renderFileView(p viewerParams) string {
 		msg := fmt.Sprintf("Binary file (%s) — cannot display", image.FormatBytes(p.content.Size))
 		hint := "Press Esc to return"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
-			styleWithFg(removedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
-		return renderPanel(body, title, true, contentWidth, p.height, false, false)
+			styleWithFg(p.theme.Removed).Render(msg)+"\n\n"+styleWithFg(p.theme.StatusDim).Render(hint))
+		return renderPanel(p.theme, body, title, true, contentWidth, p.height, false, false)
 	}
 
 	if len(p.content.Data) == 0 {
 		msg := "Empty file (0 bytes)"
 		hint := "Press Esc to return"
 		body := lipgloss.Place(contentWidth, contentHeight, lipgloss.Center, lipgloss.Center,
-			styleWithFg(unchangedColor).Render(msg)+"\n\n"+styleWithFg(statusDimColor).Render(hint))
-		return renderPanel(body, title, true, contentWidth, p.height, false, false)
+			styleWithFg(p.theme.Unchanged).Render(msg)+"\n\n"+styleWithFg(p.theme.StatusDim).Render(hint))
+		return renderPanel(p.theme, body, title, true, contentWidth, p.height, false, false)
 	}
 
 	lines := splitFileLines(p.content.Data)
@@ -110,11 +111,11 @@ func renderFileView(p viewerParams) string {
 	for i, line := range visible {
 		lineNum := p.offset + i + 1
 		lineIdx := p.offset + i
-		gutter := styleWithFg(metaDimColor).Render(fmt.Sprintf("%*d ", gutterDigits, lineNum))
+		gutter := styleWithFg(p.theme.MetaDim).Render(fmt.Sprintf("%*d ", gutterDigits, lineNum))
 		gutterW := ansi.StringWidth(gutter)
 
 		maxLineWidth := max(contentWidth-gutterW, 1)
-		lineContent := renderViewerLine(line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
+		lineContent := renderViewerLine(p.theme, line, lineIdx, p.searchQuery, p.searchMatches, p.searchCursor, syntaxHighlight)
 
 		// Cursor sits on the first visible line. Overlay it before truncation
 		// so the cursor cell is preserved (or correctly clipped) by the same
@@ -156,19 +157,19 @@ func renderFileView(p viewerParams) string {
 
 	if showSearchBar {
 		sb.WriteString("\n")
-		sb.WriteString(renderViewerSearchBar(p.searchQuery, p.searchActive, len(p.searchMatches), p.searchCursor, contentWidth))
+		sb.WriteString(renderViewerSearchBar(p.theme, p.searchQuery, p.searchActive, len(p.searchMatches), p.searchCursor, contentWidth))
 	}
 
 	if p.content.Truncated {
 		notice := fmt.Sprintf("  File truncated at 1 MB (total: %s)", image.FormatBytes(p.content.Size))
 		sb.WriteString("\n")
-		sb.WriteString(styleWithFg(modifiedColor).Render(notice))
+		sb.WriteString(styleWithFg(p.theme.Modified).Render(notice))
 	}
 
 	hasAbove := p.offset > 0
 	hasBelow := end < totalLines
 
-	return renderPanel(sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
+	return renderPanel(p.theme, sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
 }
 
 // overlayCursor paints a reverse-video block at display column `col` of a
@@ -197,12 +198,12 @@ func overlayCursor(line string, col int) string {
 	return pre + lipgloss.NewStyle().Reverse(true).Render(cell) + post
 }
 
-func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, matchCursor int, syntaxHighlight bool) string {
+func renderViewerLine(t Theme, line string, lineIdx int, query string, matches [][2]int, matchCursor int, syntaxHighlight bool) string {
 	if query == "" || len(matches) == 0 {
 		if syntaxHighlight {
 			return line
 		}
-		return styleWithFg(fileNameColor).Render(line)
+		return styleWithFg(t.FileName).Render(line)
 	}
 
 	lineRunes := []rune(line)
@@ -264,44 +265,44 @@ func renderViewerLine(line string, lineIdx int, query string, matches [][2]int, 
 		segments = append(segments, segment{text: string(lineRunes[pos:])})
 	}
 	if len(segments) == 0 {
-		return styleWithFg(fileNameColor).Render(line)
+		return styleWithFg(t.FileName).Render(line)
 	}
 
 	var sb strings.Builder
 	for _, seg := range segments {
 		if seg.current {
-			sb.WriteString(lipgloss.NewStyle().Foreground(searchCurrentFg).Background(searchCurrentBg).Render(seg.text))
+			sb.WriteString(lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.SearchCurrentBg).Render(seg.text))
 		} else if seg.match {
-			sb.WriteString(lipgloss.NewStyle().Foreground(fileNameColor).Background(searchHighlightBg).Render(seg.text))
+			sb.WriteString(lipgloss.NewStyle().Foreground(t.FileName).Background(t.SearchHighlightBg).Render(seg.text))
 		} else {
-			sb.WriteString(styleWithFg(fileNameColor).Render(seg.text))
+			sb.WriteString(styleWithFg(t.FileName).Render(seg.text))
 		}
 	}
 	return sb.String()
 }
 
-func renderViewerSearchBar(query string, active bool, matchCount, cursor, maxWidth int) string {
-	prefix := styleWithFg(accentColor).Render("/ ")
+func renderViewerSearchBar(t Theme, query string, active bool, matchCount, cursor, maxWidth int) string {
+	prefix := styleWithFg(t.Accent).Render("/ ")
 	if active {
-		cursorChar := styleWithFg(selectedColor).Render("█")
-		queryStr := styleWithFg(selectedColor).Render(query)
+		cursorChar := styleWithFg(t.Selected).Render("█")
+		queryStr := styleWithFg(t.Selected).Render(query)
 		line := prefix + queryStr + cursorChar
 		if matchCount > 0 {
-			counter := styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
+			counter := styleWithFg(t.StatusDim).Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
 			line += counter
 		} else if query != "" {
-			line += styleWithFg(statusDimColor).Render("  (no matches)")
+			line += styleWithFg(t.StatusDim).Render("  (no matches)")
 		}
 		return line
 	}
-	queryStr := styleWithFg(selectedColor).Render(query)
+	queryStr := styleWithFg(t.Selected).Render(query)
 	var counter string
 	if matchCount > 0 {
-		counter = styleWithFg(statusDimColor).Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
+		counter = styleWithFg(t.StatusDim).Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
 	} else {
-		counter = styleWithFg(statusDimColor).Render("  (no matches)")
+		counter = styleWithFg(t.StatusDim).Render("  (no matches)")
 	}
-	hint := styleWithFg(unchangedColor).Render("  [Esc clear]")
+	hint := styleWithFg(t.Unchanged).Render("  [Esc clear]")
 	line := prefix + queryStr + counter + hint
 	if lipgloss.Width(line) > maxWidth {
 		line = prefix + queryStr + counter

@@ -28,6 +28,7 @@
 - [CI mode & GitHub Actions](#ci-mode)
 - [Compare two images](#compare-two-images)
 - [JSON export](#json-export)
+- [Theming](#theming)
 - [Caching](#caching--environment)
 - [Verifying releases (Sigstore, SLSA, SBOM)](#verifying-releases)
 - [FAQ](#faq)
@@ -103,6 +104,10 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 - `layerx build` — build via docker/podman and inspect the result in a single command.
 - `--json` — full analysis (layers, files, efficiency) exported to JSON for scripts, dashboards, and `jq`.
 - Starter configs for Node, Python, Java, Go, and generic images (`layerx init --flavour ...`).
+
+### Theming
+
+8 built-in colour themes: `tokyo-night` (default), `catppuccin-mocha`, `kanagawa`, `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`. Select via `--theme` flag or `theme:` in `.layerx.yaml`. Each theme covers all UI surfaces — panels, diff colours, status bar, syntax highlighting. Full reference: [docs/theming.md](docs/theming.md).
 
 ### Trust & supply chain
 
@@ -395,11 +400,14 @@ path-rules:
     - /tmp/**
   deny-waste:
     - "**/*.pyc"
+
+# Optional: set a TUI colour theme (tokyo-night is the default)
+# theme: dracula
 ```
 
 CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
 
-Full field reference, path-rule semantics, and worked examples: [docs/configuration.md](docs/configuration.md). End-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit codes): [docs/ci-integration.md](docs/ci-integration.md).
+Full field reference, path-rule semantics, theming, and worked examples: [docs/configuration.md](docs/configuration.md). End-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit codes): [docs/ci-integration.md](docs/ci-integration.md).
 
 ### Exit codes
 
@@ -464,6 +472,38 @@ jq '.efficiency.wastedFiles | sort_by(-.totalWasted) | .[0:5]' analysis.json
 ```
 
 Full schema reference and scripting recipes: [docs/json-export.md](docs/json-export.md).
+
+---
+
+## Theming
+
+LayerX ships 8 built-in colour themes. Select one with `--theme` or set it
+permanently in `.layerx.yaml`:
+
+```bash
+layerx --theme dracula nginx:latest
+layerx --theme gruvbox-dark ./build/app.tar
+```
+
+```yaml
+# .layerx.yaml
+theme: rose-pine
+```
+
+**Precedence:** `--theme` flag > `theme:` in `.layerx.yaml` > built-in default (`tokyo-night`).
+
+| Theme | Character |
+|-------|-----------|
+| `tokyo-night` | Cool blue-grey — the default |
+| `catppuccin-mocha` | Pastel mauve |
+| `kanagawa` | Warm indigo and gold |
+| `gruvbox-dark` | Retro earthy amber |
+| `rose-pine` | Dusty rose and mauve |
+| `dracula` | High-contrast purple and cyan |
+| `oxocarbon` | IBM Carbon charcoal |
+| `cyberdream` | Neon synthwave cyan |
+
+Full reference, syntax highlighting details, and terminal background notes: [docs/theming.md](docs/theming.md).
 
 ---
 

@@ -112,3 +112,17 @@ func completePlatform(cmd *cobra.Command, args []string, toComplete string) ([]s
 	}
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
+
+func completeTheme(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	themes := []string{
+		"tokyo-night",
+		"catppuccin-mocha",
+		"kanagawa",
+		"gruvbox-dark",
+		"rose-pine",
+		"dracula",
+		"oxocarbon",
+		"cyberdream",
+	}
+	return themes, cobra.ShellCompDirectiveNoFileComp
+}
