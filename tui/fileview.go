@@ -123,7 +123,7 @@ func renderFileView(p viewerParams) string {
 		// positions still adjust hOffset in scrollViewLeft/Right, so by the
 		// time we render the cursor is always within the visible window.
 		if i == 0 {
-			lineContent = overlayCursor(lineContent, p.cursorCol)
+			lineContent = overlayCursor(p.theme, lineContent, p.cursorCol)
 		}
 
 		// Horizontal scroll: keep the styled output intact, then trim from
@@ -172,22 +172,21 @@ func renderFileView(p viewerParams) string {
 	return renderPanel(p.theme, sb.String(), title, true, contentWidth, p.height, hasAbove, hasBelow)
 }
 
-// overlayCursor paints a reverse-video block at display column `col` of a
+// overlayCursor paints a themed cursor block at display column `col` of a
 // styled line. ansi.Cut is grapheme- and escape-aware, so slicing the line
 // into [pre | cell | post] keeps chroma colors and search highlights intact.
 // When the cursor is past the end of the rendered line (cursor on a short
 // line below a longer one), the line is padded with spaces so the block
 // still renders at the requested column rather than collapsing onto EOL.
-func overlayCursor(line string, col int) string {
+func overlayCursor(t Theme, line string, col int) string {
 	if col < 0 {
 		return line
 	}
+	cursorStyle := lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.Accent)
 	w := ansi.StringWidth(line)
 	if col >= w {
-		// Past EOL: pad with spaces, then place the block. The padding
-		// fills any gap; the cell itself is one space rendered reversed.
 		pad := strings.Repeat(" ", col-w)
-		return line + pad + lipgloss.NewStyle().Reverse(true).Render(" ")
+		return line + pad + cursorStyle.Render(" ")
 	}
 	pre := ansi.Cut(line, 0, col)
 	cell := ansi.Cut(line, col, col+1)
@@ -195,7 +194,7 @@ func overlayCursor(line string, col int) string {
 	if cell == "" {
 		cell = " "
 	}
-	return pre + lipgloss.NewStyle().Reverse(true).Render(cell) + post
+	return pre + cursorStyle.Render(cell) + post
 }
 
 func renderViewerLine(t Theme, line string, lineIdx int, query string, matches [][2]int, matchCursor int, syntaxHighlight bool) string {
