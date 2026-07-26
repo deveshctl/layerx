@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`.
 - All `layerx init` starter templates include a commented `theme:` block
   showing available values and precedence order.
+- `--theme` flag now tab-completes all valid theme names in bash, zsh, fish,
+  and PowerShell.
 - `--theme` flag help and config error hints now document theme precedence
   (`--theme` flag > `theme:` in file > built-in default).
 
