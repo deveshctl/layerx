@@ -2,9 +2,9 @@
 
 # Configuration Reference
 
-`.layerx.yaml` configures CI thresholds and path-scoped rules for `layerx ci`.
-It is read from the current working directory by default. The TUI does not
-consume any of these fields today; they affect CI evaluation only.
+`.layerx.yaml` configures CI thresholds, path-scoped rules for `layerx ci`,
+and the TUI colour theme. It is read from the current working directory by
+default (or the path passed to `--config`).
 
 ---
 
@@ -34,6 +34,11 @@ A complete `.layerx.yaml` exercising every implemented field:
 ```yaml
 # .layerx.yaml — schema version 1
 version: 1
+
+# TUI colour theme. Precedence: --theme flag > this field > built-in default (tokyo-night).
+# Valid values: tokyo-night, catppuccin-mocha, kanagawa, gruvbox-dark,
+#               rose-pine, dracula, oxocarbon, cyberdream
+theme: tokyo-night
 
 # Global efficiency thresholds. Set any value to 0 to disable that rule.
 rules:
@@ -99,6 +104,7 @@ is parsed as either a YAML mapping or a YAML sequence, never both.
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `version` | int | `1` | optional | Schema version. Accepts `0` (treated as `1`) or `1`. Anything else fails validation. |
+| `theme` | string | `""` (uses `tokyo-night`) | optional | TUI colour theme. See [docs/theming.md](theming.md) for all values and precedence. |
 | `rules` | mapping | populated from defaults | optional | Global CI thresholds. See below. |
 | `path-rules` | mapping or sequence | empty | optional | Path-scoped rules. Two equivalent forms documented below. |
 | `keybindings` | mapping | empty | optional | **Reserved.** The strict decoder accepts the key, but no code reads it today. Will be wired up in a future milestone. |
