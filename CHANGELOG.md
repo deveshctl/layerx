@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Syntax highlighting now uses the correct chroma style for each theme; previously
   the style from the first file opened was locked in for the entire session, so
   `gruvbox-dark` and `dracula` users always saw tokyo-night syntax colours.
+- File viewer cursor now uses theme accent and foreground colours instead of
+  terminal reverse-video, so it is consistent across all themes.
 - A type error on the `theme:` key in `.layerx.yaml` (e.g. `theme: 123`) now
   shows the targeted theme error hint instead of a generic config message.
 
