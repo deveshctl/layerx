@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.layerx.yaml`: `tokyo-night` (default), `catppuccin-mocha`, `kanagawa`,
   `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`.
 
+### Fixed
+- `theme:` in `.layerx.yaml` was silently ignored due to `rawConfig` missing
+  the field; it now loads and validates correctly.
+- `--theme` flag with an unrecognised value now exits with a clear error
+  instead of silently falling back to `tokyo-night`.
+
 ## [v1.5.3] - 2026-07-16
 
 Configurable `.layerx.yaml` discovery, engine config env-var support, richer

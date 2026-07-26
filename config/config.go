@@ -49,6 +49,7 @@ type Config struct {
 // Used only inside LoadFrom — never exposed.
 type rawConfig struct {
 	Version     int               `yaml:"version,omitempty"`
+	Theme       string            `yaml:"theme,omitempty"`
 	Rules       ast.Node          `yaml:"rules,omitempty"`
 	PathRules   ast.Node          `yaml:"path-rules,omitempty"`
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
@@ -150,6 +151,7 @@ func LoadFrom(path string) (*Config, error) {
 
 	cfg := &Config{
 		Version:     raw.Version,
+		Theme:       raw.Theme,
 		Rules:       rules,
 		PathRules:   specs,
 		Keybindings: raw.Keybindings,

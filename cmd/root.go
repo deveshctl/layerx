@@ -125,13 +125,28 @@ func (e *engineValue) Set(s string) error {
 	}
 }
 
+var validThemes = map[string]bool{
+	"catppuccin-mocha": true,
+	"tokyo-night":      true,
+	"kanagawa":         true,
+	"gruvbox-dark":     true,
+	"rose-pine":        true,
+	"dracula":          true,
+	"oxocarbon":        true,
+	"cyberdream":       true,
+}
+
 // resolveTheme picks the effective theme name: --theme flag wins over the
 // config file value; empty string means use the built-in default.
-func resolveTheme(fromConfig, fromFlag string) string {
+// Returns an error if the flag value is not a recognised theme name.
+func resolveTheme(fromConfig, fromFlag string) (string, error) {
 	if fromFlag != "" {
-		return fromFlag
+		if !validThemes[fromFlag] {
+			return "", fmt.Errorf("unknown theme %q; valid themes: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream", fromFlag)
+		}
+		return fromFlag, nil
 	}
-	return fromConfig
+	return fromConfig, nil
 }
 
 func SetVersionInfo(v, c, d string) {
@@ -237,12 +252,17 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	theme, err := resolveTheme(cfg.Theme, flagTheme)
+	if err != nil {
+		return err
+	}
+
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCache,
 		Platform: activePlatformDisplay(),
-		Theme:    resolveTheme(cfg.Theme, flagTheme),
+		Theme:    theme,
 	})
 }
 

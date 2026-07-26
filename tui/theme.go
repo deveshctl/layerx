@@ -289,12 +289,6 @@ func Oxocarbon() Theme {
 	}
 }
 
-// Everforest is a calm, muted green forest theme — warm dark base with
-// soft greens, yellows, and reds that are easy on the eyes.
-// Nord is an arctic, blue-grey theme — cool polar night base with frost
-// blue accents and aurora green, yellow, and red for diff states.
-// OneDark is the classic Atom One Dark theme — balanced warm/cool dark
-// base with blue, cyan, green, and orange accents.
 // Cyberdream is a high-contrast neon synthwave theme — near-black base
 // with electric cyan, magenta, and lime accents.
 func Cyberdream() Theme {
