@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gruvbox-dark` and `dracula` users always saw tokyo-night syntax colours.
 - File viewer cursor now uses theme accent and foreground colours instead of
   terminal reverse-video, so it is consistent across all themes.
+- `layerx --config PATH build` now honours the `--config` flag; previously it
+  was silently ignored and the default config was used instead.
 - A type error on the `theme:` key in `.layerx.yaml` (e.g. `theme: 123`) now
   shows the targeted theme error hint instead of a generic config message.
 
