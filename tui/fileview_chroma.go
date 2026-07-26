@@ -12,19 +12,21 @@ import (
 )
 
 var (
-	chromaInit  sync.Once
-	chromaFmt   chroma.Formatter
-	chromaStyle *chroma.Style
+	chromaFmtOnce sync.Once
+	chromaFmt     chroma.Formatter
 )
 
-func initChroma(styleName string) {
-	chromaInit.Do(func() {
+// chromaStyleFor resolves a chroma style by name, falling back to "monokai"
+// when the name is not registered. The formatter is initialized once (it is
+// stateless); the style is resolved per-call so theme changes are honoured.
+func chromaStyleFor(styleName string) *chroma.Style {
+	chromaFmtOnce.Do(func() {
 		chromaFmt = formatters.Get("terminal256")
-		chromaStyle = chromastyles.Get(styleName)
-		if chromaStyle == nil {
-			chromaStyle = chromastyles.Get("monokai")
-		}
 	})
+	if s := chromastyles.Get(styleName); s != nil {
+		return s
+	}
+	return chromastyles.Get("monokai")
 }
 
 // highlightFileCmd wraps highlightFileLines in a tea.Cmd so the bubbletea
@@ -46,8 +48,8 @@ func highlightFileCmd(requestID uint64, path string, data []byte, chromaStyleNam
 }
 
 func highlightFileLines(path string, data []byte, styleName string) []string {
-	initChroma(styleName)
-	if chromaFmt == nil || chromaStyle == nil {
+	style := chromaStyleFor(styleName)
+	if chromaFmt == nil || style == nil {
 		return nil
 	}
 
@@ -68,7 +70,7 @@ func highlightFileLines(path string, data []byte, styleName string) []string {
 	}
 
 	var buf strings.Builder
-	if err := chromaFmt.Format(&buf, chromaStyle, it); err != nil {
+	if err := chromaFmt.Format(&buf, style, it); err != nil {
 		return nil
 	}
 

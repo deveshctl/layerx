@@ -150,10 +150,21 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	cfg, err := loadConfig(cmd)
+	if err != nil {
+		return err
+	}
+	theme, err := resolveTheme(cfg.Theme, flagTheme)
+	if err != nil {
+		return err
+	}
+
 	return tui.Run(tui.Config{
 		ImageRef: imageRef,
 		Resolver: resolver,
 		NoCache:  noCacheRequested(),
+		Theme:    theme,
 	})
 }
 

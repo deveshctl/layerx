@@ -308,6 +308,8 @@ func inferParseSection(err error) string {
 		return SectionPathRules
 	case strings.Contains(msg, "keybindings"):
 		return SectionKeybindings
+	case strings.Contains(msg, "theme"):
+		return SectionTheme
 	case strings.Contains(msg, "rules"):
 		return SectionRules
 	case strings.Contains(msg, "version"):
