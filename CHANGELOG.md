@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was silently ignored and the default config was used instead.
 - A type error on the `theme:` key in `.layerx.yaml` (e.g. `theme: 123`) now
   shows the targeted theme error hint instead of a generic config message.
+- `catppuccin-mocha`, `kanagawa`, and `rose-pine` themes now use their native
+  chroma syntax-highlighting styles instead of `monokai`; file viewer syntax
+  colours now match the active theme palette.
+- `layerx init` now prints a confirmation after writing `.layerx.yaml`
+  (e.g. `wrote .layerx.yaml (flavour: node). Edit it to customise thresholds.`).
 
 ## [v1.5.3] - 2026-07-16
 

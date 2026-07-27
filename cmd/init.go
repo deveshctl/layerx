@@ -67,7 +67,11 @@ func runInitCmd(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("unknown flavour %q (want %s)", flavour, flavourList())
 	}
 
-	return writeStarterConfig(initConfigPath, data, flagInitForce)
+	if err := writeStarterConfig(initConfigPath, data, flagInitForce); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (flavour: %s). Edit it to customise thresholds.\n", initConfigPath, flavour)
+	return nil
 }
 
 // resolveFlavour decides which flavour to use based on the flag, TTY state,
