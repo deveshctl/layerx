@@ -239,6 +239,18 @@ func extractLayerxFlags(args []string) ([]string, error) {
 			flagJSON = v
 			continue
 		}
+		if a == "--config" {
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--config requires a value")
+			}
+			flagConfig = args[i+1] //nolint:gosec // bound-checked above
+			i++
+			continue
+		}
+		if v, ok := strings.CutPrefix(a, "--config="); ok {
+			flagConfig = v
+			continue
+		}
 		out = append(out, a)
 	}
 	return out, nil
