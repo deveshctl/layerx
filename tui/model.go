@@ -1907,7 +1907,11 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	layers := m.layers()
 	var right string
 	if m.statusMsg != "" {
-		msgStyle := lipgloss.NewStyle().Foreground(m.theme.Modified).Background(m.theme.StatusBg).Bold(true)
+		fg := m.theme.Added
+		if strings.HasPrefix(m.statusMsg, "Error:") {
+			fg = m.theme.Removed
+		}
+		msgStyle := lipgloss.NewStyle().Foreground(fg).Background(m.theme.StatusBg).Bold(true)
 		right = msgStyle.Render(m.statusMsg) + " "
 	} else if m.copyConfirm {
 		copiedStyle := lipgloss.NewStyle().Foreground(m.theme.Added).Background(m.theme.StatusBg).Bold(true)

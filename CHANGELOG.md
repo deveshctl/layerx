@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`--theme` flag > `theme:` in file > built-in default).
 
 ### Fixed
+- Long paths in the wasted-files overlay are now mid-truncated (`/usr/local/…/numpy-1.24.dist`)
+  instead of right-truncated, so the filename is always visible.
+- Transient status-bar messages (`Saved:`, `Jumped →`, `Extracting…`) now use the
+  same green success colour as `Copied!`; error messages (`Error:`) use red. Previously
+  success messages used the yellow modified colour inconsistently.
 - `theme:` in `.layerx.yaml` was silently ignored due to `rawConfig` missing
   the field; it now loads and validates correctly.
 - `--theme` flag with an unrecognised value now exits with a clear error
