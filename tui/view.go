@@ -7,11 +7,14 @@ import (
 )
 
 // finalizeView applies standard TUI options: alternate screen, mouse wheel
-// capture, and the theme background color.
+// capture, and the theme background color. bg is skipped when nil (transparent
+// background mode — the terminal's own background shows through).
 func finalizeView(v tea.View, bg color.Color) tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
-	v.BackgroundColor = bg
+	if bg != nil {
+		v.BackgroundColor = bg
+	}
 	return v
 }
 
@@ -20,6 +23,8 @@ func finalizeView(v tea.View, bg color.Color) tea.View {
 func finalizeViewNoMouse(v tea.View, bg color.Color) tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeNone
-	v.BackgroundColor = bg
+	if bg != nil {
+		v.BackgroundColor = bg
+	}
 	return v
 }

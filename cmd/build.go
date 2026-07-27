@@ -161,10 +161,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	return tui.Run(tui.Config{
-		ImageRef: imageRef,
-		Resolver: resolver,
-		NoCache:  noCacheRequested(),
-		Theme:    theme,
+		ImageRef:      imageRef,
+		Resolver:      resolver,
+		NoCache:       noCacheRequested(),
+		Theme:         theme,
+		TransparentBg: cfg.TransparentBackground,
 	})
 }
 
