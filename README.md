@@ -488,6 +488,9 @@ layerx --theme gruvbox-dark ./build/app.tar
 ```yaml
 # .layerx.yaml
 theme: rose-pine
+
+# Strip all background colours so your terminal's own background shows through.
+# transparent_background: true
 ```
 
 **Precedence:** `--theme` flag > `theme:` in `.layerx.yaml` > built-in default (`tokyo-night`).

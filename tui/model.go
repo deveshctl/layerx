@@ -858,15 +858,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			f := files[cur]
 			if f.IsDir {
-				m.setStatus("Cannot extract directory")
+				m.setStatus("Error: cannot extract directory")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if f.DiffType == image.Removed {
-				m.setStatus("File removed in this layer")
+				m.setStatus("Error: file removed in this layer")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if m.extractor == nil {
-				m.setStatus("Extractor unavailable")
+				m.setStatus("Error: extractor unavailable")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			m.setStatus("Extracting...")

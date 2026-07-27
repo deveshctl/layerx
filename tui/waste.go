@@ -444,6 +444,11 @@ func truncateMid(s string, width int) string {
 	if lipgloss.Width(s) <= width {
 		return s
 	}
+	// width <= 2: use bare truncation with no ellipsis, matching ansi.Truncate
+	// semantics. truncateLeft emits "…"+char at width==2; the difference is
+	// intentional — mid-truncation needs both ends and can't spare the cell.
+	// In practice pathW is bounded to minPath (12) before this is called, so
+	// this branch is a safety net rather than a production path.
 	if width <= 2 {
 		return ansi.Truncate(s, width, "")
 	}
