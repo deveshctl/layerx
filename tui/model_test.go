@@ -1340,7 +1340,7 @@ func TestEnterOnRemovedFileShowsStatusMsg(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
 	assert.Equal(t, viewNone, um.viewState)
-	assert.Equal(t, "File removed in this layer", um.statusMsg)
+	assert.Equal(t, "Error: file removed in this layer", um.statusMsg)
 }
 
 func TestEscClosesFileViewer(t *testing.T) {
@@ -1515,7 +1515,7 @@ func TestExtractKeyOnDirectoryShowsStatus(t *testing.T) {
 
 	updated, _ := m.Update(keyPress('x'))
 	um := updated.(model)
-	assert.Equal(t, "Cannot extract directory", um.statusMsg)
+	assert.Equal(t, "Error: cannot extract directory", um.statusMsg)
 }
 
 func TestExtractKeyOnFileTriggersExtraction(t *testing.T) {
@@ -1571,7 +1571,7 @@ func TestExtractKeyOnRemovedFile(t *testing.T) {
 
 	updated, _ := m.Update(keyPress('x'))
 	um := updated.(model)
-	assert.Equal(t, "File removed in this layer", um.statusMsg)
+	assert.Equal(t, "Error: file removed in this layer", um.statusMsg)
 }
 
 func TestFileSaveMsgSuccess(t *testing.T) {
