@@ -89,7 +89,7 @@ func CatppuccinMocha() Theme {
 
 		MainBg: lipgloss.Color("#1E1E2E"),
 
-		ChromaStyle: "monokai",
+		ChromaStyle: "catppuccin-mocha",
 	}
 }
 
@@ -129,7 +129,7 @@ func Kanagawa() Theme {
 
 		MainBg: lipgloss.Color("#1F1F28"), // sumi ink
 
-		ChromaStyle: "monokai",
+		ChromaStyle: "kanagawa-wave",
 	}
 }
 
@@ -207,7 +207,7 @@ func RosePine() Theme {
 
 		MainBg: lipgloss.Color("#191724"), // base
 
-		ChromaStyle: "monokai",
+		ChromaStyle: "rose-pine",
 	}
 }
 
