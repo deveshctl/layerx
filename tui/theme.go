@@ -53,6 +53,12 @@ type Theme struct {
 
 	// Chroma syntax highlight theme name (passed to chroma styles.Get)
 	ChromaStyle string
+
+	// GradientStart and GradientEnd define the colour sweep applied to the
+	// image ref in the header bar. Blue→purple is the default direction;
+	// each theme tunes the exact stops to complement its palette.
+	GradientStart color.Color
+	GradientEnd   color.Color
 }
 
 // CatppuccinMocha is the original built-in theme.
@@ -89,7 +95,9 @@ func CatppuccinMocha() Theme {
 
 		MainBg: lipgloss.Color("#1E1E2E"),
 
-		ChromaStyle: "catppuccin-mocha",
+		ChromaStyle:   "catppuccin-mocha",
+		GradientStart: lipgloss.Color("#89B4FA"),
+		GradientEnd:   lipgloss.Color("#CBA6F7"),
 	}
 }
 
@@ -129,7 +137,9 @@ func Kanagawa() Theme {
 
 		MainBg: lipgloss.Color("#1F1F28"), // sumi ink
 
-		ChromaStyle: "kanagawa-wave",
+		ChromaStyle:   "kanagawa-wave",
+		GradientStart: lipgloss.Color("#7E9CD8"),
+		GradientEnd:   lipgloss.Color("#938AA9"),
 	}
 }
 
@@ -168,7 +178,9 @@ func GruvboxDark() Theme {
 
 		MainBg: lipgloss.Color("#282828"),
 
-		ChromaStyle: "gruvbox",
+		ChromaStyle:   "gruvbox",
+		GradientStart: lipgloss.Color("#83A598"),
+		GradientEnd:   lipgloss.Color("#D3869B"),
 	}
 }
 
@@ -207,7 +219,9 @@ func RosePine() Theme {
 
 		MainBg: lipgloss.Color("#191724"), // base
 
-		ChromaStyle: "rose-pine",
+		ChromaStyle:   "rose-pine",
+		GradientStart: lipgloss.Color("#9CCFD8"),
+		GradientEnd:   lipgloss.Color("#C4A7E7"),
 	}
 }
 
@@ -246,7 +260,9 @@ func Dracula() Theme {
 
 		MainBg: lipgloss.Color("#282A36"),
 
-		ChromaStyle: "dracula",
+		ChromaStyle:   "dracula",
+		GradientStart: lipgloss.Color("#8BE9FD"),
+		GradientEnd:   lipgloss.Color("#BD93F9"),
 	}
 }
 
@@ -285,7 +301,9 @@ func Oxocarbon() Theme {
 
 		MainBg: lipgloss.Color("#1E1E1E"),
 
-		ChromaStyle: "monokai",
+		ChromaStyle:   "monokai",
+		GradientStart: lipgloss.Color("#78A9FF"),
+		GradientEnd:   lipgloss.Color("#BE95FF"),
 	}
 }
 
@@ -324,7 +342,9 @@ func Cyberdream() Theme {
 
 		MainBg: lipgloss.Color("#16161F"),
 
-		ChromaStyle: "monokai",
+		ChromaStyle:   "monokai",
+		GradientStart: lipgloss.Color("#00BFFF"),
+		GradientEnd:   lipgloss.Color("#9D79FF"),
 	}
 }
 
@@ -365,6 +385,8 @@ func TokyoNight() Theme {
 		// Base surface — slightly above pure black, ties the whole UI together
 		MainBg: lipgloss.Color("#1A1B26"),
 
-		ChromaStyle: "tokyonight-dark",
+		ChromaStyle:   "tokyonight-dark",
+		GradientStart: lipgloss.Color("#7AA2F7"),
+		GradientEnd:   lipgloss.Color("#BB9AF7"),
 	}
 }
