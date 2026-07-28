@@ -356,7 +356,7 @@ func formatWasteRow(t Theme, r wasteRow, selected bool, innerWidth int) string {
 	pathW := innerWidth - fixedW - gap - 2
 	pathW = max(pathW, minPath)
 
-	path := truncateLeft(r.Path, pathW)
+	path := truncateMid(r.Path, pathW)
 	pathPad := max(pathW-lipgloss.Width(path), 0)
 
 	gutter := "  "
@@ -432,4 +432,44 @@ func truncateLeft(s string, width int) string {
 		startIdx = i
 	}
 	return "…" + string(runes[startIdx:])
+}
+
+// truncateMid keeps the leading path prefix and the filename, replacing the
+// middle with "…" so the most useful parts (root context + filename) stay
+// visible. Falls back to truncateLeft when the filename alone exceeds width.
+func truncateMid(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	// width <= 2: use bare truncation with no ellipsis, matching ansi.Truncate
+	// semantics. truncateLeft emits "…"+char at width==2; the difference is
+	// intentional — mid-truncation needs both ends and can't spare the cell.
+	// In practice pathW is bounded to minPath (12) before this is called, so
+	// this branch is a safety net rather than a production path.
+	if width <= 2 {
+		return ansi.Truncate(s, width, "")
+	}
+
+	// Split on the last path separator to isolate the filename.
+	sep := strings.LastIndexByte(s, '/')
+	if sep < 0 {
+		return truncateLeft(s, width)
+	}
+	filename := s[sep+1:]
+	prefix := s[:sep+1]
+
+	filenameW := lipgloss.Width(filename)
+	// "…" + filename needs to fit; if not, fall back to left-truncation.
+	if filenameW+1 >= width {
+		return truncateLeft(s, width)
+	}
+
+	// Budget remaining columns for as much of the prefix as will fit.
+	// Reserve 1 for "…" between prefix and filename.
+	prefixBudget := width - filenameW - 1
+	truncatedPrefix := ansi.Truncate(prefix, prefixBudget, "")
+	return truncatedPrefix + "…" + filename
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -472,6 +473,84 @@ func TestTruncateLeftCJKHonoursDisplayWidth(t *testing.T) {
 			assert.LessOrEqual(t, lipgloss.Width(got), tc.width,
 				"truncateLeft(%q, %d) -> %q overflowed display width to %d cells",
 				tc.input, tc.width, got, lipgloss.Width(got))
+		})
+	}
+}
+
+func TestTruncateMid(t *testing.T) {
+	cases := []struct {
+		name            string
+		input           string
+		width           int
+		wantFilename    string // non-empty: assert this suffix is preserved
+		wantFitsWidth   bool
+		wantContainsMid bool // true: result must contain "…" in the middle
+	}{
+		{
+			name:            "fits without truncation",
+			input:           "/usr/bin/sh",
+			width:           20,
+			wantFitsWidth:   true,
+			wantContainsMid: false,
+		},
+		{
+			name:            "normal ascii mid-truncation preserves filename",
+			input:           "/usr/local/lib/python3.11/site-packages/numpy-1.24.dist",
+			width:           30,
+			wantFilename:    "numpy-1.24.dist",
+			wantFitsWidth:   true,
+			wantContainsMid: true,
+		},
+		{
+			name:            "no path separator falls back to truncateLeft",
+			input:           "verylongfilenamewithnoseparatoratall",
+			width:           10,
+			wantFitsWidth:   true,
+			wantContainsMid: false,
+		},
+		{
+			name:            "filename alone fills width falls back to truncateLeft",
+			input:           "/a/verylongfilename.txt",
+			width:           10,
+			wantFitsWidth:   true,
+			wantContainsMid: false,
+		},
+		{
+			name:            "cjk filename preserves display width",
+			input:           "/usr/local/share/ファイル名.bin",
+			width:           20,
+			wantFitsWidth:   true,
+		},
+		{
+			name:            "cjk segment in prefix preserves display width",
+			input:           "/データ/モデル/ファイル/large.bin",
+			width:           18,
+			wantFilename:    "large.bin",
+			wantFitsWidth:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateMid(tc.input, tc.width)
+			if tc.wantFitsWidth {
+				assert.LessOrEqual(t, lipgloss.Width(got), tc.width,
+					"truncateMid(%q, %d) -> %q overflowed display width to %d cells",
+					tc.input, tc.width, got, lipgloss.Width(got))
+			}
+			if tc.wantFilename != "" {
+				assert.True(t, strings.HasSuffix(got, tc.wantFilename),
+					"truncateMid(%q, %d) -> %q: expected filename suffix %q to be preserved",
+					tc.input, tc.width, got, tc.wantFilename)
+			}
+			if tc.wantContainsMid {
+				assert.Contains(t, got, "…",
+					"truncateMid(%q, %d) -> %q: expected mid-truncation ellipsis",
+					tc.input, tc.width, got)
+				// ellipsis must not be at the very start (that would be left-truncation)
+				assert.False(t, strings.HasPrefix(got, "…"),
+					"truncateMid(%q, %d) -> %q: ellipsis must be in the middle, not at start",
+					tc.input, tc.width, got)
+			}
 		})
 	}
 }

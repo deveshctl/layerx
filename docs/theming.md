@@ -166,3 +166,28 @@ share the same surface colour as the rest of the UI — no mismatch with the
 terminal's own background setting. If your terminal overrides background colours
 and the result looks wrong, check whether it has a "force background" option
 and disable it for layerx.
+
+### Transparent background mode
+
+If you have a styled terminal (background image, gradient, blur, or custom
+colour), you can strip all background fills from the TUI by setting
+`transparent_background: true` in `.layerx.yaml`:
+
+```yaml
+# .layerx.yaml
+theme: dracula
+transparent_background: true
+```
+
+With this set, every panel, header, and status bar renders foreground content
+only — the terminal's own background shows through everywhere. The theme still
+governs all text and border colours; only background fills are suppressed.
+
+**Notes:**
+- Default is `false` — themed background colours apply normally.
+- On terminals with a very light custom background, some foreground text may
+  lose contrast. If readability suffers, use a lighter theme (e.g.
+  `catppuccin-mocha` has higher-contrast foreground colours than `oxocarbon`
+  on a white background).
+- `transparent_background` is independent of `--theme` and `theme:` — you can
+  combine it with any theme.

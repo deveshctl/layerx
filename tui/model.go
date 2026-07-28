@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,9 @@ type Config struct {
 	// built-in default (tokyo-night). Valid values match the names accepted
 	// by the theme: key in .layerx.yaml.
 	Theme string
+	// TransparentBg strips all background colours from the TUI so the
+	// terminal's own background shows through. Opt-in; default false.
+	TransparentBg bool
 }
 
 type focus int
@@ -233,6 +237,7 @@ type model struct {
 	sizeMode      sizeColMode
 	noCache       bool
 	theme         Theme
+	transparentBg bool
 
 	fetchCtx    context.Context
 	fetchCancel context.CancelFunc
@@ -277,9 +282,19 @@ func NewModel(cfg Config) model {
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
 		theme:       themeFor(cfg.Theme),
+		transparentBg: cfg.TransparentBg,
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
+}
+
+// viewBg returns the theme background colour, or nil when transparent mode is
+// active. Passed to finalizeView so the terminal background shows through.
+func (m model) viewBg() color.Color {
+	if m.transparentBg {
+		return nil
+	}
+	return m.theme.MainBg
 }
 
 func (m model) Init() tea.Cmd {
@@ -843,15 +858,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			f := files[cur]
 			if f.IsDir {
-				m.setStatus("Cannot extract directory")
+				m.setStatus("Error: cannot extract directory")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if f.DiffType == image.Removed {
-				m.setStatus("File removed in this layer")
+				m.setStatus("Error: file removed in this layer")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if m.extractor == nil {
-				m.setStatus("Extractor unavailable")
+				m.setStatus("Error: extractor unavailable")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			m.setStatus("Extracting...")
@@ -1069,11 +1084,11 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	if f.DiffType == image.Removed {
-		m.setStatus("File removed in this layer")
+		m.setStatus("Error: file removed in this layer")
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	if m.extractor == nil {
-		m.setStatus("Extractor unavailable")
+		m.setStatus("Error: extractor unavailable")
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	m.viewState = viewLoading
@@ -1581,7 +1596,7 @@ func (m model) View() tea.View {
 
 func (m model) viewLoading() tea.View {
 	if m.width > 0 && m.width < 10 {
-		return finalizeView(tea.NewView("loading…"), m.theme.MainBg)
+		return finalizeView(tea.NewView("loading…"), m.viewBg())
 	}
 	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
 
@@ -1670,7 +1685,7 @@ func (m model) viewLoading() tea.View {
 	body := strings.Join(lines, "\n")
 	panel := renderPanel(m.theme, body, "Loading", true, boxWidth, boxHeight, false, false)
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
-	return finalizeView(tea.NewView(content), m.theme.MainBg)
+	return finalizeView(tea.NewView(content), m.viewBg())
 }
 
 // renderRightPanel paints the file-tree side of the screen. In single-pane
@@ -1722,13 +1737,13 @@ func (m model) viewError() tea.View {
 	hintStyle := lipgloss.NewStyle().Foreground(m.theme.StatusDim)
 	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + hintStyle.Render("Press q or Esc to exit.")
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
-	return finalizeView(tea.NewView(content), m.theme.MainBg)
+	return finalizeView(tea.NewView(content), m.viewBg())
 }
 
 func (m model) viewReady() tea.View {
 	if m.width < 50 {
 		return finalizeView(tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Terminal too narrow\n(need 50+ cols)")), m.theme.MainBg)
+			"Terminal too narrow\n(need 50+ cols)")), m.viewBg())
 	}
 
 	// chromeRows: header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1)
@@ -1736,7 +1751,7 @@ func (m model) viewReady() tea.View {
 	const minPanelRows = 3
 	if m.height < chromeRows+minPanelRows {
 		return finalizeView(tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			"Terminal too short\n(need 11+ rows)")), m.theme.MainBg)
+			"Terminal too short\n(need 11+ rows)")), m.viewBg())
 	}
 
 	leftWidth := m.leftPanelWidth()
@@ -1795,9 +1810,9 @@ func (m model) viewReady() tea.View {
 	// Release mouse capture when the file viewer is open so the terminal
 	// handles mouse events natively, enabling text selection by click+drag.
 	if m.viewState != viewNone {
-		return finalizeViewNoMouse(tea.NewView(content), m.theme.MainBg)
+		return finalizeViewNoMouse(tea.NewView(content), m.viewBg())
 	}
-	return finalizeView(tea.NewView(content), m.theme.MainBg)
+	return finalizeView(tea.NewView(content), m.viewBg())
 }
 
 func (m model) leftPanelWidth() int {
@@ -1907,7 +1922,11 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	layers := m.layers()
 	var right string
 	if m.statusMsg != "" {
-		msgStyle := lipgloss.NewStyle().Foreground(m.theme.Modified).Background(m.theme.StatusBg).Bold(true)
+		fg := m.theme.Added
+		if strings.HasPrefix(m.statusMsg, "Error:") {
+			fg = m.theme.Removed
+		}
+		msgStyle := lipgloss.NewStyle().Foreground(fg).Background(m.theme.StatusBg).Bold(true)
 		right = msgStyle.Render(m.statusMsg) + " "
 	} else if m.copyConfirm {
 		copiedStyle := lipgloss.NewStyle().Foreground(m.theme.Added).Background(m.theme.StatusBg).Bold(true)

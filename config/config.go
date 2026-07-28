@@ -29,6 +29,11 @@ type Config struct {
 	// cyberdream. Empty string means the built-in default (tokyo-night).
 	Theme string `yaml:"theme,omitempty"`
 
+	// TransparentBackground strips all background colours from the TUI so
+	// the terminal's own background (image, gradient, colour) shows through.
+	// Opt-in only; default false preserves existing behaviour.
+	TransparentBackground bool `yaml:"transparent_background,omitempty"`
+
 	Rules RulesConfig `yaml:"rules"`
 
 	// PathRules is populated by the loader's normalize() pass. It is NOT
@@ -48,11 +53,12 @@ type Config struct {
 // so the loader can reject null/malformed shapes before they zero defaults.
 // Used only inside LoadFrom — never exposed.
 type rawConfig struct {
-	Version     int               `yaml:"version,omitempty"`
-	Theme       string            `yaml:"theme,omitempty"`
-	Rules       ast.Node          `yaml:"rules,omitempty"`
-	PathRules   ast.Node          `yaml:"path-rules,omitempty"`
-	Keybindings map[string]string `yaml:"keybindings,omitempty"`
+	Version               int               `yaml:"version,omitempty"`
+	Theme                 string            `yaml:"theme,omitempty"`
+	TransparentBackground bool              `yaml:"transparent_background,omitempty"`
+	Rules                 ast.Node          `yaml:"rules,omitempty"`
+	PathRules             ast.Node          `yaml:"path-rules,omitempty"`
+	Keybindings           map[string]string `yaml:"keybindings,omitempty"`
 }
 
 type RulesConfig struct {
@@ -150,11 +156,12 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Version:     raw.Version,
-		Theme:       raw.Theme,
-		Rules:       rules,
-		PathRules:   specs,
-		Keybindings: raw.Keybindings,
+		Version:               raw.Version,
+		Theme:                 raw.Theme,
+		TransparentBackground: raw.TransparentBackground,
+		Rules:                 rules,
+		PathRules:             specs,
+		Keybindings:           raw.Keybindings,
 	}
 
 	// Restore the documented "absent version: defaults to 1" contract

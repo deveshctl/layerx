@@ -267,11 +267,12 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	}
 
 	return tui.Run(tui.Config{
-		ImageRef: imageRef,
-		Resolver: resolver,
-		NoCache:  noCache,
-		Platform: activePlatformDisplay(),
-		Theme:    theme,
+		ImageRef:      imageRef,
+		Resolver:      resolver,
+		NoCache:       noCache,
+		Platform:      activePlatformDisplay(),
+		Theme:         theme,
+		TransparentBg: cfg.TransparentBackground,
 	})
 }
 
