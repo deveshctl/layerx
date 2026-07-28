@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -593,9 +594,12 @@ func TestViewErrorWrapsLongMessage(t *testing.T) {
 func TestViewReadyContainsBrandAndImageRef(t *testing.T) {
 	m := setupModel()
 	v := m.View()
-	content := viewContent(v)
-	assert.Contains(t, content, "layerx")
-	assert.Contains(t, content, "test:latest")
+	// Strip ANSI sequences before asserting — the image ref is gradient-rendered
+	// with per-character colour codes so "test:latest" won't appear as a plain
+	// substring in the raw content.
+	stripped := ansi.Strip(viewContent(v))
+	assert.Contains(t, stripped, "layerx")
+	assert.Contains(t, stripped, "test:latest")
 }
 
 func TestViewReadyHasAltScreen(t *testing.T) {

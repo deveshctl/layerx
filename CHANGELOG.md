@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transparent_background: true` in `.layerx.yaml` strips all background colours
   from the TUI so the terminal's own background (image, gradient, colour) shows
   through. Opt-in only; default behaviour is unchanged.
+- The image reference in the header bar now renders with a per-theme colour
+  gradient (e.g. blue → purple on Tokyo Night, cyan → purple on Dracula) so
+  it is visually distinct from flat panel content.
+- A section divider (`├────┤`) now separates the file-tree column header from
+  the file entries, creating clear visual hierarchy within the panel.
 
 ### Fixed
 - Long paths in the wasted-files overlay are now mid-truncated (`/usr/local/…/numpy-1.24.dist`)

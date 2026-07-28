@@ -1836,7 +1836,8 @@ func (m model) renderHeader() string {
 	glyph := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("◆")
 	brand := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true).Render(" layerx")
 	sep := lipgloss.NewStyle().Foreground(m.theme.HeaderSep).Background(m.theme.StatusBg).Render(" │ ")
-	imageName := lipgloss.NewStyle().Foreground(m.theme.Selected).Background(m.theme.StatusBg).Render(m.imageRef)
+	imageName := renderGradient(m.imageRef, m.theme.GradientStart, m.theme.GradientEnd)
+	imageName = lipgloss.NewStyle().Background(m.theme.StatusBg).Render(imageName)
 	left := glyph + brand + sep + imageName
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant

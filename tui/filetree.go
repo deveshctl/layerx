@@ -85,6 +85,12 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 	if in.showHeader {
 		sb.WriteString(renderTreeHeader(in.theme, in.contentWidth))
 		sb.WriteString("\n")
+		sb.WriteString(renderDivider(in.theme, in.contentWidth))
+		sb.WriteString("\n")
+		contentHeight--
+		if contentHeight < 0 {
+			contentHeight = 0
+		}
 	}
 
 	if len(in.files) == 0 {
