@@ -159,7 +159,7 @@ sudo rpm -i layerx_linux_arm64.rpm
 
 ### Direct download
 
-Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). Replace `latest` with a specific tag (e.g. `v1.5.3`) in any URL above.
+Prebuilt binaries for Linux, macOS, and Windows (amd64 + arm64) on the [Releases page](https://github.com/deveshctl/layerx/releases). Replace `latest` with a specific tag (e.g. `v1.6.0`) in any URL above.
 
 ### Container image (Docker, Podman, any OCI runtime)
 
@@ -167,7 +167,7 @@ Every tagged release also publishes a multi-arch image (linux/amd64 + linux/arm6
 
 ```
 ghcr.io/deveshctl/layerx:latest
-ghcr.io/deveshctl/layerx:v1.5.3     # pin a specific version
+ghcr.io/deveshctl/layerx:v1.6.0     # pin a specific version
 ```
 
 LayerX is a client to a running container engine, so the image needs the host engine's socket bind-mounted in. It cannot inspect live images without one — but archive mode (bind-mount a `docker save` / OCI tar) works without any socket at all.
