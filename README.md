@@ -489,11 +489,14 @@ layerx --theme gruvbox-dark ./build/app.tar
 # .layerx.yaml
 theme: rose-pine
 
-# Strip all background colours so your terminal's own background shows through.
+# Optional: strip all background colours so your terminal's own background
+# (image, gradient, colour) shows through all panels. Default: false.
 # transparent_background: true
 ```
 
 **Precedence:** `--theme` flag > `theme:` in `.layerx.yaml` > built-in default (`tokyo-night`).
+
+**Transparent background:** Set `transparent_background: true` in `.layerx.yaml` to remove all background fills from the TUI. Useful when your terminal has a custom background image or colour scheme you want to show through. Default is `false` — themed background colours are applied normally.
 
 | Theme | Character |
 |-------|-----------|
