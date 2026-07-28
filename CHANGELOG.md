@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.0] - 2026-07-28
+
+Eight built-in colour themes, a transparent-background mode, and TUI visual
+polish across the header, file tree, and status bar.
+
 ### Added
 - Eight built-in colour themes selectable via `--theme` flag or `theme:` in
   `.layerx.yaml`: `tokyo-night` (default), `catppuccin-mocha`, `kanagawa`,
-  `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`.
+  `gruvbox-dark`, `rose-pine`, `dracula`, `oxocarbon`, `cyberdream`. Full
+  reference: [docs/theming.md](docs/theming.md).
 - All `layerx init` starter templates include a commented `theme:` block
   showing available values and precedence order.
 - `--theme` flag now tab-completes all valid theme names in bash, zsh, fish,
