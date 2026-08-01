@@ -166,6 +166,39 @@ type fileSavedMsg struct {
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
+// treeCache memoizes the flatten→filter→sort output of displayTreeFor between
+// frames. A single keystroke in split+filter+sort mode drives displayTreeFor up
+// to seven times per round-trip (cursor bounds, clamp, status bar, both render
+// passes); without a cache each call re-walks the whole FileNode tree.
+//
+// The cache lives behind a pointer on the model because displayTreeFor has a
+// value receiver and the model is copied by value on every Update — a value
+// field would be written to a throwaway copy and never survive. All copies of
+// the model share one *treeCache; staleness is caught by comparing the stored
+// key against the current inputs, not by assuming a copy carried fresh data.
+//
+// Both panes (focusTree and focusTreeAgg) get an independent slot so split-mode
+// rendering, which asks for both trees in the same frame, does not thrash a
+// single slot. The generation counter that keys collapse state lives on the
+// model (collapsedGen), because toggleCollapsed mutates a map in place and
+// returns the same reference — neither map identity nor contents can be
+// compared cheaply, so the counter is bumped on every collapse mutation
+// instead (see the toggleCollapsed call sites / clear*Collapsed).
+type treeCacheSlot struct {
+	valid        bool
+	layerCursor  int
+	filterQuery  string
+	diffOnly     bool
+	sortMode     sortMode
+	collapsedGen uint64
+	files        []*image.FileNode
+}
+
+type treeCache struct {
+	top treeCacheSlot // focusTree
+	bot treeCacheSlot // focusTreeAgg
+}
+
 type model struct {
 	width        int
 	height       int
@@ -239,6 +272,13 @@ type model struct {
 	theme         Theme
 	transparentBg bool
 
+	// collapsedGen is bumped whenever a collapse map is mutated; it is the
+	// invalidation key for the displayTreeFor cache (see treeCache).
+	collapsedGen uint64
+	// treeCache memoizes displayTreeFor across frames. Behind a pointer so the
+	// value-receiver method can write through it and all model copies share it.
+	treeCache *treeCache
+
 	fetchCtx    context.Context
 	fetchCancel context.CancelFunc
 }
@@ -283,6 +323,7 @@ func NewModel(cfg Config) model {
 		noCache:     cfg.NoCache,
 		theme:       themeFor(cfg.Theme),
 		transparentBg: cfg.TransparentBg,
+		treeCache:   &treeCache{},
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
@@ -1067,6 +1108,7 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 			} else {
 				m.treeCollapsed = toggleCollapsed(m.treeCollapsed, f.Path)
 			}
+			m.collapsedGen++
 			mp := &m
 			mp.clampCursors()
 			return *mp, nil
@@ -1204,7 +1246,41 @@ func (m model) collapsedFor(f focus) map[string]bool {
 // displayTreeFor flattens, filters, and sorts the tree visible in the given
 // pane. The same composition rules (collapse → diff-only → filter → sort)
 // apply to both panes.
+//
+// The result is memoized per pane (see treeCache). A cache miss recomputes and
+// stores; a hit returns the stored slice untouched. When m.treeCache is nil
+// (bare model{} literals in tests) it computes through without caching, so the
+// observable output is identical with or without the cache.
 func (m model) displayTreeFor(f focus) []*image.FileNode {
+	if m.treeCache == nil {
+		return m.computeDisplayTreeFor(f)
+	}
+	slot := &m.treeCache.top
+	if f == focusTreeAgg {
+		slot = &m.treeCache.bot
+	}
+	if slot.valid &&
+		slot.layerCursor == m.layerCursor &&
+		slot.filterQuery == m.filterQuery &&
+		slot.diffOnly == m.diffOnly &&
+		slot.sortMode == m.sortMode &&
+		slot.collapsedGen == m.collapsedGen {
+		return slot.files
+	}
+	files := m.computeDisplayTreeFor(f)
+	*slot = treeCacheSlot{
+		valid:        true,
+		layerCursor:  m.layerCursor,
+		filterQuery:  m.filterQuery,
+		diffOnly:     m.diffOnly,
+		sortMode:     m.sortMode,
+		collapsedGen: m.collapsedGen,
+		files:        files,
+	}
+	return files
+}
+
+func (m model) computeDisplayTreeFor(f focus) []*image.FileNode {
 	root := m.rootFor(f)
 	var files []*image.FileNode
 	if m.useTreeCollapse() {
@@ -1243,10 +1319,12 @@ func (m model) activeTreeFocus() focus {
 
 func (m *model) clearTreeCollapsed() {
 	m.treeCollapsed = nil
+	m.collapsedGen++
 }
 
 func (m *model) clearAggCollapsed() {
 	m.aggCollapsed = nil
+	m.collapsedGen++
 }
 
 func (m *model) resetTreeForLayerChange() {
