@@ -8,11 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+### Changed
 - The interactive file tree now caches its flatten/filter/sort result between
   redraws, so holding a navigation key or scrolling a large image's tree stays
   responsive instead of recomputing the whole tree on every frame. The cache
   refreshes whenever the selected layer, filter, sort, or collapse state
   changes. Output is unchanged; only the redundant per-frame work is removed.
+- The header's gradient-coloured image reference is now rendered once when the
+  TUI starts instead of being recomputed on every frame. The image reference and
+  theme gradient are fixed for the session, so the per-character colour
+  interpolation was redundant work on each redraw. Output is unchanged; only the
+  repeated per-frame computation is removed.
 
 ## [v1.6.0] - 2026-07-28
 

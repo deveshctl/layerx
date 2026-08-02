@@ -272,6 +272,11 @@ type model struct {
 	noCache       bool
 	theme         Theme
 	transparentBg bool
+	// renderedImageRef is the gradient-coloured image ref for the header,
+	// precomputed once in NewModel. Both inputs (imageRef, theme gradient
+	// stops) are immutable for the session, so renderHeader must not recompute
+	// the per-rune colour interpolation on every frame.
+	renderedImageRef string
 
 	// collapsedGen is bumped whenever a collapse map is mutated; it is the
 	// invalidation key for the displayTreeFor cache (see treeCache).
@@ -319,6 +324,7 @@ func themeFor(name string) Theme {
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
+	theme := themeFor(cfg.Theme)
 	return model{
 		state:       stateLoading,
 		imageRef:    cfg.ImageRef,
@@ -329,9 +335,10 @@ func NewModel(cfg Config) model {
 		statFile:    os.Lstat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
-		theme:       themeFor(cfg.Theme),
+		theme:       theme,
 		transparentBg: cfg.TransparentBg,
 		treeCache:   &treeCache{},
+		renderedImageRef: renderGradient(cfg.ImageRef, theme.GradientStart, theme.GradientEnd),
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
@@ -1925,8 +1932,7 @@ func (m model) renderHeader() string {
 	glyph := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("◆")
 	brand := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true).Render(" layerx")
 	sep := lipgloss.NewStyle().Foreground(m.theme.HeaderSep).Background(m.theme.StatusBg).Render(" │ ")
-	imageName := renderGradient(m.imageRef, m.theme.GradientStart, m.theme.GradientEnd)
-	imageName = lipgloss.NewStyle().Background(m.theme.StatusBg).Render(imageName)
+	imageName := lipgloss.NewStyle().Background(m.theme.StatusBg).Render(m.renderedImageRef)
 	left := glyph + brand + sep + imageName
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant
