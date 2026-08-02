@@ -191,6 +191,7 @@ type treeCacheSlot struct {
 	diffOnly     bool
 	sortMode     sortMode
 	collapsedGen uint64
+	analysisGen  uint64
 	files        []*image.FileNode
 }
 
@@ -275,6 +276,13 @@ type model struct {
 	// collapsedGen is bumped whenever a collapse map is mutated; it is the
 	// invalidation key for the displayTreeFor cache (see treeCache).
 	collapsedGen uint64
+	// analysisGen is bumped whenever m.analysis is replaced. It keys the
+	// displayTreeFor cache against the analysis identity: a valid slot whose
+	// layerCursor/filters are unchanged would otherwise return the previous
+	// analysis's FileNode slice after a re-analysis. Today analysis is set
+	// exactly once, so this only ever reaches 1 — it is future-proofing, not a
+	// live fix, and costs one comparison per lookup.
+	analysisGen uint64
 	// treeCache memoizes displayTreeFor across frames. Behind a pointer so the
 	// value-receiver method can write through it and all model copies share it.
 	treeCache *treeCache
@@ -430,6 +438,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = stateReady
 		m.analysis = msg.analysis
+		m.analysisGen++
 		m.efficiency = image.EfficiencyFromAnalysis(msg.analysis)
 		if src, ok := m.resolver.(image.ExtractorSource); ok {
 			m.extractor = src.NewExtractor()
@@ -1264,7 +1273,8 @@ func (m model) displayTreeFor(f focus) []*image.FileNode {
 		slot.filterQuery == m.filterQuery &&
 		slot.diffOnly == m.diffOnly &&
 		slot.sortMode == m.sortMode &&
-		slot.collapsedGen == m.collapsedGen {
+		slot.collapsedGen == m.collapsedGen &&
+		slot.analysisGen == m.analysisGen {
 		return slot.files
 	}
 	files := m.computeDisplayTreeFor(f)
@@ -1275,6 +1285,7 @@ func (m model) displayTreeFor(f focus) []*image.FileNode {
 		diffOnly:     m.diffOnly,
 		sortMode:     m.sortMode,
 		collapsedGen: m.collapsedGen,
+		analysisGen:  m.analysisGen,
 		files:        files,
 	}
 	return files

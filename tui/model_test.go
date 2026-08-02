@@ -2677,3 +2677,30 @@ func TestDisplayTreeCacheHitReturnsIdenticalSlice(t *testing.T) {
 	assert.Equal(t, &first[0], &second[0], "an unchanged repeat lookup should return the cached slice")
 }
 
+func TestDisplayTreeCacheReflectsReanalysis(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.layerCursor = 0
+	before := m.displayTreeFor(focusTree) // warms the cache for the first analysis
+	require.NotEmpty(t, before)
+
+	// A second analysis replaces m.analysis while layerCursor and every filter
+	// stay put. Without the analysisGen key the warm slot would return the old
+	// analysis's nodes; the gen bump in the analysisMsg handler must force a
+	// recompute against the new tree.
+	other := testAnalysis()
+	root := other.StackedTrees[0].Root
+	root.AddChild(&image.FileNode{Name: "REANALYZED", Path: "/REANALYZED", Size: 1})
+	m = send(m, analysisMsg{analysis: other})
+
+	after := m.displayTreeFor(focusTree)
+	var found bool
+	for _, f := range after {
+		if f.Path == "/REANALYZED" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "a replaced analysis must invalidate the warm tree cache")
+}
+
