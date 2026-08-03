@@ -1511,6 +1511,30 @@ func TestEfficiencyBadgeInStatusBar(t *testing.T) {
 	assert.Contains(t, content, "wasted")
 }
 
+// With the viewer open, viewReady must skip the file-tree pipeline (whose
+// result the viewer status bar never consumes) yet still render a correct
+// viewer status bar. Guards the PERF optimisation that passes a nil treeFiles
+// through renderStatusBar's early viewer branch.
+func TestViewerOpen_RendersViewerStatusBar(t *testing.T) {
+	m := setupModel()
+	m.width = 80
+	m.height = 30
+	m.efficiency = &image.EfficiencyResult{Score: 0.85, WastedBytes: 1500000}
+	m.viewState = viewReady
+	openViewer(&m, &image.FileContent{
+		Path: "/etc/hosts",
+		Data: []byte("line1\nline2\nline3\n"),
+		Size: 18,
+	})
+
+	content := viewContent(m.View())
+	// Viewer status bar hints and the line counter are present…
+	assert.Contains(t, content, "search", "viewer status bar must render while the viewer is open")
+	assert.Contains(t, content, "Line 1/3", "viewer status bar must show the line counter")
+	// …and the normal (non-viewer) tree status bar is not.
+	assert.NotContains(t, content, "Eff:", "efficiency badge belongs to the non-viewer status bar")
+}
+
 // --- File Extraction to Disk (M10) -------------------------------------------
 
 func TestExtractKeyOnDirectoryShowsStatus(t *testing.T) {

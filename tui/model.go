@@ -1862,7 +1862,13 @@ func (m model) viewReady() tea.View {
 	// header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1) = 8
 	panelHeight := m.height - chromeRows
 	header := m.renderHeader()
-	treeFiles := m.displayTree()
+	// The status bar only consumes treeFiles in its non-viewer branch; when the
+	// viewer is open renderStatusBar returns early via renderViewerStatusBar and
+	// never reads it. Skip the tree pipeline entirely in that case.
+	var treeFiles []*image.FileNode
+	if m.viewState == viewNone {
+		treeFiles = m.displayTree()
+	}
 	left := renderLayers(m.theme, m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := m.renderRightPanel(rightWidth, panelHeight)
 
