@@ -1535,6 +1535,41 @@ func TestViewerOpen_RendersViewerStatusBar(t *testing.T) {
 	assert.NotContains(t, content, "Eff:", "efficiency badge belongs to the non-viewer status bar")
 }
 
+// viewLineCount reads the cached m.viewLines that scroll clamping and the
+// status-bar line counter depend on. It must stay identical to the direct
+// fileViewLineCount reference for every input, including the trailing-newline
+// terminator and binary cases — a drift here off-by-ones the scroll limit and
+// the "Line n/N" counter. Asserting equivalence keeps the cached path honest
+// even though fileViewLineCount itself is no longer on a hot path.
+func TestViewLineCount_MatchesFileViewLineCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		content *image.FileContent
+		want    int
+	}{
+		{"trailing newline (terminator)", &image.FileContent{Data: []byte("a\nb\n")}, 2},
+		{"no trailing newline", &image.FileContent{Data: []byte("a\nb")}, 2},
+		{"single newline", &image.FileContent{Data: []byte("\n")}, 1},
+		{"single line", &image.FileContent{Data: []byte("hello")}, 1},
+		{"empty", &image.FileContent{Data: []byte{}}, 0},
+		{"binary", &image.FileContent{Data: []byte("a\nb\n"), Binary: true}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel()
+			openViewer(&m, tc.content)
+			assert.Equal(t, tc.want, m.viewLineCount())
+			assert.Equal(t, fileViewLineCount(tc.content), m.viewLineCount(),
+				"cached viewLineCount must match the direct fileViewLineCount reference")
+		})
+	}
+}
+
+func TestViewLineCount_NilContent(t *testing.T) {
+	m := setupModel()
+	assert.Equal(t, 0, m.viewLineCount(), "no file open must report zero lines")
+}
+
 // --- File Extraction to Disk (M10) -------------------------------------------
 
 func TestExtractKeyOnDirectoryShowsStatus(t *testing.T) {
