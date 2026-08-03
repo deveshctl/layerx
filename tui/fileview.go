@@ -12,6 +12,10 @@ import (
 
 type viewerParams struct {
 	content      *image.FileContent
+	// lines is the plain-text split of content.Data, computed once on file open
+	// and cached on the model. The renderer reads it instead of re-splitting the
+	// body every frame. nil is tolerated (falls back to a single empty line).
+	lines        []string
 	offset       int
 	hOffset      int
 	cursorCol    int
@@ -73,7 +77,7 @@ func renderFileView(p viewerParams) string {
 		return renderPanel(p.theme, body, title, true, contentWidth, p.height, false, false)
 	}
 
-	lines := splitFileLines(p.content.Data)
+	lines := p.lines
 	if lines == nil {
 		lines = []string{""}
 	}

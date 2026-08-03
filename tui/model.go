@@ -245,6 +245,12 @@ type model struct {
 	viewState    viewState
 	viewContent      *image.FileContent
 	viewHighlightedLines []string
+	// viewLines is the plain-text split of viewContent.Data, computed once when
+	// the file opens. The viewer's hot paths (scroll clamp, cursor-column bound,
+	// search indexing, render) read this instead of re-running splitFileLines —
+	// which copies the whole body and allocates per line — on every keystroke
+	// and every frame. nil when no file is open; parallels viewHighlightedLines.
+	viewLines        []string
 	viewOffset       int
 	viewHOffset      int
 	viewCursorCol    int
@@ -504,6 +510,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewState = viewReady
 		m.viewContent = msg.content
 		m.viewHighlightedLines = nil
+		m.viewLines = splitFileLines(msg.content.Data)
 		m.viewOffset = 0
 		m.viewHOffset = 0
 		m.viewCursorCol = 0
@@ -593,6 +600,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewState = viewNone
 				m.viewContent = nil
 				m.viewHighlightedLines = nil
+				m.viewLines = nil
 				m.viewOffset = 0
 				m.viewHOffset = 0
 				m.viewCursorCol = 0
@@ -714,7 +722,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewHOffset = 0
 				m.viewCursorCol = 0
 			case key.Matches(msg, m.keys.Bottom):
-				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
+				maxOffset := max(m.viewLineCount()-m.viewVisibleHeight(), 0)
 				m.viewOffset = maxOffset
 				m.viewHOffset = 0
 				m.viewCursorCol = 0
@@ -1019,7 +1027,7 @@ func (m *model) recomputeViewerMatches() {
 		return
 	}
 	query := strings.ToLower(m.viewSearchQuery)
-	lines := splitFileLines(m.viewContent.Data)
+	lines := m.viewLines
 	for lineIdx, line := range lines {
 		lower := strings.ToLower(line)
 		offset := 0
@@ -1049,8 +1057,7 @@ func (m *model) scrollToViewerMatch() {
 	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
 	targetCol := m.viewSearchMatches[m.viewSearchCursor][1]
 	visHeight := m.viewVisibleHeight()
-	lines := splitFileLines(m.viewContent.Data)
-	totalLines := len(lines)
+	totalLines := len(m.viewLines)
 	desired := max(targetLine-visHeight/2, 0)
 	maxOffset := max(totalLines-visHeight, 0)
 	if desired > maxOffset {
@@ -1063,7 +1070,7 @@ func (m *model) scrollToViewerMatch() {
 	// is grapheme-aware and matches the renderer's truncate metric.
 	displayCol := targetCol
 	if targetLine < totalLines {
-		runes := []rune(lines[targetLine])
+		runes := []rune(m.viewLines[targetLine])
 		if targetCol <= len(runes) {
 			displayCol = ansi.StringWidth(string(runes[:targetCol]))
 		}
@@ -1094,7 +1101,7 @@ func (m *model) viewVisibleWidth() int {
 	if m.viewContent == nil {
 		return 0
 	}
-	return m.viewVisibleWidthFor(fileViewLineCount(m.viewContent))
+	return m.viewVisibleWidthFor(m.viewLineCount())
 }
 
 // viewVisibleWidthFor is the totalLines-cached form, used inside
@@ -1864,6 +1871,7 @@ func (m model) viewReady() tea.View {
 	if m.viewState != viewNone {
 		viewer := renderFileView(viewerParams{
 			content:       m.viewContent,
+			lines:         m.viewLines,
 			offset:        m.viewOffset,
 			hOffset:       m.viewHOffset,
 			cursorCol:     m.viewCursorCol,
@@ -2104,7 +2112,7 @@ func (m model) renderViewerStatusBar() string {
 		matchStyle := lipgloss.NewStyle().Foreground(m.theme.SearchCurrentBg).Background(m.theme.StatusBg).Bold(true)
 		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
 	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
-		total := fileViewLineCount(m.viewContent)
+		total := m.viewLineCount()
 		line := m.viewOffset + 1
 		pct := 0
 		if total > 0 {
@@ -2292,8 +2300,22 @@ func atomicWriteFile(name string, data []byte, perm os.FileMode) error {
 }
 
 
+// viewLineCount returns the viewer's rendered line count from the cached split
+// in m.viewLines, preserving fileViewLineCount's contract: non-empty text whose
+// only content is a trailing newline counts as one line. Reads the cache so
+// scroll clamping does not re-split the file body on every keystroke.
+func (m *model) viewLineCount() int {
+	if m.viewContent == nil || m.viewContent.Binary || len(m.viewContent.Data) == 0 {
+		return 0
+	}
+	if len(m.viewLines) == 0 {
+		return 1
+	}
+	return len(m.viewLines)
+}
+
 func (m *model) scrollViewDown() {
-	maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
+	maxOffset := max(m.viewLineCount()-m.viewVisibleHeight(), 0)
 	if m.viewOffset < maxOffset {
 		m.viewOffset++
 	}
@@ -2344,7 +2366,7 @@ func (m *model) viewMaxCursorCol() int {
 	if m.viewContent == nil {
 		return 0
 	}
-	lines := splitFileLines(m.viewContent.Data)
+	lines := m.viewLines
 	if len(lines) == 0 {
 		return 0
 	}

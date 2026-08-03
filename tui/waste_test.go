@@ -382,7 +382,7 @@ func TestWasteWGuard(t *testing.T) {
 	m = setupModel()
 	m.efficiency = efficiencyOf(3)
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("hi"), Size: 2}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("hi"), Size: 2})
 	updated, _ = m.Update(keyPress('w'))
 	um = updated.(model)
 	assert.False(t, um.showWaste, "w should not open while viewer is up")
