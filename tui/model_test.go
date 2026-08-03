@@ -2560,3 +2560,147 @@ func TestPageOnEmptyTreeIsNoop(t *testing.T) {
 	m.moveByPage(1, false)
 	assert.Equal(t, 0, m.treeCursor, "paging an empty tree must not move or panic")
 }
+
+// --- displayTreeFor cache invalidation ---------------------------------------
+//
+// These tests exercise the memoization added to displayTreeFor. Each drives one
+// input-mutation path and asserts the returned slice reflects the new state.
+// They fail if an invalidation key is missing from the cache — the regression
+// class the cache introduces.
+
+func TestDisplayTreeCacheReflectsDiffOnlyToggle(t *testing.T) {
+	m := setupModelWithDiffs()
+	before := len(m.displayTreeFor(focusTree)) // warms the cache
+
+	m.diffOnly = true
+	filtered := m.displayTreeFor(focusTree)
+
+	assert.Less(t, len(filtered), before, "diff-only must drop unchanged files even after the cache is warm")
+	for _, f := range filtered {
+		assert.NotEqual(t, image.Unchanged, f.DiffType)
+	}
+}
+
+func TestDisplayTreeCacheReflectsFilterQuery(t *testing.T) {
+	m := setupModelWithDiffs()
+	all := m.displayTreeFor(focusTree) // warms the cache
+	require.NotEmpty(t, all)
+
+	m.filterQuery = "nginx"
+	filtered := m.displayTreeFor(focusTree)
+
+	assert.NotEmpty(t, filtered)
+	assert.Less(t, len(filtered), len(all), "a filter query must narrow the cached slice")
+	for _, f := range filtered {
+		assert.Contains(t, strings.ToLower(f.Path), "nginx")
+	}
+}
+
+func TestDisplayTreeCacheReflectsSortMode(t *testing.T) {
+	m := setupModelWithDiffs()
+	unsorted := m.displayTreeFor(focusTree) // warms the cache
+	require.NotEmpty(t, unsorted)
+
+	m.sortMode = sortDesc
+	sorted := m.displayTreeFor(focusTree)
+
+	// Sorting by size descending must yield non-increasing effective sizes.
+	for i := 1; i < len(sorted); i++ {
+		assert.GreaterOrEqual(t, nodeEffectiveSize(sorted[i-1]), nodeEffectiveSize(sorted[i]),
+			"sortDesc must return files by descending effective size, not a stale unsorted slice")
+	}
+}
+
+func TestDisplayTreeCacheReflectsLayerChange(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.layerCursor = 0
+	base := m.displayTreeFor(focusTree) // warms the cache for layer 0
+
+	m.layerCursor = 1
+	next := m.displayTreeFor(focusTree)
+
+	// The two layers have different tree shapes; a stale cache would return the
+	// layer-0 slice for layer 1.
+	assert.NotEqual(t, base, next, "changing the selected layer must recompute the tree")
+}
+
+func TestDisplayTreeCacheReflectsCollapseToggle(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	expanded := m.displayTreeFor(focusTree) // warms the cache
+	require.NotEmpty(t, expanded)
+
+	// Collapse the first directory in the visible list.
+	var dirPath string
+	for _, f := range expanded {
+		if f.IsDir {
+			dirPath = f.Path
+			break
+		}
+	}
+	require.NotEmpty(t, dirPath, "fixture must contain at least one directory")
+
+	m.treeCollapsed = toggleCollapsed(m.treeCollapsed, dirPath)
+	m.collapsedGen++
+	collapsed := m.displayTreeFor(focusTree)
+
+	assert.Less(t, len(collapsed), len(expanded),
+		"collapsing a directory must hide its descendants even after the cache is warm")
+}
+
+func TestDisplayTreeCachePanesAreIndependent(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.aggregated = true
+
+	// Rendering split mode asks for both panes in one frame; the two cache
+	// slots must not clobber each other.
+	top := m.displayTreeFor(focusTree)
+	bot := m.displayTreeFor(focusTreeAgg)
+	topAgain := m.displayTreeFor(focusTree)
+	botAgain := m.displayTreeFor(focusTreeAgg)
+
+	require.NotEmpty(t, top)
+	require.NotEmpty(t, bot)
+	assert.Equal(t, &top[0], &topAgain[0], "the top pane slot must survive a bot-pane lookup in the same frame")
+	assert.Equal(t, &bot[0], &botAgain[0], "the bot pane slot must survive a top-pane lookup in the same frame")
+	assert.NotEqual(t, &top[0], &bot[0], "the two panes must not share one cache slot")
+}
+
+func TestDisplayTreeCacheHitReturnsIdenticalSlice(t *testing.T) {
+	m := setupModelWithDiffs()
+	first := m.displayTreeFor(focusTree)
+	second := m.displayTreeFor(focusTree)
+
+	// A warm hit with unchanged inputs should return the very same backing
+	// slice, not recompute a fresh one.
+	require.NotEmpty(t, first)
+	assert.Equal(t, &first[0], &second[0], "an unchanged repeat lookup should return the cached slice")
+}
+
+func TestDisplayTreeCacheReflectsReanalysis(t *testing.T) {
+	m := setupModel()
+	m.focus = focusTree
+	m.layerCursor = 0
+	before := m.displayTreeFor(focusTree) // warms the cache for the first analysis
+	require.NotEmpty(t, before)
+
+	// A second analysis replaces m.analysis while layerCursor and every filter
+	// stay put. Without the analysisGen key the warm slot would return the old
+	// analysis's nodes; the gen bump in the analysisMsg handler must force a
+	// recompute against the new tree.
+	other := testAnalysis()
+	root := other.StackedTrees[0].Root
+	root.AddChild(&image.FileNode{Name: "REANALYZED", Path: "/REANALYZED", Size: 1})
+	m = send(m, analysisMsg{analysis: other})
+
+	after := m.displayTreeFor(focusTree)
+	var found bool
+	for _, f := range after {
+		if f.Path == "/REANALYZED" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "a replaced analysis must invalidate the warm tree cache")
+}
+

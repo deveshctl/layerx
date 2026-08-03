@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The interactive file tree now caches its flatten/filter/sort result between
+  redraws, so holding a navigation key or scrolling a large image's tree stays
+  responsive instead of recomputing the whole tree on every frame. The cache
+  refreshes whenever the selected layer, filter, sort, or collapse state
+  changes. Output is unchanged; only the redundant per-frame work is removed.
+
 ## [v1.6.0] - 2026-07-28
 
 Eight built-in colour themes, transparent-background mode, and TUI visual
