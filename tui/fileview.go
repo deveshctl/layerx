@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -239,20 +240,20 @@ func renderViewerLine(t Theme, line string, lineIdx int, query string, matches [
 		match   bool
 	}
 
+	queryStr := string(queryRunes)
 	var segments []segment
 	pos := 0
 	occurrence := 0
 	for pos <= len(lowerLineRunes)-queryLen {
-		idx := -1
-		for i := pos; i <= len(lowerLineRunes)-queryLen; i++ {
-			if string(lowerLineRunes[i:i+queryLen]) == string(queryRunes) {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
+		// Convert only the remaining rune slice to string for this iteration;
+		// strings.Index finds the match in O(N) without per-position allocation.
+		tail := string(lowerLineRunes[pos:])
+		byteIdx := strings.Index(tail, queryStr)
+		if byteIdx < 0 {
 			break
 		}
+		// Translate byte offset back to rune offset within tail.
+		idx := pos + utf8.RuneCountInString(tail[:byteIdx])
 		matchEnd := idx + queryLen
 
 		if idx > pos {

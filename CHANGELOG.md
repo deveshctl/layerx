@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   theme gradient are fixed for the session, so the per-character colour
   interpolation was redundant work on each redraw. Output is unchanged; only the
   repeated per-frame computation is removed.
+- Directory sizes used by the sort-by-size view are now computed once when a
+  layer's file tree is built instead of re-walking each directory's subtree on
+  every sort invocation. Toggling sort (`s`) and navigating large layers with
+  deep directory trees is now constant-time rather than O(N²) in node count.
+- Incremental search in the file viewer no longer allocates a temporary string
+  per candidate position when scanning each visible line for matches. The inner
+  scan now uses `strings.Index` on the lowercased line tail, reducing allocation
+  pressure during active search through large files.
 
 ## [v1.6.0] - 2026-07-28
 
