@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   responsive instead of recomputing the whole tree on every frame. The cache
   refreshes whenever the selected layer, filter, sort, or collapse state
   changes. Output is unchanged; only the redundant per-frame work is removed.
+- The file viewer now splits a file's contents into lines once when the file is
+  opened instead of re-splitting the whole body on every keystroke and every
+  frame. Scrolling and incremental search through large files (minified JSON,
+  logs, long single-line files) no longer allocate megabytes of throwaway
+  strings per redraw. While the viewer is open, the file-tree pipeline is no
+  longer run for a status bar that does not use it. Rendered output and line
+  counts are unchanged.
+- The header's gradient-coloured image reference is now rendered once when the
+  TUI starts instead of being recomputed on every frame. The image reference and
+  theme gradient are fixed for the session, so the per-character colour
+  interpolation was redundant work on each redraw. Output is unchanged; only the
+  repeated per-frame computation is removed.
 
 ## [v1.6.0] - 2026-07-28
 

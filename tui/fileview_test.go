@@ -34,6 +34,7 @@ func TestRenderFileViewSyntaxHighlighting(t *testing.T) {
 			Data: src,
 			Size: 13,
 		},
+		lines:            splitFileLines(src),
 		offset:           0,
 		width:            80,
 		height:           10,
@@ -51,6 +52,7 @@ func TestRenderFileView_ScrolledDoesNotExceedWidth(t *testing.T) {
 			Data: data,
 			Size: int64(len(data)),
 		},
+		lines:            splitFileLines(data),
 		offset:           36,
 		width:            120,
 		height:           30,
@@ -75,6 +77,7 @@ func TestRenderFileViewSearchDisablesSyntaxHighlighting(t *testing.T) {
 			Data: src,
 			Size: 13,
 		},
+		lines:            splitFileLines(src),
 		offset:           0,
 		width:            80,
 		height:           10,
@@ -96,6 +99,7 @@ func TestRenderFileView_TitleTruncation_WideChar(t *testing.T) {
 			Data: []byte("a\n"),
 			Size: 2,
 		},
+		lines:        splitFileLines([]byte("a\n")),
 		originLayer:  1,
 		originCmd:    wideCmd,
 		currentLayer: 2,
@@ -139,6 +143,7 @@ func TestRenderFileView_TrailingNewlineLineCount(t *testing.T) {
 	body := renderFileView(viewerParams{
 		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "x.txt", Data: data, Size: int64(len(data))},
+		lines:   splitFileLines(data),
 		offset:  0,
 		width:   80,
 		height:  20,
@@ -193,6 +198,7 @@ func TestRenderFileView_HOffset_ShowsLeftMarker(t *testing.T) {
 	body := renderFileView(viewerParams{
 		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))},
+		lines:   splitFileLines(data),
 		offset:  0,
 		hOffset: 80,
 		width:   80,
@@ -207,6 +213,7 @@ func TestRenderFileView_HOffsetZero_NoLeftMarker(t *testing.T) {
 	body := renderFileView(viewerParams{
 		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "/x.txt", Data: data, Size: int64(len(data))},
+		lines:   splitFileLines(data),
 		offset:  0,
 		hOffset: 0,
 		width:   80,
@@ -222,6 +229,7 @@ func TestRenderFileView_HOffset_StillRespectsWidth(t *testing.T) {
 	body := renderFileView(viewerParams{
 		theme:   CatppuccinMocha(),
 		content: &image.FileContent{Path: "/x.txt", Data: data, Size: int64(len(data))},
+		lines:   splitFileLines(data),
 		offset:  0,
 		hOffset: 50,
 		width:   80,
@@ -242,6 +250,7 @@ func TestRenderFileView_LongLineMatchVisibleAfterScroll(t *testing.T) {
 	body := renderFileView(viewerParams{
 		theme:         CatppuccinMocha(),
 		content:       &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))},
+		lines:         splitFileLines(data),
 		offset:        0,
 		hOffset:       170, // chosen so column 200 falls within an 80-col view
 		width:         80,
@@ -263,6 +272,7 @@ func TestRenderFileView_HOffset_PreservesChromaOutput(t *testing.T) {
 	body := renderFileView(viewerParams{
 		theme:            CatppuccinMocha(),
 		content:          &image.FileContent{Path: "app.go", Data: src, Size: int64(len(src))},
+		lines:            splitFileLines(src),
 		offset:           0,
 		hOffset:          50,
 		width:            80,

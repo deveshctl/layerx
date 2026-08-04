@@ -39,6 +39,15 @@ func viewContent(v tea.View) string {
 	return v.Content
 }
 
+// openViewer sets the viewer content and its derived line-split cache together,
+// mirroring what the fileContentMsg handler does in production. Tests that set
+// m.viewContent directly must keep m.viewLines in sync, or the viewer's cached
+// hot paths (scroll clamp, search indexing, render) see an empty file.
+func openViewer(m *model, fc *image.FileContent) {
+	m.viewContent = fc
+	m.viewLines = splitFileLines(fc.Data)
+}
+
 // --- test fixtures -----------------------------------------------------------
 
 func testAnalysis() *image.Analysis {
@@ -1053,11 +1062,11 @@ func TestFilterCtrlCStillQuits(t *testing.T) {
 func TestViewerSearchSwallowsQWhenActive(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("jquery and graphql"),
 		Size: 18,
-	}
+	})
 	m.viewSearchActive = true
 
 	m = send(m, keyPress('j'))
@@ -1069,11 +1078,11 @@ func TestViewerSearchSwallowsQWhenActive(t *testing.T) {
 func TestViewerSearchCtrlCStillQuits(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("hello"),
 		Size: 5,
-	}
+	})
 	m.viewSearchActive = true
 
 	m = send(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -1350,7 +1359,7 @@ func TestEnterOnRemovedFileShowsStatusMsg(t *testing.T) {
 func TestEscClosesFileViewer(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/test", Data: []byte("hi")}
+	openViewer(&m, &image.FileContent{Path: "/test", Data: []byte("hi")})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	um := updated.(model)
@@ -1365,7 +1374,7 @@ func TestEscClosesFileViewer(t *testing.T) {
 func TestEscMashOnFileViewerDoesNotQuit(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/test", Data: []byte("hi")}
+	openViewer(&m, &image.FileContent{Path: "/test", Data: []byte("hi")})
 
 	// First Esc: closes viewer.
 	m = send(m, keyPressSpecial(tea.KeyEscape))
@@ -1380,11 +1389,11 @@ func TestEscMashOnFileViewerDoesNotQuit(t *testing.T) {
 func TestViewerScrollDown(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte(strings.Repeat("line\n", 100)),
 		Size: 500,
-	}
+	})
 	m.viewOffset = 0
 	m.height = 30
 
@@ -1396,11 +1405,11 @@ func TestViewerScrollDown(t *testing.T) {
 func TestViewerScrollUpAtTopStays(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("line1\nline2\n"),
 		Size: 12,
-	}
+	})
 	m.viewOffset = 0
 
 	updated, _ := m.Update(keyPress('k'))
@@ -1444,7 +1453,7 @@ func TestFileContentMsgPopulatesHighlightCache(t *testing.T) {
 func TestEscClearsHighlightCache(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "main.go", Data: []byte("package main\n")}
+	openViewer(&m, &image.FileContent{Path: "main.go", Data: []byte("package main\n")})
 	m.viewHighlightedLines = []string{"package main"}
 
 	updated, _ := m.Update(keyPressSpecial(tea.KeyEscape))
@@ -1465,7 +1474,7 @@ func TestFileContentMsgErrorClearsViewState(t *testing.T) {
 func TestViewerBlocksNavigationKeys(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/test", Data: []byte("hi")}
+	openViewer(&m, &image.FileContent{Path: "/test", Data: []byte("hi")})
 	m.focus = focusLayers
 	cursorBefore := m.layerCursor
 
@@ -1500,6 +1509,65 @@ func TestEfficiencyBadgeInStatusBar(t *testing.T) {
 	content := viewContent(view)
 	assert.Contains(t, content, "Eff: 85%")
 	assert.Contains(t, content, "wasted")
+}
+
+// With the viewer open, viewReady must skip the file-tree pipeline (whose
+// result the viewer status bar never consumes) yet still render a correct
+// viewer status bar. Guards the PERF optimisation that passes a nil treeFiles
+// through renderStatusBar's early viewer branch.
+func TestViewerOpen_RendersViewerStatusBar(t *testing.T) {
+	m := setupModel()
+	m.width = 80
+	m.height = 30
+	m.efficiency = &image.EfficiencyResult{Score: 0.85, WastedBytes: 1500000}
+	m.viewState = viewReady
+	openViewer(&m, &image.FileContent{
+		Path: "/etc/hosts",
+		Data: []byte("line1\nline2\nline3\n"),
+		Size: 18,
+	})
+
+	content := viewContent(m.View())
+	// Viewer status bar hints and the line counter are present…
+	assert.Contains(t, content, "search", "viewer status bar must render while the viewer is open")
+	assert.Contains(t, content, "Line 1/3", "viewer status bar must show the line counter")
+	// …and the normal (non-viewer) tree status bar is not.
+	assert.NotContains(t, content, "Eff:", "efficiency badge belongs to the non-viewer status bar")
+}
+
+// viewLineCount reads the cached m.viewLines that scroll clamping and the
+// status-bar line counter depend on. It must stay identical to the direct
+// fileViewLineCount reference for every input, including the trailing-newline
+// terminator and binary cases — a drift here off-by-ones the scroll limit and
+// the "Line n/N" counter. Asserting equivalence keeps the cached path honest
+// even though fileViewLineCount itself is no longer on a hot path.
+func TestViewLineCount_MatchesFileViewLineCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		content *image.FileContent
+		want    int
+	}{
+		{"trailing newline (terminator)", &image.FileContent{Data: []byte("a\nb\n")}, 2},
+		{"no trailing newline", &image.FileContent{Data: []byte("a\nb")}, 2},
+		{"single newline", &image.FileContent{Data: []byte("\n")}, 1},
+		{"single line", &image.FileContent{Data: []byte("hello")}, 1},
+		{"empty", &image.FileContent{Data: []byte{}}, 0},
+		{"binary", &image.FileContent{Data: []byte("a\nb\n"), Binary: true}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel()
+			openViewer(&m, tc.content)
+			assert.Equal(t, tc.want, m.viewLineCount())
+			assert.Equal(t, fileViewLineCount(tc.content), m.viewLineCount(),
+				"cached viewLineCount must match the direct fileViewLineCount reference")
+		})
+	}
+}
+
+func TestViewLineCount_NilContent(t *testing.T) {
+	m := setupModel()
+	assert.Equal(t, 0, m.viewLineCount(), "no file open must report zero lines")
 }
 
 // --- File Extraction to Disk (M10) -------------------------------------------
@@ -1703,11 +1771,11 @@ func TestCopyPathYKeyInLayersPanelIsNoop(t *testing.T) {
 func TestCopyContentShiftYInViewer(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/etc/passwd",
 		Data: []byte("root:x:0:0"),
 		Size: 10,
-	}
+	})
 
 	updated, cmd := m.Update(keyPress('Y'))
 	um := updated.(model)
@@ -1733,11 +1801,11 @@ func TestCopyContentShiftYInLayerPanelIsNoOp(t *testing.T) {
 func TestViewerSearchActivatesOnSlash(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/etc/passwd",
 		Data: []byte("root:x:0:0\nnobody:x:65534:65534"),
 		Size: 30,
-	}
+	})
 
 	updated, _ := m.Update(keyPress('/'))
 	um := updated.(model)
@@ -1747,11 +1815,11 @@ func TestViewerSearchActivatesOnSlash(t *testing.T) {
 func TestViewerSearchTypingBuildsQuery(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/etc/passwd",
 		Data: []byte("root:x:0:0\nnobody:x:65534:65534"),
 		Size: 30,
-	}
+	})
 	m.viewSearchActive = true
 
 	updated, _ := m.Update(tea.KeyPressMsg{Text: "r"})
@@ -1767,11 +1835,11 @@ func TestViewerSearchTypingBuildsQuery(t *testing.T) {
 func TestViewerSearchEnterConfirms(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("hello world"),
 		Size: 11,
-	}
+	})
 	m.viewSearchActive = true
 	m.viewSearchQuery = "hello"
 
@@ -1784,11 +1852,11 @@ func TestViewerSearchEnterConfirms(t *testing.T) {
 func TestViewerSearchEscClearsQuery(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("hello world"),
 		Size: 11,
-	}
+	})
 	m.viewSearchActive = true
 	m.viewSearchQuery = "hello"
 	m.viewSearchMatches = [][2]int{{0, 0}}
@@ -1803,11 +1871,11 @@ func TestViewerSearchEscClearsQuery(t *testing.T) {
 func TestViewerSearchNextPrevMatch(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("aaa\naaa\naaa"),
 		Size: 11,
-	}
+	})
 	m.viewSearchQuery = "aaa"
 	m.viewSearchMatches = [][2]int{{0, 0}, {1, 0}, {2, 0}}
 	m.viewSearchCursor = 0
@@ -1832,11 +1900,11 @@ func TestViewerSearchNextPrevMatch(t *testing.T) {
 func TestViewerScrollStillWorksWithoutSearch(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte(strings.Repeat("line\n", 100)),
 		Size: 500,
-	}
+	})
 	m.viewOffset = 0
 
 	updated, _ := m.Update(keyPress('j'))
@@ -1847,11 +1915,11 @@ func TestViewerScrollStillWorksWithoutSearch(t *testing.T) {
 func TestViewerEscCascadeWithSearch(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "/test",
 		Data: []byte("test"),
 		Size: 4,
-	}
+	})
 	m.viewSearchActive = true
 	m.viewSearchQuery = "test"
 
@@ -1876,11 +1944,11 @@ func TestMouseWheelDownScrollsViewer(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line%d", i))
 	}
 	data := []byte(strings.Join(lines, "\n") + "\n")
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "test.txt",
 		Data: data,
 		Size: int64(len(data)),
-	}
+	})
 	m.height = 20
 
 	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
@@ -1890,11 +1958,11 @@ func TestMouseWheelDownScrollsViewer(t *testing.T) {
 func TestMouseWheelUpScrollsViewer(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{
+	openViewer(&m, &image.FileContent{
 		Path: "test.txt",
 		Data: []byte("line1\nline2\nline3\n"),
 		Size: 18,
-	}
+	})
 	m.viewOffset = 1
 	m.height = 20
 
@@ -2074,7 +2142,7 @@ func TestScrollToViewerMatch_AdjustsHOffsetForOffScreenMatch(t *testing.T) {
 	prefix := strings.Repeat("x", 200)
 	data := []byte(prefix + "needle and rest of the line")
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))}
+	openViewer(&m, &image.FileContent{Path: "/long.txt", Data: data, Size: int64(len(data))})
 	m.viewSearchQuery = "needle"
 	m.recomputeViewerMatches()
 
@@ -2097,7 +2165,7 @@ func TestScrollToViewerMatch_LeavesHOffsetWhenMatchAlreadyVisible(t *testing.T) 
 	// Short line with the match well within the viewport.
 	data := []byte("hello needle world")
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/short.txt", Data: data, Size: int64(len(data))}
+	openViewer(&m, &image.FileContent{Path: "/short.txt", Data: data, Size: int64(len(data))})
 	m.viewSearchQuery = "needle"
 	m.recomputeViewerMatches()
 
@@ -2110,7 +2178,7 @@ func TestScrollToViewerMatch_LeavesHOffsetWhenMatchAlreadyVisible(t *testing.T) 
 // first match falls in the un-shifted region of the line.
 func TestRecomputeViewerMatches_ResetsHOffsetOnEmptyQuery(t *testing.T) {
 	m := setupModel()
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("abc"), Size: 3}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("abc"), Size: 3})
 	m.viewHOffset = 999
 
 	m.viewSearchQuery = ""
@@ -2124,7 +2192,7 @@ func TestRecomputeViewerMatches_ResetsHOffsetOnEmptyQuery(t *testing.T) {
 func TestViewerEsc_ClearsHOffsetWithSearch(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("hello world"), Size: 11}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("hello world"), Size: 11})
 	m.viewSearchQuery = "world"
 	m.viewHOffset = 50
 
@@ -2144,7 +2212,7 @@ func TestViewerHKey_MovesCursorLeft(t *testing.T) {
 	// past the start so a leftward step on the cursor at the left edge
 	// drags the viewport but no further than column 0.
 	long := strings.Repeat("x", 200)
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))})
 	m.viewHOffset = 50
 	m.viewCursorCol = 50 // at the visible left edge
 
@@ -2162,7 +2230,7 @@ func TestViewerLKey_KeepsViewportStable(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
 	long := strings.Repeat("x", 200)
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))})
 	m.viewHOffset = 0
 	m.viewCursorCol = 0
 
@@ -2178,7 +2246,7 @@ func TestViewerLKey_ScrollsViewportAtRightEdge(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
 	long := strings.Repeat("x", 500)
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte(long), Size: int64(len(long))})
 	visWidth := m.viewVisibleWidth()
 	require.Greater(t, visWidth, 0)
 	// Park the cursor at the rightmost visible column. Next l takes it
@@ -2196,7 +2264,7 @@ func TestViewerLKey_ScrollsViewportAtRightEdge(t *testing.T) {
 func TestViewerHKey_ClampsAtZero(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("line"), Size: 4})
 	m.viewHOffset = 0
 
 	um := send(m, keyPress('h'))
@@ -2208,7 +2276,7 @@ func TestViewerHKey_ClampsAtZero(t *testing.T) {
 func TestViewerGTop_ResetsHOffset(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("a\nb\nc\n"), Size: 6}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("a\nb\nc\n"), Size: 6})
 	m.viewOffset = 2
 	m.viewHOffset = 50
 
@@ -2220,7 +2288,7 @@ func TestViewerGTop_ResetsHOffset(t *testing.T) {
 func TestViewerGBottom_ResetsHOffset(t *testing.T) {
 	m := setupModel()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("a\nb\nc\n"), Size: 6}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("a\nb\nc\n"), Size: 6})
 	m.viewHOffset = 50
 
 	um := send(m, keyPress('G'))
@@ -2285,7 +2353,7 @@ func TestModel_AggregateToggle_RoutesCurrentTreeRoot(t *testing.T) {
 func TestModel_AggregateToggle_NoOpWhenViewerOpen(t *testing.T) {
 	m := setupModelWithDiffs()
 	m.viewState = viewReady
-	m.viewContent = &image.FileContent{Path: "/x", Data: []byte("data"), Size: 4}
+	openViewer(&m, &image.FileContent{Path: "/x", Data: []byte("data"), Size: 4})
 
 	m = send(m, keyPress('A'))
 

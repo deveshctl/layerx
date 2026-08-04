@@ -245,6 +245,12 @@ type model struct {
 	viewState    viewState
 	viewContent      *image.FileContent
 	viewHighlightedLines []string
+	// viewLines is the plain-text split of viewContent.Data, computed once when
+	// the file opens. The viewer's hot paths (scroll clamp, cursor-column bound,
+	// search indexing, render) read this instead of re-running splitFileLines —
+	// which copies the whole body and allocates per line — on every keystroke
+	// and every frame. nil when no file is open; parallels viewHighlightedLines.
+	viewLines        []string
 	viewOffset       int
 	viewHOffset      int
 	viewCursorCol    int
@@ -272,6 +278,11 @@ type model struct {
 	noCache       bool
 	theme         Theme
 	transparentBg bool
+	// renderedImageRef is the gradient-coloured image ref for the header,
+	// precomputed once in NewModel. Both inputs (imageRef, theme gradient
+	// stops) are immutable for the session, so renderHeader must not recompute
+	// the per-rune colour interpolation on every frame.
+	renderedImageRef string
 
 	// collapsedGen is bumped whenever a collapse map is mutated; it is the
 	// invalidation key for the displayTreeFor cache (see treeCache).
@@ -319,6 +330,7 @@ func themeFor(name string) Theme {
 func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
+	theme := themeFor(cfg.Theme)
 	return model{
 		state:       stateLoading,
 		imageRef:    cfg.ImageRef,
@@ -329,9 +341,10 @@ func NewModel(cfg Config) model {
 		statFile:    os.Lstat,
 		keys:        defaultKeys(),
 		noCache:     cfg.NoCache,
-		theme:       themeFor(cfg.Theme),
+		theme:       theme,
 		transparentBg: cfg.TransparentBg,
 		treeCache:   &treeCache{},
+		renderedImageRef: renderGradient(cfg.ImageRef, theme.GradientStart, theme.GradientEnd),
 		fetchCtx:    ctx,
 		fetchCancel: cancel,
 	}
@@ -497,6 +510,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewState = viewReady
 		m.viewContent = msg.content
 		m.viewHighlightedLines = nil
+		m.viewLines = splitFileLines(msg.content.Data)
 		m.viewOffset = 0
 		m.viewHOffset = 0
 		m.viewCursorCol = 0
@@ -586,6 +600,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewState = viewNone
 				m.viewContent = nil
 				m.viewHighlightedLines = nil
+				m.viewLines = nil
 				m.viewOffset = 0
 				m.viewHOffset = 0
 				m.viewCursorCol = 0
@@ -707,7 +722,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewHOffset = 0
 				m.viewCursorCol = 0
 			case key.Matches(msg, m.keys.Bottom):
-				maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
+				maxOffset := max(m.viewLineCount()-m.viewVisibleHeight(), 0)
 				m.viewOffset = maxOffset
 				m.viewHOffset = 0
 				m.viewCursorCol = 0
@@ -1012,7 +1027,7 @@ func (m *model) recomputeViewerMatches() {
 		return
 	}
 	query := strings.ToLower(m.viewSearchQuery)
-	lines := splitFileLines(m.viewContent.Data)
+	lines := m.viewLines
 	for lineIdx, line := range lines {
 		lower := strings.ToLower(line)
 		offset := 0
@@ -1042,8 +1057,7 @@ func (m *model) scrollToViewerMatch() {
 	targetLine := m.viewSearchMatches[m.viewSearchCursor][0]
 	targetCol := m.viewSearchMatches[m.viewSearchCursor][1]
 	visHeight := m.viewVisibleHeight()
-	lines := splitFileLines(m.viewContent.Data)
-	totalLines := len(lines)
+	totalLines := len(m.viewLines)
 	desired := max(targetLine-visHeight/2, 0)
 	maxOffset := max(totalLines-visHeight, 0)
 	if desired > maxOffset {
@@ -1056,7 +1070,7 @@ func (m *model) scrollToViewerMatch() {
 	// is grapheme-aware and matches the renderer's truncate metric.
 	displayCol := targetCol
 	if targetLine < totalLines {
-		runes := []rune(lines[targetLine])
+		runes := []rune(m.viewLines[targetLine])
 		if targetCol <= len(runes) {
 			displayCol = ansi.StringWidth(string(runes[:targetCol]))
 		}
@@ -1087,7 +1101,7 @@ func (m *model) viewVisibleWidth() int {
 	if m.viewContent == nil {
 		return 0
 	}
-	return m.viewVisibleWidthFor(fileViewLineCount(m.viewContent))
+	return m.viewVisibleWidthFor(m.viewLineCount())
 }
 
 // viewVisibleWidthFor is the totalLines-cached form, used inside
@@ -1848,7 +1862,13 @@ func (m model) viewReady() tea.View {
 	// header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1) = 8
 	panelHeight := m.height - chromeRows
 	header := m.renderHeader()
-	treeFiles := m.displayTree()
+	// The status bar only consumes treeFiles in its non-viewer branch; when the
+	// viewer is open renderStatusBar returns early via renderViewerStatusBar and
+	// never reads it. Skip the tree pipeline entirely in that case.
+	var treeFiles []*image.FileNode
+	if m.viewState == viewNone {
+		treeFiles = m.displayTree()
+	}
 	left := renderLayers(m.theme, m.layers(), m.layerCursor, m.layerOffset, leftWidth, panelHeight, m.focus == focusLayers, m.sizeMode, m.finalLiveSize())
 	right := m.renderRightPanel(rightWidth, panelHeight)
 
@@ -1857,6 +1877,7 @@ func (m model) viewReady() tea.View {
 	if m.viewState != viewNone {
 		viewer := renderFileView(viewerParams{
 			content:       m.viewContent,
+			lines:         m.viewLines,
 			offset:        m.viewOffset,
 			hOffset:       m.viewHOffset,
 			cursorCol:     m.viewCursorCol,
@@ -1925,8 +1946,7 @@ func (m model) renderHeader() string {
 	glyph := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Render("◆")
 	brand := lipgloss.NewStyle().Foreground(m.theme.Accent).Background(m.theme.StatusBg).Bold(true).Render(" layerx")
 	sep := lipgloss.NewStyle().Foreground(m.theme.HeaderSep).Background(m.theme.StatusBg).Render(" │ ")
-	imageName := renderGradient(m.imageRef, m.theme.GradientStart, m.theme.GradientEnd)
-	imageName = lipgloss.NewStyle().Background(m.theme.StatusBg).Render(imageName)
+	imageName := lipgloss.NewStyle().Background(m.theme.StatusBg).Render(m.renderedImageRef)
 	left := glyph + brand + sep + imageName
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant
@@ -2098,7 +2118,7 @@ func (m model) renderViewerStatusBar() string {
 		matchStyle := lipgloss.NewStyle().Foreground(m.theme.SearchCurrentBg).Background(m.theme.StatusBg).Bold(true)
 		right = matchStyle.Render(fmt.Sprintf("Match %d/%d ", m.viewSearchCursor+1, len(m.viewSearchMatches)))
 	} else if m.viewContent != nil && !m.viewContent.Binary && len(m.viewContent.Data) > 0 {
-		total := fileViewLineCount(m.viewContent)
+		total := m.viewLineCount()
 		line := m.viewOffset + 1
 		pct := 0
 		if total > 0 {
@@ -2286,8 +2306,22 @@ func atomicWriteFile(name string, data []byte, perm os.FileMode) error {
 }
 
 
+// viewLineCount returns the viewer's rendered line count from the cached split
+// in m.viewLines, preserving fileViewLineCount's contract: non-empty text whose
+// only content is a trailing newline counts as one line. Reads the cache so
+// scroll clamping does not re-split the file body on every keystroke.
+func (m *model) viewLineCount() int {
+	if m.viewContent == nil || m.viewContent.Binary || len(m.viewContent.Data) == 0 {
+		return 0
+	}
+	if len(m.viewLines) == 0 {
+		return 1
+	}
+	return len(m.viewLines)
+}
+
 func (m *model) scrollViewDown() {
-	maxOffset := max(fileViewLineCount(m.viewContent)-m.viewVisibleHeight(), 0)
+	maxOffset := max(m.viewLineCount()-m.viewVisibleHeight(), 0)
 	if m.viewOffset < maxOffset {
 		m.viewOffset++
 	}
@@ -2338,7 +2372,7 @@ func (m *model) viewMaxCursorCol() int {
 	if m.viewContent == nil {
 		return 0
 	}
-	lines := splitFileLines(m.viewContent.Data)
+	lines := m.viewLines
 	if len(lines) == 0 {
 		return 0
 	}
