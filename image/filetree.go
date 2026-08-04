@@ -16,10 +16,10 @@ type FileTree struct {
 }
 
 type FileNode struct {
-	Name              string
-	Path              string
-	Linkname          string
-	Size              int64
+	Name     string
+	Path     string
+	Linkname string
+	Size     int64
 	// EffectiveSize is the sum of Size for all non-removed file descendants
 	// (or Size itself for non-directory nodes). Populated once by
 	// computeEffectiveSizes after the tree is fully built; used by the TUI
