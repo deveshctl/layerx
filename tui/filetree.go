@@ -514,7 +514,7 @@ func formatSizeForNode(f *image.FileNode, flat bool) string {
 		return "0 B"
 	}
 	if flat {
-		sz := nodeEffectiveSize(f)
+		sz := f.EffectiveSize
 		if sz > 0 {
 			return image.FormatBytes(sz)
 		}
@@ -578,14 +578,10 @@ func applySortBySize(files []*image.FileNode, mode sortMode) []*image.FileNode {
 	if mode == sortNone {
 		return files
 	}
-	sizes := make(map[*image.FileNode]int64, len(files))
-	for _, f := range files {
-		sizes[f] = nodeEffectiveSize(f)
-	}
 	sorted := make([]*image.FileNode, len(files))
 	copy(sorted, files)
 	sort.Slice(sorted, func(i, j int) bool {
-		si, sj := sizes[sorted[i]], sizes[sorted[j]]
+		si, sj := sorted[i].EffectiveSize, sorted[j].EffectiveSize
 		if mode == sortDesc {
 			return si > sj
 		}
