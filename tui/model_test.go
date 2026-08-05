@@ -763,13 +763,13 @@ func TestFriendlyErrorGenericReturnsMessage(t *testing.T) {
 func TestRenderLayersDoesNotPanic(t *testing.T) {
 	a := testAnalysis()
 	assert.NotPanics(t, func() {
-		renderLayers(CatppuccinMocha(), a.Layers, 0, 0, 40, 20, true, sizeColDelta, 0)
+		renderLayers(CatppuccinMocha(), themeStyles{}, a.Layers, 0, 0, 40, 20, true, sizeColDelta, 0)
 	})
 }
 
 func TestRenderLayersEmptyDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
-		renderLayers(CatppuccinMocha(), nil, 0, 0, 40, 20, false, sizeColDelta, 0)
+		renderLayers(CatppuccinMocha(), themeStyles{}, nil, 0, 0, 40, 20, false, sizeColDelta, 0)
 	})
 }
 
@@ -779,12 +779,12 @@ func TestRenderFileTreeDoesNotPanic(t *testing.T) {
 	m := setupModel()
 	files := m.displayTree()
 	assert.NotPanics(t, func() {
-		renderFileTree(CatppuccinMocha(), files, 0, 0, 60, 20, true, false, "", true, false, nil, 0)
+		renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 20, true, false, "", true, false, nil, 0)
 	})
 }
 
 func TestRenderFileTreeEmptyShowsPlaceholder(t *testing.T) {
-	output := renderFileTree(CatppuccinMocha(), nil, 0, 0, 60, 20, false, false, "", true, false, nil, 0)
+	output := renderFileTree(CatppuccinMocha(), themeStyles{}, nil, 0, 0, 60, 20, false, false, "", true, false, nil, 0)
 	assert.Contains(t, output, "no filesystem changes")
 }
 
@@ -800,7 +800,7 @@ func TestRenderFileTreeCollapsedDirShowsGlyph(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	um := updated.(model)
-	line := renderFileTree(CatppuccinMocha(), um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, false, um.treeCollapsed, 0)
+	line := renderFileTree(CatppuccinMocha(), themeStyles{}, um.displayTree(), um.treeCursor, 0, 80, 20, true, false, "", true, false, um.treeCollapsed, 0)
 	assert.Contains(t, line, "▸")
 }
 

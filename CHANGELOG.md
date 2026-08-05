@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per candidate position when scanning each visible line for matches. The inner
   scan now uses `strings.Index` on the lowercased line tail, reducing allocation
   pressure during active search through large files.
+- All theme-derived lipgloss styles are now built once at startup into a
+  session-scoped style set and reused every frame. The theme is fixed for the
+  session, so the ~300–400 per-frame style allocations that were rebuilding
+  identical structs on every redraw are eliminated. Reduces GC pressure
+  noticeably on low-power machines and slow terminals.
 
 ## [v1.6.0] - 2026-07-28
 

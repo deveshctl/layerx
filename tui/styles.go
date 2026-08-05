@@ -92,6 +92,99 @@ func styleWithFg(c color.Color) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c)
 }
 
+// themeStyles holds lipgloss.Style values derived solely from the session
+// Theme. The theme is fixed at NewModel time and never changes, so these
+// styles are built once and reused for every frame instead of being
+// allocated anew on each styleWithFg / lipgloss.NewStyle() call.
+//
+// Dynamic styles — those whose color or content depends on per-row state
+// (selected background, diff color, delta color, search highlight with a
+// per-row fg) — are NOT included here; they remain inline at their call
+// sites.
+type themeStyles struct {
+	// file tree
+	metaDim   lipgloss.Style
+	headerDim lipgloss.Style
+	treeDim   lipgloss.Style
+	unchanged lipgloss.Style
+	added     lipgloss.Style
+	modified  lipgloss.Style
+	removed   lipgloss.Style
+	accent    lipgloss.Style
+	fileName  lipgloss.Style
+	// status / header bar chrome (with StatusBg background)
+	statusKey   lipgloss.Style
+	statusDim   lipgloss.Style
+	headerSep   lipgloss.Style
+	headerDimBg lipgloss.Style
+	accentBg    lipgloss.Style
+	modifiedBg  lipgloss.Style
+	addedBg     lipgloss.Style
+	bgOnly      lipgloss.Style
+	// misc
+	command      lipgloss.Style
+	separator    lipgloss.Style
+	selected     lipgloss.Style
+	statusDimRaw lipgloss.Style // StatusDim without StatusBg (loading/error screens)
+	// searchHighlight is the background used for non-current search matches
+	// in both the file tree name and the file viewer.
+	searchHighlight lipgloss.Style
+	// searchHighlightFile is FileName+SearchHighlightBg, used for non-current
+	// match segments in the file viewer where the fg is always FileName.
+	searchHighlightFile lipgloss.Style
+	// cursorOverlay is the style applied to the character under the file-viewer
+	// cursor. Both inputs (SearchCurrentFg, Accent) are immutable for the session.
+	cursorOverlay lipgloss.Style
+	// selectedStatusBg is Selected+StatusBg+Bold, used for the layer number in
+	// the status bar right section.
+	selectedStatusBg lipgloss.Style
+	// selectedTreeBg is Selected+SelectedBg, used for the selected row in the
+	// file tree and layer list.
+	selectedTreeBg lipgloss.Style
+	// searchMatchStyle is SearchCurrentBg+StatusBg+Bold, used for the match
+	// counter in the viewer status bar.
+	searchMatchStyle lipgloss.Style
+	// searchCurrentLine is SearchCurrentFg+SearchCurrentBg, used for the
+	// current search match segment in the file viewer.
+	searchCurrentLine lipgloss.Style
+	// removedStatusBg is Removed+StatusBg+Bold, used for the error status message.
+	removedStatusBg lipgloss.Style
+}
+
+func newThemeStyles(t Theme) themeStyles {
+	return themeStyles{
+		metaDim:          lipgloss.NewStyle().Foreground(t.MetaDim),
+		headerDim:        lipgloss.NewStyle().Foreground(t.HeaderDim),
+		treeDim:          lipgloss.NewStyle().Foreground(t.TreeDim),
+		unchanged:        lipgloss.NewStyle().Foreground(t.Unchanged),
+		added:            lipgloss.NewStyle().Foreground(t.Added),
+		modified:         lipgloss.NewStyle().Foreground(t.Modified),
+		removed:          lipgloss.NewStyle().Foreground(t.Removed),
+		accent:           lipgloss.NewStyle().Foreground(t.Accent),
+		fileName:         lipgloss.NewStyle().Foreground(t.FileName),
+		statusKey:        lipgloss.NewStyle().Foreground(t.StatusKey).Background(t.StatusBg).Bold(true),
+		statusDim:        lipgloss.NewStyle().Foreground(t.StatusDim).Background(t.StatusBg),
+		headerSep:        lipgloss.NewStyle().Foreground(t.HeaderSep).Background(t.StatusBg),
+		headerDimBg:      lipgloss.NewStyle().Foreground(t.HeaderDim).Background(t.StatusBg),
+		accentBg:         lipgloss.NewStyle().Foreground(t.Accent).Background(t.StatusBg),
+		modifiedBg:       lipgloss.NewStyle().Foreground(t.Modified).Background(t.StatusBg),
+		addedBg:          lipgloss.NewStyle().Foreground(t.Added).Background(t.StatusBg).Bold(true),
+		bgOnly:           lipgloss.NewStyle().Background(t.StatusBg),
+		command:          lipgloss.NewStyle().Foreground(t.Command),
+		separator:        lipgloss.NewStyle().Foreground(t.Separator),
+		selected:         lipgloss.NewStyle().Foreground(t.Selected),
+		statusDimRaw:     lipgloss.NewStyle().Foreground(t.StatusDim),
+		searchHighlight:     lipgloss.NewStyle().Background(t.SearchHighlightBg),
+		searchHighlightFile: lipgloss.NewStyle().Foreground(t.FileName).Background(t.SearchHighlightBg),
+		cursorOverlay:    lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.Accent),
+		selectedStatusBg:  lipgloss.NewStyle().Foreground(t.Selected).Background(t.StatusBg).Bold(true),
+		selectedTreeBg:    lipgloss.NewStyle().Foreground(t.Selected).Background(t.SelectedBg),
+		searchMatchStyle:  lipgloss.NewStyle().Foreground(t.SearchCurrentBg).Background(t.StatusBg).Bold(true),
+		searchCurrentLine: lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.SearchCurrentBg),
+		removedStatusBg:   lipgloss.NewStyle().Foreground(t.Removed).Background(t.StatusBg).Bold(true),
+	}
+}
+
 // renderGradient interpolates linearly from `from` to `to` across the runes
 // of text, rendering each rune in its own per-character colour. Single-rune
 // strings get the start colour; the transition is spread evenly across longer
