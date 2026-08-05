@@ -110,7 +110,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 		midpoint := contentHeight / 2
 		for i := 0; i < contentHeight; i++ {
 			if i == midpoint {
-			sb.WriteString(pad)
+				sb.WriteString(pad)
 				sb.WriteString(in.styles.unchanged.Render(msg))
 			}
 			if i < contentHeight-1 {
