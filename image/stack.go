@@ -16,6 +16,7 @@ func Stack(layers []Layer) []*FileTree {
 			} else {
 				stacked := cloneAsUnchanged(cumulative)
 				result[i] = &FileTree{Root: stacked}
+				result[i].computeEffectiveSizes()
 			}
 			continue
 		}
@@ -23,10 +24,12 @@ func Stack(layers []Layer) []*FileTree {
 		if cumulative == nil {
 			stacked := cloneAsAdded(layer.Tree.Root, i)
 			result[i] = &FileTree{Root: stacked}
+			result[i].computeEffectiveSizes()
 			cumulative = cloneStructure(stacked)
 		} else {
 			stacked := mergeLayer(cumulative, layer.Tree.Root, i)
 			result[i] = &FileTree{Root: stacked}
+			result[i].computeEffectiveSizes()
 			cumulative = cloneStructure(stacked)
 		}
 	}
@@ -343,15 +346,18 @@ func BuildAggregatedTrees(layers []Layer) []*FileTree {
 		baseline = cloneAsAdded(first.Tree.Root, 0)
 	}
 	result[0] = &FileTree{Root: cloneWithDiffType(baseline)}
+	result[0].computeEffectiveSizes()
 
 	for i := 1; i < len(layers); i++ {
 		layer := layers[i]
 		if layer.Tree == nil || layer.Tree.Root == nil || len(layer.Tree.Root.Children) == 0 {
 			result[i] = &FileTree{Root: cloneWithDiffType(baseline)}
+			result[i].computeEffectiveSizes()
 			continue
 		}
 		baseline = aggregateMerge(baseline, layer.Tree.Root, i)
 		result[i] = &FileTree{Root: cloneWithDiffType(baseline)}
+		result[i].computeEffectiveSizes()
 	}
 
 	return result
