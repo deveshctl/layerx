@@ -224,6 +224,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 
 	botBody, botAbove, botBelow := renderTreeBody(treePaneInput{
 		theme:         in.theme,
+		styles:        in.styles,
 		files:         in.botFiles,
 		cursor:        in.botCursor,
 		offset:        in.botOffset,
