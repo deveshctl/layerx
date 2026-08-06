@@ -27,7 +27,7 @@ func TestRenderFileTree_FilterActiveSuppressesBelowIndicator(t *testing.T) {
 	// (the bar persists until the query is cleared). The filter bar
 	// occupies the panel's last row, where renderPanel would otherwise
 	// paint the ▾ scroll indicator.
-	out := renderFileTree(CatppuccinMocha(), files, 0, 0, 60, 10, true, false, "f", false, false, nil, 0)
+	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "f", false, false, nil, 0)
 	if strings.Contains(out, "▾") {
 		t.Fatalf("expected no ▾ when filter bar occupies last row; got panel:\n%s", out)
 	}
@@ -35,7 +35,7 @@ func TestRenderFileTree_FilterActiveSuppressesBelowIndicator(t *testing.T) {
 
 func TestRenderFileTree_NoFilterRetainsBelowIndicator(t *testing.T) {
 	files := fakeFiles(50)
-	out := renderFileTree(CatppuccinMocha(), files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
+	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
 	if !strings.Contains(out, "▾") {
 		t.Fatalf("expected ▾ when overflow exists and filter is not active; got panel:\n%s", out)
 	}
@@ -43,7 +43,7 @@ func TestRenderFileTree_NoFilterRetainsBelowIndicator(t *testing.T) {
 
 func TestRenderFileTree_TitleSingleLayerMode(t *testing.T) {
 	files := fakeFiles(3)
-	out := renderFileTree(CatppuccinMocha(), files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
+	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
 	if !strings.Contains(out, "Current Layer Contents") {
 		t.Fatalf("expected title to contain 'Current Layer Contents' when aggregated=false; got:\n%s", out)
 	}
@@ -54,7 +54,7 @@ func TestRenderFileTree_TitleSingleLayerMode(t *testing.T) {
 
 func TestRenderFileTree_TitleAggregatedMode(t *testing.T) {
 	files := fakeFiles(3)
-	out := renderFileTree(CatppuccinMocha(), files, 0, 0, 60, 10, true, false, "", false, true, nil, 0)
+	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, true, nil, 0)
 	if !strings.Contains(out, "Aggregated Layer Contents") {
 		t.Fatalf("expected title to contain 'Aggregated Layer Contents' when aggregated=true; got:\n%s", out)
 	}
@@ -107,7 +107,7 @@ func TestRenderSplitFileTree_DividerCarriesCumulativeLabel(t *testing.T) {
 // label — that title is reserved for the split layout.
 func TestRenderFileTree_SinglePaneOmitsSplitTitle(t *testing.T) {
 	files := fakeFiles(3)
-	out := renderFileTree(CatppuccinMocha(), files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
+	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
 	if strings.Contains(out, "Layer Δ") {
 		t.Fatalf("single-pane file tree must not advertise the split title 'Layer Δ'; got:\n%s", out)
 	}
