@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -2438,7 +2439,14 @@ func friendlyError(err error) string {
 		return fmt.Sprintf("Not a valid image archive: %q. Expected a docker-save or OCI layout tarball.", invalidErr.Path)
 	}
 	if infraErr, ok := errors.AsType[*image.ErrArchiveInfra](err); ok {
-		return fmt.Sprintf("Could not %s: %v. Free up disk space or set TMPDIR to a writable location and try again.", infraErr.Op, infraErr.Cause)
+		// The disk-space hint is only trustworthy when the cause is actually a
+		// full disk. ErrArchiveInfra also covers seek/temp-file/I/O failures
+		// (e.g. on a network mount), where telling the user to free disk space
+		// misdirects them. Show the hint only on ENOSPC, matching the CLI.
+		if errors.Is(infraErr.Cause, syscall.ENOSPC) {
+			return fmt.Sprintf("Could not %s: %v. Free up disk space or set TMPDIR to a writable location and try again.", infraErr.Op, infraErr.Cause)
+		}
+		return fmt.Sprintf("Could not %s: %v.", infraErr.Op, infraErr.Cause)
 	}
 	// Platform errors are already user-readable; pass them through verbatim
 	// so the multi-line "Available platforms:" list keeps its formatting.

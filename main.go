@@ -47,6 +47,10 @@ func main() {
 		// `layerx build` exactly like `docker build` / `podman build`.
 		os.Exit(e.ExitCode)
 	}
+	// Exit 2 covers ErrCIUsage, ErrCompareUsage, and any unrecognised error.
+	// Usage errors are deliberately distinct from rule failures (ErrCIFailed →
+	// 1) and build failures (ErrBuildFailed → engine code): do NOT remap
+	// ErrCIUsage/ErrCompareUsage to exit 1.
 	os.Exit(2)
 }
 
