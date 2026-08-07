@@ -145,7 +145,11 @@ func TestEfficiency_StableOrderOnEqualWaste(t *testing.T) {
 // both copies as a duplicate occurrence of the same path and flagged the
 // first as waste — the canonical apt-get install + apt-get clean +
 // apt-get install bug.
-func TestEfficiency_InstallCleanReinstall_NoWaste(t *testing.T) {
+// install -> clean -> reinstall: the first copy is added, deleted by a
+// whiteout, then a fresh copy is added at the same path. The deleted first
+// copy still ships in its layer and is never reclaimed, so it is wasted; the
+// reinstall is a fresh live run and is not.
+func TestEfficiency_InstallCleanReinstall_FirstCopyWasted(t *testing.T) {
 	layers := []Layer{
 		{Index: 0, Size: 100, Tree: makeTree(
 			makeDir("var", "/var",
@@ -164,9 +168,11 @@ func TestEfficiency_InstallCleanReinstall_NoWaste(t *testing.T) {
 		)},
 	}
 	result := Efficiency(layers)
-	assert.Equal(t, int64(0), result.WastedBytes,
-		"a deletion between two writes means the first copy was properly cleaned up — not wasted")
-	assert.Empty(t, result.WastedFiles)
+	assert.Equal(t, int64(100), result.WastedBytes,
+		"the deleted first copy ships in layer 0 and is never reclaimed by the later whiteout")
+	require.Len(t, result.WastedFiles, 1)
+	assert.Equal(t, "/var/x", result.WastedFiles[0].Path)
+	assert.Equal(t, int64(100), result.WastedFiles[0].TotalWasted)
 }
 
 // duplicate_in_same_run: a file is added, then modified in the next layer
@@ -192,10 +198,11 @@ func TestEfficiency_DuplicateInSameRun_IsWasted(t *testing.T) {
 	assert.Equal(t, int64(100), result.WastedFiles[0].TotalWasted)
 }
 
-// install -> modify -> clean -> reinstall: only the install->modify pair
-// inside the first run contributes waste; the post-clean reinstall is a
-// fresh run with one occurrence (no waste).
-func TestEfficiency_InstallModifyCleanReinstall_OnlyFirstRunWasted(t *testing.T) {
+// install -> modify -> clean -> reinstall: the first run (install then modify,
+// no deletion in between) ends in a whiteout. Both of its copies shipped and
+// neither survives, so both are wasted (100 + 80). The post-clean reinstall is
+// a fresh live run and is not.
+func TestEfficiency_InstallModifyCleanReinstall_FirstRunFullyWasted(t *testing.T) {
 	layers := []Layer{
 		{Index: 0, Size: 100, Tree: makeTree(
 			makeDir("etc", "/etc",
@@ -219,12 +226,14 @@ func TestEfficiency_InstallModifyCleanReinstall_OnlyFirstRunWasted(t *testing.T)
 		)},
 	}
 	result := Efficiency(layers)
-	assert.Equal(t, int64(100), result.WastedBytes,
-		"first run has occurrences (0,100)+(1,80); only the size-100 layer-0 copy is shadowed; the post-clean reinstall starts a new run")
+	assert.Equal(t, int64(180), result.WastedBytes,
+		"the first run (100 then 80) ends in a whiteout, so both shipped copies are wasted; the reinstall is a fresh live run")
 }
 
-// Opaque whiteout breaks a run just like an explicit per-file whiteout.
-func TestEfficiency_OpaqueWhiteout_BreaksRun(t *testing.T) {
+// Opaque whiteout ends a run just like an explicit per-file whiteout: the copy
+// written before the opaque marker still ships and is never reclaimed, so it is
+// wasted. The post-opaque copy is a fresh live run.
+func TestEfficiency_OpaqueWhiteout_PreOpaqueCopyWasted(t *testing.T) {
 	layers := []Layer{
 		{Index: 0, Size: 100, Tree: makeTree(
 			makeDir("var", "/var",
@@ -249,8 +258,61 @@ func TestEfficiency_OpaqueWhiteout_BreaksRun(t *testing.T) {
 		)},
 	}
 	result := Efficiency(layers)
-	assert.Equal(t, int64(0), result.WastedBytes,
-		"opaque whiteout should reset run; the post-opaque copy is fresh")
+	assert.Equal(t, int64(100), result.WastedBytes,
+		"the copy written before the opaque whiteout ships and is never reclaimed")
+	require.Len(t, result.WastedFiles, 1)
+	assert.Equal(t, "/var/cache/x", result.WastedFiles[0].Path)
+}
+
+// Pure add-then-delete: a file is added in one layer and whiteouted in the
+// next, with no reintroduction. Every byte shipped in the earlier layer and
+// none survives — the whole thing is waste, and the path is listed even though
+// it is absent from the final image.
+func TestEfficiency_AddThenDelete_FullyWasted(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 1000, Tree: makeTree(
+			makeFile("big", "/big", 1000),
+		)},
+		{Index: 1, Size: 0, Tree: makeTree(
+			makeFile(".wh.big", "/.wh.big", 0),
+		)},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(1000), result.WastedBytes,
+		"an added-then-deleted file ships its bytes and is never reclaimed")
+	require.Len(t, result.WastedFiles, 1)
+	assert.Equal(t, "/big", result.WastedFiles[0].Path)
+	assert.Equal(t, int64(1000), result.WastedFiles[0].TotalWasted)
+	assert.Equal(t, 1, result.WastedFiles[0].LayerCount)
+}
+
+// add -> modify -> delete, with no reintroduction: both shipped copies are in
+// one run that ends in deletion, so both are charged.
+func TestEfficiency_AddModifyThenDelete_BothCopiesWasted(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 100, Tree: makeTree(makeFile("x", "/x", 100))},
+		{Index: 1, Size: 70, Tree: makeTree(makeFile("x", "/x", 70))},
+		{Index: 2, Size: 0, Tree: makeTree(makeFile(".wh.x", "/.wh.x", 0))},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(170), result.WastedBytes,
+		"both the added and modified copies ship and neither survives the whiteout")
+	require.Len(t, result.WastedFiles, 1)
+	assert.Equal(t, int64(170), result.WastedFiles[0].TotalWasted)
+	assert.Equal(t, 2, result.WastedFiles[0].LayerCount)
+}
+
+// Regression guard: a file added once and never duplicated or deleted stays
+// live and contributes zero waste. The deletion-aware charge rule must not
+// touch the ordinary single-occurrence live case.
+func TestEfficiency_SingleLiveFile_NoWaste(t *testing.T) {
+	layers := []Layer{
+		{Index: 0, Size: 500, Tree: makeTree(makeFile("only", "/only", 500))},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(0), result.WastedBytes)
+	assert.Empty(t, result.WastedFiles)
+	assert.Equal(t, 1.0, result.Score)
 }
 
 // regular_file_replaced_by_hardlink: a file is added as real bytes in layer 0

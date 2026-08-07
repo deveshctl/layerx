@@ -123,6 +123,11 @@ decoder is strict.
 Range validation rejects `NaN`, `±Inf`, negative byte counts, and floats
 outside `[0, 1]`.
 
+Wasted bytes include files added in one layer and deleted in a later one: the
+delete records a whiteout but never reclaims the earlier layer's bytes, so they
+still ship in the image. A score may be lower than a tool that counts only
+files duplicated across layers.
+
 ### `path-rules` — flat form (mapping)
 
 | Field | Type | Default | Required | Description |

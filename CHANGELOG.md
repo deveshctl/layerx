@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Efficiency analysis now counts a file that is added in one layer and deleted
+  in a later layer as wasted space. Deleting a file in a later layer records a
+  whiteout but does not reclaim the earlier layer's bytes — they remain stored
+  in the image and are transferred on every pull. Such files now contribute to
+  `wastedBytes`, appear in the wasted-files list (JSON export, TUI waste
+  navigator `w`), and lower the efficiency score. Scores may drop for images
+  built with the common "download, build, then `rm`" pattern; the score formula,
+  CI rules, thresholds, and exit codes are unchanged.
 - The interactive file tree now caches its flatten/filter/sort result between
   redraws, so holding a navigation key or scrolling a large image's tree stays
   responsive instead of recomputing the whole tree on every frame. The cache

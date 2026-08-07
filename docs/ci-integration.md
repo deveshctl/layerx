@@ -24,6 +24,12 @@ Rules come from `.layerx.yaml` (in the working directory) and can be
 overridden inline with CLI flags for the three global thresholds. If
 `.layerx.yaml` is missing, built-in defaults apply.
 
+The efficiency figure counts a file that is added in one layer and deleted in
+a later one as wasted — the delete records a whiteout but never reclaims the
+earlier layer's bytes, so they still ship. A score may therefore be lower than
+a tool that only counts files duplicated across layers. The rules and
+thresholds themselves are unchanged.
+
 Two ways to invoke CI mode:
 
 ```bash
