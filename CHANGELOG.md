@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failure while fetching image size during loading is now surfaced as a brief
   status message instead of being silently dropped, so a size lookup that fails
   on its own no longer leaves the loading screen blank with no explanation.
+- Every failure shown in the status bar now renders in the error colour.
+  Previously the colour was chosen by checking whether the message began with the
+  word "Error:", so the friendlier messages above — which no longer start with
+  that word — would have appeared in the success colour.
 
 ## [v1.6.0] - 2026-07-28
 

@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -132,9 +132,22 @@ type clearCopyMsg struct{}
 type clearStatusMsg struct{ gen uint64 }
 
 // setStatus assigns msg to the status bar and bumps statusGen so any
-// previously-scheduled clearStatusMsg ticks become stale and no-ops.
+// previously-scheduled clearStatusMsg ticks become stale and no-ops. The
+// message is styled as informational (non-error); use setErrorStatus for
+// failures that should render in the error colour.
 func (m *model) setStatus(msg string) {
 	m.statusMsg = msg
+	m.statusIsError = false
+	m.statusGen++
+}
+
+// setErrorStatus is setStatus for failure messages: it renders in the error
+// colour. Kept separate from string-prefix sniffing so the status bar's
+// colour is driven by intent, not by whether a message happens to start with
+// a particular word.
+func (m *model) setErrorStatus(msg string) {
+	m.statusMsg = msg
+	m.statusIsError = true
 	m.statusGen++
 }
 
@@ -202,34 +215,35 @@ type treeCache struct {
 }
 
 type model struct {
-	width        int
-	height       int
-	focus        focus
-	state        appState
-	imageRef     string
-	platform     string
-	analysis     *image.Analysis
-	layerCursor  int
-	layerOffset  int
-	treeCursor   int
-	treeOffset   int
-	errMsg       string
-	quitting     bool
-	resolver     image.Resolver
-	spinnerFrame int
-	imageSize    int64
-	loadPhase    image.ProgressPhase
-	pullLayers   int
-	pullTotal    int
-	pullBytes    int64
-	pullBytesMax int64
-	progressCh   chan image.ProgressEvent
-	copyConfirm  bool
-	statusMsg    string
-	statusGen    uint64
-	showHelp     bool
-	filterActive bool
-	filterQuery  string
+	width         int
+	height        int
+	focus         focus
+	state         appState
+	imageRef      string
+	platform      string
+	analysis      *image.Analysis
+	layerCursor   int
+	layerOffset   int
+	treeCursor    int
+	treeOffset    int
+	errMsg        string
+	quitting      bool
+	resolver      image.Resolver
+	spinnerFrame  int
+	imageSize     int64
+	loadPhase     image.ProgressPhase
+	pullLayers    int
+	pullTotal     int
+	pullBytes     int64
+	pullBytesMax  int64
+	progressCh    chan image.ProgressEvent
+	copyConfirm   bool
+	statusMsg     string
+	statusIsError bool
+	statusGen     uint64
+	showHelp      bool
+	filterActive  bool
+	filterQuery   string
 	diffOnly      bool
 	aggregated    bool
 	sortMode      sortMode
@@ -240,45 +254,45 @@ type model struct {
 	// and collapse separately — the value of the split view is being able to
 	// inspect "what just changed" and "the full carry-forward state" without
 	// losing one's place in either.
-	aggCursor    int
-	aggOffset    int
-	aggCollapsed map[string]bool
-	viewState    viewState
-	viewContent      *image.FileContent
+	aggCursor            int
+	aggOffset            int
+	aggCollapsed         map[string]bool
+	viewState            viewState
+	viewContent          *image.FileContent
 	viewHighlightedLines []string
 	// viewLines is the plain-text split of viewContent.Data, computed once when
 	// the file opens. The viewer's hot paths (scroll clamp, cursor-column bound,
 	// search indexing, render) read this instead of re-running splitFileLines —
 	// which copies the whole body and allocates per line — on every keystroke
 	// and every frame. nil when no file is open; parallels viewHighlightedLines.
-	viewLines        []string
-	viewOffset       int
-	viewHOffset      int
-	viewCursorCol    int
-	viewOriginLayer  int
-	viewOriginCmd    string
-	viewSearchActive bool
-	viewSearchQuery  string
+	viewLines         []string
+	viewOffset        int
+	viewHOffset       int
+	viewCursorCol     int
+	viewOriginLayer   int
+	viewOriginCmd     string
+	viewSearchActive  bool
+	viewSearchQuery   string
 	viewSearchMatches [][2]int
-	viewSearchCursor int
-	viewRequestID    uint64
-	viewerCancel     context.CancelFunc
-	saveRequestID    uint64
-	saveCancel       context.CancelFunc
-	extractor        image.Extractor
-	efficiency       *image.EfficiencyResult
-	writeFile        func(string, []byte, os.FileMode) error
-	statFile         func(string) (os.FileInfo, error)
-	keys             keyMap
-	showWaste     bool
-	wasteCursor   int
-	wasteOffset   int
-	wasteExpanded bool
-	wasteRows     []wasteRow
-	sizeMode      sizeColMode
-	noCache       bool
-	theme         Theme
-	transparentBg bool
+	viewSearchCursor  int
+	viewRequestID     uint64
+	viewerCancel      context.CancelFunc
+	saveRequestID     uint64
+	saveCancel        context.CancelFunc
+	extractor         image.Extractor
+	efficiency        *image.EfficiencyResult
+	writeFile         func(string, []byte, os.FileMode) error
+	statFile          func(string) (os.FileInfo, error)
+	keys              keyMap
+	showWaste         bool
+	wasteCursor       int
+	wasteOffset       int
+	wasteExpanded     bool
+	wasteRows         []wasteRow
+	sizeMode          sizeColMode
+	noCache           bool
+	theme             Theme
+	transparentBg     bool
 	// renderedImageRef is the gradient-coloured image ref for the header,
 	// precomputed once in NewModel. Both inputs (imageRef, theme gradient
 	// stops) are immutable for the session, so renderHeader must not recompute
@@ -336,22 +350,22 @@ func NewModel(cfg Config) model {
 	ctx, cancel := context.WithCancel(context.Background())
 	theme := themeFor(cfg.Theme)
 	return model{
-		state:       stateLoading,
-		imageRef:    cfg.ImageRef,
-		platform:    cfg.Platform,
-		resolver:    cfg.Resolver,
-		progressCh:  ch,
-		writeFile:   atomicWriteFile,
-		statFile:    os.Lstat,
-		keys:        defaultKeys(),
-		noCache:     cfg.NoCache,
-		theme:       theme,
-		transparentBg: cfg.TransparentBg,
+		state:            stateLoading,
+		imageRef:         cfg.ImageRef,
+		platform:         cfg.Platform,
+		resolver:         cfg.Resolver,
+		progressCh:       ch,
+		writeFile:        atomicWriteFile,
+		statFile:         os.Lstat,
+		keys:             defaultKeys(),
+		noCache:          cfg.NoCache,
+		theme:            theme,
+		transparentBg:    cfg.TransparentBg,
 		treeCache:        &treeCache{},
 		styles:           newThemeStyles(theme),
 		renderedImageRef: renderGradient(cfg.ImageRef, theme.GradientStart, theme.GradientEnd),
-		fetchCtx:    ctx,
-		fetchCancel: cancel,
+		fetchCtx:         ctx,
+		fetchCancel:      cancel,
 	}
 }
 
@@ -433,7 +447,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// on a slow pull, this is the only diagnostic the user gets until
 			// analysisMsg arrives. No scheduleStatusClear: analysisMsg will
 			// overwrite it, or the error state will replace the whole screen.
-			m.setStatus("Inspect failed: " + friendlyError(msg.err))
+			m.setErrorStatus("Inspect failed: " + friendlyError(msg.err))
 		}
 		return m, nil
 
@@ -478,6 +492,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearStatusMsg:
 		if msg.gen == m.statusGen {
 			m.statusMsg = ""
+			m.statusIsError = false
 		}
 		return m, nil
 
@@ -516,7 +531,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.viewState = viewNone
-			m.setStatus(friendlyError(msg.err))
+			m.setErrorStatus(friendlyError(msg.err))
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		m.viewState = viewReady
@@ -556,7 +571,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveCancel = nil
 		}
 		if msg.err != nil {
-			m.setStatus(friendlyError(msg.err))
+			m.setErrorStatus(friendlyError(msg.err))
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		// Run stat + write off-thread so a slow disk (network mount, encrypted
@@ -572,7 +587,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.setStatus(friendlySaveError(msg.err, msg.original))
+			m.setErrorStatus(friendlySaveError(msg.err, msg.original))
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		if msg.target != msg.original {
@@ -935,15 +950,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			f := files[cur]
 			if f.IsDir {
-				m.setStatus("Error: cannot extract directory")
+				m.setErrorStatus("Cannot extract a directory")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if f.DiffType == image.Removed {
-				m.setStatus("Error: file removed in this layer")
+				m.setErrorStatus("File was removed in this layer")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			if m.extractor == nil {
-				m.setStatus("Error: extractor unavailable")
+				m.setErrorStatus("Extractor unavailable")
 				return m, m.scheduleStatusClear(2 * time.Second)
 			}
 			m.setStatus("Extracting...")
@@ -1161,11 +1176,11 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	if f.DiffType == image.Removed {
-		m.setStatus("Error: file removed in this layer")
+		m.setErrorStatus("File was removed in this layer")
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	if m.extractor == nil {
-		m.setStatus("Error: extractor unavailable")
+		m.setErrorStatus("Extractor unavailable")
 		return m, m.scheduleStatusClear(2 * time.Second)
 	}
 	m.viewState = viewLoading
@@ -1887,22 +1902,22 @@ func (m model) viewReady() tea.View {
 
 	if m.viewState != viewNone {
 		viewer := renderFileView(viewerParams{
-			content:       m.viewContent,
-			lines:         m.viewLines,
-			offset:        m.viewOffset,
-			hOffset:       m.viewHOffset,
-			cursorCol:     m.viewCursorCol,
-			width:         m.width,
-			height:        panelHeight,
-			loading:       m.viewState == viewLoading,
-			spinnerFrame:  m.spinnerFrame,
-			originLayer:   m.viewOriginLayer,
-			originCmd:     m.viewOriginCmd,
-			currentLayer:  m.layerCursor,
-			searchQuery:   m.viewSearchQuery,
-			searchMatches: m.viewSearchMatches,
-			searchCursor:  m.viewSearchCursor,
-			searchActive:  m.viewSearchActive,
+			content:          m.viewContent,
+			lines:            m.viewLines,
+			offset:           m.viewOffset,
+			hOffset:          m.viewHOffset,
+			cursorCol:        m.viewCursorCol,
+			width:            m.width,
+			height:           panelHeight,
+			loading:          m.viewState == viewLoading,
+			spinnerFrame:     m.spinnerFrame,
+			originLayer:      m.viewOriginLayer,
+			originCmd:        m.viewOriginCmd,
+			currentLayer:     m.layerCursor,
+			searchQuery:      m.viewSearchQuery,
+			searchMatches:    m.viewSearchMatches,
+			searchCursor:     m.viewSearchCursor,
+			searchActive:     m.viewSearchActive,
 			highlightedLines: m.viewHighlightedLines,
 			theme:            m.theme,
 			styles:           m.styles,
@@ -2043,7 +2058,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	var right string
 	if m.statusMsg != "" {
 		msgStyle := m.styles.addedBg
-		if strings.HasPrefix(m.statusMsg, "Error:") {
+		if m.statusIsError {
 			msgStyle = m.styles.removedStatusBg
 		}
 		right = msgStyle.Render(m.statusMsg) + " "
@@ -2309,7 +2324,6 @@ func atomicWriteFile(name string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-
 // viewLineCount returns the viewer's rendered line count from the cached split
 // in m.viewLines, preserving fileViewLineCount's contract: non-empty text whose
 // only content is a trailing newline counts as one line. Reads the cache so
@@ -2467,15 +2481,25 @@ func friendlyError(err error) string {
 }
 
 // friendlySaveError renders a file-save write failure for the status bar.
-// The write path spools through a temp file, so the raw os error on a full
-// disk leaks the internal .tmp path ("write /out/.tmp-123: no space left on
-// device"). Gate the disk-space case on ENOSPC — matching the CLI and the
-// ErrArchiveInfra path in friendlyError — and name only the user's file, not
-// the temp spool. name is the path the user asked to save to.
+// The write path spools through a temp file, so the raw os error names the
+// internal spool path ("write /out/.layerx-save-123: no space left on
+// device"). ENOSPC gets a dedicated recovery hint (matching the CLI and the
+// ErrArchiveInfra path in friendlyError); every other write error has its
+// *os.PathError / *os.LinkError wrapper unwrapped so only the syscall reason
+// survives — the temp spool path never reaches the user. name is the path
+// the user asked to save to; only its base name is shown.
 func friendlySaveError(err error, name string) string {
 	base := filepath.Base(name)
 	if errors.Is(err, syscall.ENOSPC) {
 		return fmt.Sprintf("Could not save %s: not enough disk space. Free space or choose another directory.", base)
+	}
+	// Strip the leaking spool path: *os.PathError.Error() is "op path: reason",
+	// and path here is the internal temp file. Reduce to the bare reason.
+	if pathErr, ok := errors.AsType[*os.PathError](err); ok {
+		return fmt.Sprintf("Could not save %s: %v", base, pathErr.Err)
+	}
+	if linkErr, ok := errors.AsType[*os.LinkError](err); ok {
+		return fmt.Sprintf("Could not save %s: %v", base, linkErr.Err)
 	}
 	return fmt.Sprintf("Could not save %s: %v", base, err)
 }
