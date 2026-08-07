@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON export now reports a clean "no space left to write &lt;path&gt;" message on a
   full disk instead of leaking the internal temporary spool file path into the
   error shown to the user.
+- Opening a file in the interactive viewer that cannot be read (for example a
+  file that was removed by a later layer, or a daemon that became unreachable
+  mid-session) now shows a readable message in the status bar instead of a raw
+  internal error string.
+- Saving an extracted file to a full disk now reports "not enough disk space"
+  and names only the file you chose, instead of leaking the internal temporary
+  file path and a raw system error into the status bar.
+- A failure while fetching image size during loading is now surfaced as a brief
+  status message instead of being silently dropped, so a size lookup that fails
+  on its own no longer leaves the loading screen blank with no explanation.
 
 ## [v1.6.0] - 2026-07-28
 

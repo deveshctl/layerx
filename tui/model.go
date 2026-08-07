@@ -427,6 +427,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case inspectMsg:
 		if msg.err == nil && msg.meta != nil {
 			m.imageSize = msg.meta.Size
+		} else if msg.err != nil && !errors.Is(msg.err, context.Canceled) && m.state == stateLoading {
+			// Inspect runs concurrently with the analysis fetch. If it fails
+			// fast (e.g. connection refused) while analysis is still blocked
+			// on a slow pull, this is the only diagnostic the user gets until
+			// analysisMsg arrives. No scheduleStatusClear: analysisMsg will
+			// overwrite it, or the error state will replace the whole screen.
+			m.setStatus("Inspect failed: " + friendlyError(msg.err))
 		}
 		return m, nil
 
@@ -509,7 +516,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.viewState = viewNone
-			m.setStatus("Error: " + msg.err.Error())
+			m.setStatus(friendlyError(msg.err))
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		m.viewState = viewReady
@@ -549,7 +556,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveCancel = nil
 		}
 		if msg.err != nil {
-			m.setStatus("Error: " + msg.err.Error())
+			m.setStatus(friendlyError(msg.err))
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		// Run stat + write off-thread so a slow disk (network mount, encrypted
@@ -565,7 +572,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.setStatus("Error: " + msg.err.Error())
+			m.setStatus(friendlySaveError(msg.err, msg.original))
 			return m, m.scheduleStatusClear(3 * time.Second)
 		}
 		if msg.target != msg.original {
@@ -2457,6 +2464,20 @@ func friendlyError(err error) string {
 		return pErr.Error()
 	}
 	return err.Error()
+}
+
+// friendlySaveError renders a file-save write failure for the status bar.
+// The write path spools through a temp file, so the raw os error on a full
+// disk leaks the internal .tmp path ("write /out/.tmp-123: no space left on
+// device"). Gate the disk-space case on ENOSPC — matching the CLI and the
+// ErrArchiveInfra path in friendlyError — and name only the user's file, not
+// the temp spool. name is the path the user asked to save to.
+func friendlySaveError(err error, name string) string {
+	base := filepath.Base(name)
+	if errors.Is(err, syscall.ENOSPC) {
+		return fmt.Sprintf("Could not save %s: not enough disk space. Free space or choose another directory.", base)
+	}
+	return fmt.Sprintf("Could not save %s: %v", base, err)
 }
 
 // Run starts the TUI program with the given configuration.

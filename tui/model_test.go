@@ -2792,3 +2792,52 @@ func TestDisplayTreeCacheReflectsReanalysis(t *testing.T) {
 	assert.True(t, found, "a replaced analysis must invalidate the warm tree cache")
 }
 
+// --- inspectMsg error surfacing (ERR-5) --------------------------------------
+
+func TestInspectMsgErrorSurfacesDuringLoading(t *testing.T) {
+	m := NewModel(Config{ImageRef: "test:latest"})
+	require.Equal(t, stateLoading, m.state)
+	m = send(m, inspectMsg{err: &image.ErrDaemonNotRunning{Engine: "docker", Cause: errors.New("connection refused")}})
+	assert.Contains(t, m.statusMsg, "Inspect failed:")
+	assert.Contains(t, m.statusMsg, "Docker is not running")
+}
+
+func TestInspectMsgCanceledDoesNotSurface(t *testing.T) {
+	m := NewModel(Config{ImageRef: "test:latest"})
+	require.Equal(t, stateLoading, m.state)
+	m = send(m, inspectMsg{err: context.Canceled})
+	assert.Empty(t, m.statusMsg, "a canceled inspect (user quit) must not raise a status warning")
+}
+
+func TestInspectMsgErrorIgnoredWhenReady(t *testing.T) {
+	m := setupModel() // stateReady
+	m = send(m, inspectMsg{err: errors.New("late failure")})
+	assert.Empty(t, m.statusMsg, "a late inspect error after the tree is ready is noise, not a diagnostic")
+}
+
+func TestInspectMsgSuccessSetsImageSize(t *testing.T) {
+	m := NewModel(Config{ImageRef: "test:latest"})
+	m = send(m, inspectMsg{meta: &image.ImageMeta{Size: 12345}})
+	assert.Equal(t, int64(12345), m.imageSize)
+	assert.Empty(t, m.statusMsg)
+}
+
+// --- friendlySaveError (ERR-2 write phase) -----------------------------------
+
+func TestFriendlySaveErrorENOSPC(t *testing.T) {
+	err := fmt.Errorf("write /home/user/out/.tmp-123: %w", syscall.ENOSPC)
+	got := friendlySaveError(err, "/home/user/out/server.bin")
+	assert.Contains(t, got, "server.bin")
+	assert.Contains(t, got, "disk space")
+	assert.NotContains(t, got, ".tmp-123", "the internal temp path must not leak into the message")
+	assert.NotContains(t, got, "/home/user/out/server.bin", "only the base name should appear, not the full path")
+}
+
+func TestFriendlySaveErrorGeneric(t *testing.T) {
+	err := errors.New("permission denied")
+	got := friendlySaveError(err, "/some/dir/file.txt")
+	assert.Contains(t, got, "file.txt")
+	assert.Contains(t, got, "permission denied")
+	assert.NotContains(t, got, "/some/dir", "only the base name should appear, not the directory")
+}
+
