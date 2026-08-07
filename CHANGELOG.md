@@ -39,6 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical structs on every redraw are eliminated. Reduces GC pressure
   noticeably on low-power machines and slow terminals.
 
+### Fixed
+- Running `layerx <image>` with no reachable container engine (or with a
+  Podman connection that is unconfigured, missing, or malformed) now prints the
+  same friendly, actionable message the other commands already showed —
+  previously the interactive command printed the raw internal error string with
+  no recovery hint.
+- The archive "could not …" error in the interactive viewer no longer suggests
+  freeing disk space or setting `TMPDIR` for failures that are not disk-full
+  (for example a seek or I/O error on a network mount), matching the
+  command-line behaviour. The disk-space hint now appears only when the
+  underlying cause is a full disk.
+- JSON export now reports a clean "no space left to write &lt;path&gt;" message on a
+  full disk instead of leaking the internal temporary spool file path into the
+  error shown to the user.
+
 ## [v1.6.0] - 2026-07-28
 
 Eight built-in colour themes, transparent-background mode, and TUI visual

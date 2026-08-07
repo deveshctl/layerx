@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -307,4 +308,23 @@ func TestRunJSONExport_ContextCancelled(t *testing.T) {
 
 	_, statErr := os.Stat(outPath)
 	assert.True(t, os.IsNotExist(statErr), "no output file must exist when resolve was cancelled (statErr = %v)", statErr)
+}
+
+func TestCleanDiskWriteErr_ENOSPCNamesTargetNotTmp(t *testing.T) {
+	// The raw write error carries the internal .tmp spool path; on ENOSPC the
+	// user-facing message must name the output path they supplied instead.
+	target := "/home/user/out.json"
+	raw := &os.PathError{Op: "write", Path: "/home/user/.layerx-json-123.tmp", Err: syscall.ENOSPC}
+	got := cleanDiskWriteErr(target, raw)
+	assert.Contains(t, got.Error(), target)
+	assert.NotContains(t, got.Error(), ".tmp")
+	assert.Contains(t, got.Error(), "no space left")
+}
+
+func TestCleanDiskWriteErr_NonENOSPCPassesThrough(t *testing.T) {
+	// Non-disk-full errors are returned unchanged — their paths are the target
+	// or a directory the user chose, so there is nothing internal to hide.
+	raw := errors.New("permission denied")
+	got := cleanDiskWriteErr("/home/user/out.json", raw)
+	assert.Same(t, raw, got)
 }

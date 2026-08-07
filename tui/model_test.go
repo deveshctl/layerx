@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -756,6 +757,25 @@ func TestFriendlyErrorImageNotFound(t *testing.T) {
 func TestFriendlyErrorGenericReturnsMessage(t *testing.T) {
 	err := errors.New("unexpected failure")
 	assert.Equal(t, "unexpected failure", friendlyError(err))
+}
+
+func TestFriendlyErrorArchiveInfra_ENOSPCKeepsHint(t *testing.T) {
+	// A genuine disk-full cause should keep the free-up-space hint.
+	err := &image.ErrArchiveInfra{Op: "spool layer to temp file", Cause: syscall.ENOSPC}
+	msg := friendlyError(err)
+	assert.Contains(t, msg, "spool layer to temp file")
+	assert.Contains(t, msg, "Free up disk space")
+}
+
+func TestFriendlyErrorArchiveInfra_NonENOSPCDropsHint(t *testing.T) {
+	// A seek/I/O failure that is not ENOSPC must NOT tell the user to free
+	// disk space — that misdirects on network-mount and permission errors.
+	err := &image.ErrArchiveInfra{Op: "seek in spooled archive", Cause: errors.New("input/output error")}
+	msg := friendlyError(err)
+	assert.Contains(t, msg, "seek in spooled archive")
+	assert.Contains(t, msg, "input/output error")
+	assert.NotContains(t, msg, "Free up disk space")
+	assert.NotContains(t, msg, "TMPDIR")
 }
 
 // --- renderLayers ------------------------------------------------------------

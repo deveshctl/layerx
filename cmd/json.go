@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/deveshctl/layerx/image"
 )
@@ -95,7 +97,10 @@ func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) erro
 	}
 
 	if err := writeJSONAtomic(outputPath, data); err != nil {
-		return fmt.Errorf("writing %s: %w", outputPath, err)
+		// writeJSONAtomic already names outputPath in its disk-full message;
+		// wrap the generic path with %w so callers can still errors.Is/As it
+		// without prefixing a second, redundant "writing <path>:".
+		return fmt.Errorf("could not write JSON: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "layerx: wrote analysis to %s\n", outputPath)
@@ -174,26 +179,37 @@ func writeJSONAtomic(targetPath string, data []byte) error {
 	dir := filepath.Dir(targetPath)
 	f, err := os.CreateTemp(dir, ".layerx-json-*.tmp")
 	if err != nil {
-		return err
+		return cleanDiskWriteErr(targetPath, err)
 	}
 	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return err
+		return cleanDiskWriteErr(targetPath, err)
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return err
+		return cleanDiskWriteErr(targetPath, err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return err
+		return cleanDiskWriteErr(targetPath, err)
 	}
 	if err := os.Rename(tmp, targetPath); err != nil {
 		os.Remove(tmp)
-		return err
+		return cleanDiskWriteErr(targetPath, err)
 	}
 	return nil
+}
+
+// cleanDiskWriteErr rewrites a disk-full failure so the user-facing message
+// names the output path they supplied instead of the internal .tmp spool file
+// (which the raw syscall error carries). Non-ENOSPC errors pass through
+// unchanged — their paths are already the target or a directory the user chose.
+func cleanDiskWriteErr(targetPath string, err error) error {
+	if errors.Is(err, syscall.ENOSPC) {
+		return fmt.Errorf("no space left to write %s (free up disk space and try again)", targetPath)
+	}
+	return err
 }

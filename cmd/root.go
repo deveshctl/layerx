@@ -256,24 +256,35 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return runJSONExport(cmd.Context(), imageRef, flagJSON, noCache)
 	}
 
+	// selectResolver produces the typed engine/resolver errors (no engine
+	// found, Podman connection not configured, malformed connection config)
+	// synchronously, before the TUI starts. Route them through presentCLIError
+	// so the user sees the friendly, actionable message rather than the raw
+	// Error() string cobra would otherwise print — and silence cobra's own
+	// printer so it does not double-print. Mirrors the --json branch above.
+	cmd.SilenceErrors = true
+
 	resolver, err := selectResolver(imageRef)
 	if err != nil {
-		return err
+		return presentCLIError(os.Stderr, err)
 	}
 
 	theme, err := resolveTheme(cfg.Theme, flagTheme)
 	if err != nil {
-		return err
+		return presentCLIError(os.Stderr, err)
 	}
 
-	return tui.Run(tui.Config{
+	if err := tui.Run(tui.Config{
 		ImageRef:      imageRef,
 		Resolver:      resolver,
 		NoCache:       noCache,
 		Platform:      activePlatformDisplay(),
 		Theme:         theme,
 		TransparentBg: cfg.TransparentBackground,
-	})
+	}); err != nil {
+		return presentCLIError(os.Stderr, err)
+	}
+	return nil
 }
 
 // warnCIThresholdFlagsIgnored prints a warning to w when CI=true is active
