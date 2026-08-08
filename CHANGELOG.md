@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.1] - 2026-08-08
+
+An efficiency-scoring correction, friendlier error messages across the
+interactive viewer, and a pass of TUI/analysis performance work that removes
+redundant per-frame computation on large images.
+
 ### Changed
 - Efficiency analysis now counts a file that is added in one layer and deleted
   in a later layer as wasted space. Deleting a file in a later layer records a
