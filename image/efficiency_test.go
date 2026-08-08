@@ -139,12 +139,6 @@ func TestEfficiency_StableOrderOnEqualWaste(t *testing.T) {
 	}
 }
 
-// install_clean_reinstall: a file is added, deleted via whiteout, and a
-// different file appears at the same path. The two distinct files live in
-// separate runs and neither is wasted. Pre-Round-8 the algorithm counted
-// both copies as a duplicate occurrence of the same path and flagged the
-// first as waste — the canonical apt-get install + apt-get clean +
-// apt-get install bug.
 // install -> clean -> reinstall: the first copy is added, deleted by a
 // whiteout, then a fresh copy is added at the same path. The deleted first
 // copy still ships in its layer and is never reclaimed, so it is wasted; the
@@ -173,6 +167,8 @@ func TestEfficiency_InstallCleanReinstall_FirstCopyWasted(t *testing.T) {
 	require.Len(t, result.WastedFiles, 1)
 	assert.Equal(t, "/var/x", result.WastedFiles[0].Path)
 	assert.Equal(t, int64(100), result.WastedFiles[0].TotalWasted)
+	assert.Equal(t, 1, result.WastedFiles[0].LayerCount,
+		"only the deleted copy in layer 0 is waste; the reinstall in layer 2 is the live keeper")
 }
 
 // duplicate_in_same_run: a file is added, then modified in the next layer

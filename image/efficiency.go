@@ -101,15 +101,6 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		var pathWaste int64
 		var occurrenceCount int
 		for _, run := range runs {
-			for _, occ := range run.occ {
-				// LayerCount documents "how many layers contributed bytes".
-				// Zero-size occurrences (hardlink replacements that extend a
-				// run only to keep the earlier real-file bytes chargeable)
-				// are not byte-contributors and must not inflate the count.
-				if occ.size > 0 {
-					occurrenceCount++
-				}
-			}
 			// A run that ended in deletion ships every one of its copies with
 			// nothing surviving into the final image, so all occurrences are
 			// waste. A run still live at the top of the stack keeps its last
@@ -118,12 +109,27 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 			charged := run.occ
 			if !run.endedInDeletion {
 				if len(run.occ) < 2 {
+					// Single live occurrence with no prior copy in this run: no
+					// waste, and the path's reinstall copy must not inflate
+					// LayerCount for waste entries produced by earlier deleted runs.
 					continue
 				}
 				charged = run.occ[:len(run.occ)-1]
 			}
 			for _, occ := range charged {
 				pathWaste += occ.size
+			}
+			// LayerCount counts byte-contributing occurrences across charged
+			// copies only. For deleted runs, every occurrence is charged. For
+			// live runs, the surviving last copy is excluded from charged but
+			// is still a real byte-contributor visible to the user, so include
+			// all non-zero occurrences in the run (not just the charged slice).
+			// The single-occurrence live run above is skipped entirely, so
+			// reinstalled copies from a separate run do not inflate the count.
+			for _, occ := range run.occ {
+				if occ.size > 0 {
+					occurrenceCount++
+				}
 			}
 		}
 		if pathWaste == 0 {
