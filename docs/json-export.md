@@ -122,7 +122,7 @@ Schema version `1.0.1`. Pretty-printed with two-space indent.
 | Field | Type | Description |
 |---|---|---|
 | `score` | float64 | `1.0 − wastedBytes / (liveBytes + wastedBytes)`, in `[0.0, 1.0]`. Higher is better. |
-| `wastedBytes` | int64 | Bytes duplicated across layers (file-path appears in more than one layer; only first occurrence counts as "live"). |
+| `wastedBytes` | int64 | Bytes that ship in the image but are not live in the final filesystem. Two cases: a file rewritten across layers (only the last copy is live; earlier copies are waste), and a file added in one layer then deleted in a later one (the delete records a whiteout but never reclaims the earlier layer's bytes, so the whole file is waste). |
 | `wastedFiles` | array | Per-file waste breakdown. Always `[]` when empty (never `null`). Sorted by `totalWasted` descending, then `path` ascending. |
 
 #### `efficiency.wastedFiles[]`

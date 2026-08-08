@@ -18,10 +18,12 @@ type EfficiencyResult struct {
 // layers. It stacks layers internally; prefer EfficiencyFromAnalysis when the
 // caller already has stacked trees.
 //
-// A file at the same path counted across runs separated by deletion (whiteout
-// or opaque whiteout) is NOT considered wasted: the deleted copy was properly
-// cleaned up before the new copy appeared. Within a single run (no deletion
-// in between), all but the last occurrence are wasted.
+// Within a run of a path's occurrences (a span with no deletion in between),
+// all but the last occurrence are wasted — the last is the copy that survives.
+// A run that ends in a deletion (whiteout or opaque whiteout) has ALL of its
+// occurrences wasted: the bytes were written into earlier layers, still ship in
+// the image, and are never reclaimed by the later deletion, yet none of them
+// survive into the final filesystem.
 func Efficiency(layers []Layer) *EfficiencyResult {
 	if len(layers) == 0 {
 		return &EfficiencyResult{Score: 1.0}
@@ -54,6 +56,16 @@ func EfficiencyFromAnalysis(a *Analysis) *EfficiencyResult {
 type efficiencyOccurrence struct {
 	layerIdx int
 	size     int64
+}
+
+// pathRun is one contiguous span of a path's Added/Modified occurrences.
+// endedInDeletion records why the span closed: true when a whiteout, opaque
+// whiteout, or absence removed the path (nothing from the run survives into the
+// final image), false when the run reached the top of the layer stack still
+// live. The charge rule differs between the two — see computeEfficiency.
+type pathRun struct {
+	occ             []efficiencyOccurrence
+	endedInDeletion bool
 }
 
 func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
@@ -89,20 +101,35 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		var pathWaste int64
 		var occurrenceCount int
 		for _, run := range runs {
-			for _, occ := range run {
-				// LayerCount documents "how many layers contributed bytes".
-				// Zero-size occurrences (hardlink replacements that extend a
-				// run only to keep the earlier real-file bytes chargeable)
-				// are not byte-contributors and must not inflate the count.
+			// A run that ended in deletion ships every one of its copies with
+			// nothing surviving into the final image, so all occurrences are
+			// waste. A run still live at the top of the stack keeps its last
+			// occurrence (the copy present in the image); only the earlier,
+			// shadowed copies are waste.
+			charged := run.occ
+			if !run.endedInDeletion {
+				if len(run.occ) < 2 {
+					// Single live occurrence with no prior copy in this run: no
+					// waste, and the path's reinstall copy must not inflate
+					// LayerCount for waste entries produced by earlier deleted runs.
+					continue
+				}
+				charged = run.occ[:len(run.occ)-1]
+			}
+			for _, occ := range charged {
+				pathWaste += occ.size
+			}
+			// LayerCount counts byte-contributing occurrences across charged
+			// copies only. For deleted runs, every occurrence is charged. For
+			// live runs, the surviving last copy is excluded from charged but
+			// is still a real byte-contributor visible to the user, so include
+			// all non-zero occurrences in the run (not just the charged slice).
+			// The single-occurrence live run above is skipped entirely, so
+			// reinstalled copies from a separate run do not inflate the count.
+			for _, occ := range run.occ {
 				if occ.size > 0 {
 					occurrenceCount++
 				}
-			}
-			if len(run) < 2 {
-				continue
-			}
-			for _, occ := range run[:len(run)-1] {
-				pathWaste += occ.size
 			}
 		}
 		if pathWaste == 0 {
@@ -189,34 +216,41 @@ func indexTree(node *FileNode, idx map[string]*FileNode) {
 // occurrence is recorded only at snapshots where the path was Added or
 // Modified — the layer that actually wrote new bytes. Unchanged carryover does
 // not contribute.
-func pathRuns(path string, indices []map[string]*FileNode) [][]efficiencyOccurrence {
-	var runs [][]efficiencyOccurrence
+//
+// Each run records whether it ended in a deletion. A run flushed by a Removed
+// node, an absence, or a nil index is marked endedInDeletion — none of its
+// bytes survive into the final image, yet all of them shipped, so
+// computeEfficiency charges every occurrence. A run flushed only by reaching
+// the end of the layer stack is still live; its last occurrence is the copy
+// present in the final image and is not waste.
+func pathRuns(path string, indices []map[string]*FileNode) []pathRun {
+	var runs []pathRun
 	var cur []efficiencyOccurrence
 
-	flush := func() {
+	flush := func(deleted bool) {
 		if len(cur) > 0 {
-			runs = append(runs, cur)
+			runs = append(runs, pathRun{occ: cur, endedInDeletion: deleted})
 			cur = nil
 		}
 	}
 
 	for i, idx := range indices {
 		if idx == nil {
-			flush()
+			flush(true)
 			continue
 		}
 		node, ok := idx[path]
 		switch {
 		case !ok:
-			flush()
+			flush(true)
 		case node.DiffType == Removed:
-			flush()
+			flush(true)
 		case node.DiffType == Added || node.DiffType == Modified:
 			cur = append(cur, efficiencyOccurrence{layerIdx: i, size: node.Size})
 		}
 		// Unchanged carryover: skip (no new bytes; don't flush).
 	}
-	flush()
+	flush(false)
 	return runs
 }
 
