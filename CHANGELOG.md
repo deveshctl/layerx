@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ErrNoEngineFound` now implements `Unwrap()`, consistent with all other error types in the package.
+
 ## [v1.6.1] - 2026-08-08
 
 An efficiency-scoring correction, friendlier error messages across the

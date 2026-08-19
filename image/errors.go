@@ -134,12 +134,15 @@ func (e *ErrPodmanSocketNotSet) Error() string {
 
 type ErrNoEngineFound struct {
 	Tried []string
+	Cause error
 }
 
 func (e *ErrNoEngineFound) Error() string {
 	return fmt.Sprintf("no container engine found; tried: %s",
 		strings.Join(e.Tried, ", "))
 }
+
+func (e *ErrNoEngineFound) Unwrap() error { return e.Cause }
 
 // ErrPlatformInvalid is returned when --platform cannot be parsed at all
 // (empty component, too many slashes). Distinct from ErrPlatformNotInImage:
