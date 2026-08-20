@@ -51,7 +51,7 @@ func friendlyCLIError(err error) string {
 	if e, ok := errors.AsType[*image.ErrPodmanSocketNotSet](err); ok {
 		return fmt.Sprintf("--engine podman on %s: no Podman connection configured "+
 			"(run `podman system connection add <name> <uri>` and "+
-			"`podman system connection default <name>`, or set CONTAINER_HOST)",
+			"`podman system connection default <name>`, or set CONTAINER_HOST / DOCKER_HOST)",
 			e.Platform)
 	}
 	if e, ok := errors.AsType[*image.ErrNoEngineFound](err); ok {

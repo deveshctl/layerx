@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `ErrNoEngineFound` now implements `Unwrap()`, consistent with all other error types in the package.
 - `FormatBytes` now delegates to the internal `formatUnsignedBytes` helper, removing ~15 lines of duplicated formatting logic.
+- CLI error message for `--engine podman` now mentions `DOCKER_HOST` alongside `CONTAINER_HOST`, matching the hint in the library error.
+- Usage synopsis now uses `IMAGE_OR_ARCHIVE` consistently where both image references and local archives are accepted.
 
 ## [v1.6.1] - 2026-08-08
 

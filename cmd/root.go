@@ -29,8 +29,8 @@ var rootCmd = &cobra.Command{
 changes, and wasted bytes.
 
 Common usage:
-  layerx IMAGE              browse layers interactively in a TUI
-  layerx ci IMAGE           gate a build on efficiency thresholds
+  layerx IMAGE_OR_ARCHIVE    browse layers interactively in a TUI
+  layerx ci IMAGE_OR_ARCHIVE gate a build on efficiency thresholds
   layerx compare A B        diff two images for regressions
   layerx build [ARGS...]    build via the active engine, then inspect the result
 
