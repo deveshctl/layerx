@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `ErrNoEngineFound` now implements `Unwrap()`, consistent with all other error types in the package.
+- `FormatBytes` now delegates to the internal `formatUnsignedBytes` helper, removing ~15 lines of duplicated formatting logic.
 
 ## [v1.6.1] - 2026-08-08
 

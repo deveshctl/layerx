@@ -5,25 +5,6 @@ import (
 	"io/fs"
 )
 
-func FormatBytes(b int64) string {
-	const (
-		kb = 1024
-		mb = kb * 1024
-		gb = mb * 1024
-	)
-
-	switch {
-	case b >= gb:
-		return fmt.Sprintf("%.1f GB", float64(b)/float64(gb))
-	case b >= mb:
-		return fmt.Sprintf("%.1f MB", float64(b)/float64(mb))
-	case b >= kb:
-		return fmt.Sprintf("%.1f KB", float64(b)/float64(kb))
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
-}
-
 func formatUnsignedBytes(b uint64) string {
 	const (
 		kb = 1024
@@ -40,6 +21,10 @@ func formatUnsignedBytes(b uint64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+func FormatBytes(b int64) string {
+	return formatUnsignedBytes(uint64(b))
 }
 
 // FormatSignedBytes formats b like FormatBytes but with an explicit sign
