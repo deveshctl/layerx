@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `layerx compare` daemon and resolver errors now go through the same friendly error formatter as `layerx ci` and `layerx` itself, so actionable hints ("Is Docker running?", "pass a saved-image archive path instead") are shown consistently.
+- Status bar "toggle / view" hint in split-pane mode now tracks the correct pane's cursor; previously it read the top pane's cursor position even when the bottom pane had focus.
+- File viewer (`readFirstFileFromTar`) now reads up to the full `MaxViewSize` limit regardless of the tar entry's declared size, consistent with the save-file path. A crafted archive with an understated size header no longer silently truncates the viewed content.
+- `layerx build` iidfile setup now surfaces a removal error instead of silently discarding it; on Windows a failed removal no longer leaves a zero-byte file that causes the engine to report an empty image ID.
 - `ErrNoEngineFound` now implements `Unwrap()`, consistent with all other error types in the package.
 - `FormatBytes` now delegates to the internal `formatUnsignedBytes` helper, removing ~15 lines of duplicated formatting logic.
 - CLI error message for `--engine podman` now mentions `DOCKER_HOST` alongside `CONTAINER_HOST`, matching the hint in the library error.

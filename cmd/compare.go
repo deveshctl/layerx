@@ -164,7 +164,7 @@ func runCompareCmd(cmd *cobra.Command, args []string) error {
 		if _, ok := errors.AsType[*ErrCompareUsage](err); ok {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		presentCLIError(os.Stderr, err)
 	}
 	return err
 }
