@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FormatBytes` now delegates to the internal `formatUnsignedBytes` helper, removing ~15 lines of duplicated formatting logic.
 - CLI error message for `--engine podman` now mentions `DOCKER_HOST` alongside `CONTAINER_HOST`, matching the hint in the library error.
 - Usage synopsis now uses `IMAGE_OR_ARCHIVE` consistently where both image references and local archives are accepted.
+- `layerx compare` now uses the pre-computed stacked trees from the analysis for efficiency scoring, consistent with every other caller. Previously it re-stacked from raw layers, which could produce mismatched efficiency and file-diff results when the analysis carried custom stacked trees (e.g. from a cache path).
+- `layerx compare` regression detection now checks efficiency score drop before wasted-bytes increase, matching the order in which regression reasons are reported.
 
 ## [v1.6.1] - 2026-08-08
 
