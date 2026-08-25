@@ -153,6 +153,53 @@ func TestStack_WhiteoutRemovesSpecificFile(t *testing.T) {
 	assert.Equal(t, Unchanged, hostname.DiffType)
 }
 
+func TestStack_WhiteoutThenReaddInSameLayer(t *testing.T) {
+	// Layer 1 emits both `.wh.resolv.conf` and a fresh `resolv.conf` (size 80).
+	// Overlayfs upper-layer semantics let a re-add shadow a deletion in the
+	// same layer, and findFileInLayer resolves the regular entry as the winner.
+	// The stacked tree must agree: exactly one resolv.conf child, marked
+	// Modified at the new size — not a Removed tombstone.
+	layer0 := makeTree(
+		makeDir("etc", "/etc",
+			makeFile("resolv.conf", "/etc/resolv.conf", 50),
+			makeFile("hostname", "/etc/hostname", 10),
+		),
+	)
+	layer1 := makeTree(
+		makeDir("etc", "/etc",
+			makeFile(".wh.resolv.conf", "/etc/.wh.resolv.conf", 0),
+			makeFile("resolv.conf", "/etc/resolv.conf", 80),
+		),
+	)
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+
+	result := Stack(layers)
+	require.Len(t, result, 2)
+
+	etc := result[1].Root.FindChild("etc")
+	require.NotNil(t, etc)
+
+	var resolvs []*FileNode
+	for _, c := range etc.Children {
+		if c.Name == "resolv.conf" {
+			resolvs = append(resolvs, c)
+		}
+	}
+	require.Len(t, resolvs, 1, "re-added name must appear exactly once, not as both Removed and a re-add")
+	assert.Equal(t, Modified, resolvs[0].DiffType, "re-add in same layer as whiteout must win over the deletion")
+	assert.Equal(t, int64(80), resolvs[0].Size)
+
+	whiteout := etc.FindChild(".wh.resolv.conf")
+	assert.Nil(t, whiteout, "whiteout file itself must not appear in stacked tree")
+
+	hostname := etc.FindChild("hostname")
+	require.NotNil(t, hostname)
+	assert.Equal(t, Unchanged, hostname.DiffType)
+}
+
 func TestStack_OpaqueWhiteoutRemovesAllPreviousContents(t *testing.T) {
 	layer0 := makeTree(
 		makeDir("var", "/var",

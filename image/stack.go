@@ -111,13 +111,21 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 		}
 
 		for _, cChild := range cumulative.Children {
+			lChild := layerRoot.FindChild(cChild.Name)
+
 			if _, whited := whiteouts[cChild.Name]; whited {
-				removed := cloneAsRemoved(cChild)
-				merged.AddChild(removed)
-				continue
+				// A regular re-add of the same name in this layer shadows the
+				// whiteout (overlayfs upper-layer "readd shadows deletion"
+				// semantics), matching findFileInLayer in extractor.go. Only
+				// emit the Removed clone when the layer does not reintroduce
+				// the path; otherwise fall through to merge the re-add.
+				if lChild == nil {
+					removed := cloneAsRemoved(cChild)
+					merged.AddChild(removed)
+					continue
+				}
 			}
 
-			lChild := layerRoot.FindChild(cChild.Name)
 			if lChild == nil {
 				merged.AddChild(carry(cChild))
 				continue
