@@ -126,9 +126,9 @@ type ErrPodmanSocketNotSet struct {
 }
 
 func (e *ErrPodmanSocketNotSet) Error() string {
-	return fmt.Sprintf("--engine podman on %s: no active Podman connection or endpoint. "+
-		"Configure one with `podman system connection add` and "+
-		"`podman system connection default`, or set CONTAINER_HOST / DOCKER_HOST.",
+	return fmt.Sprintf("--engine podman on %s: no Podman connection configured "+
+		"(run `podman system connection add <name> <uri>` and "+
+		"`podman system connection default <name>`, or set CONTAINER_HOST / DOCKER_HOST)",
 		e.Platform)
 }
 
