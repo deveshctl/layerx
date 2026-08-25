@@ -263,7 +263,8 @@ source <(layerx completion bash)
 | `/`         | Filter file tree (tree) / search in viewer (viewer)          |
 | `n` / `N`   | Next / previous search match (viewer)                        |
 | `y`         | Copy file path to clipboard                                  |
-| `Y`         | Copy file content (viewer) or layer command (layers)         |
+| `Y`         | Copy file content to clipboard (viewer only)                 |
+| `c`         | Copy Dockerfile command to clipboard (layers panel)          |
 | `d`         | Toggle diff-only mode (hide unchanged files)                 |
 | `s`         | Cycle sort: default → largest → smallest                     |
 | `S`         | Cycle layer size column: change → stored → stored+change     |
@@ -298,8 +299,9 @@ No setup required. LayerX resolves the endpoint the same way `docker` itself doe
 
 1. `DOCKER_HOST` env if set — for scripted or CI workflows.
 2. `DOCKER_CONTEXT` env if set — overrides the active context per-shell.
-3. The active Docker context from `~/.docker/config.json` (`docker context use <name>`).
-4. The platform default socket:
+3. `DOCKER_CONFIG` env if set — overrides the Docker config directory (default `~/.docker`); contexts and credentials are loaded from here.
+4. The active Docker context from `~/.docker/config.json` (`docker context use <name>`).
+5. The platform default socket:
    - Linux: `/var/run/docker.sock`
    - macOS: `~/.docker/run/docker.sock`
    - Windows: `\\.\pipe\docker_engine`
@@ -310,8 +312,10 @@ Same idea, with Podman's own env vars and config files:
 
 1. `CONTAINER_HOST` env if set (also `DOCKER_HOST` for back-compat).
 2. `CONTAINER_CONNECTION` env if set — overrides the active connection per-shell.
-3. The default connection from `~/.config/containers/podman-connections.json` or `containers.conf` (`podman system connection default <name>`).
-4. On Linux, the rootless / rootful Podman socket if the systemd unit is running.
+3. `PODMAN_CONNECTIONS_CONF` env if set — overrides the path to `podman-connections.json`.
+4. `CONTAINERS_CONF` env if set — overrides the path to `containers.conf`.
+5. The default connection from `~/.config/containers/podman-connections.json` or `containers.conf` (`podman system connection default <name>`).
+6. On Linux, the rootless / rootful Podman socket if the systemd unit is running.
 
 The upshot: once you've run `podman system connection add` / `podman system connection default`, `layerx --engine podman <image>` just works. No `DOCKER_HOST=$(podman system connection list …)` shim required.
 
@@ -400,6 +404,7 @@ path-rules:
     - /tmp/**
   deny-waste:
     - "**/*.pyc"
+  max-layer-count: 5   # fail if any file is touched in more than 5 layers
 
 # Optional: set a TUI colour theme (tokyo-night is the default)
 # theme: dracula
@@ -530,6 +535,7 @@ Inspect and evict cache entries explicitly:
 layerx cache list                    # what's cached
 layerx cache prune                   # dry run
 layerx cache prune --older-than 7d   # evict entries older than 7 days
+layerx cache prune --older-than 7d --dry-run  # preview what would be evicted
 layerx cache prune --all             # empty
 ```
 
@@ -542,7 +548,7 @@ layerx cache prune --all             # empty
 Every release ships a cosign-signed `checksums.txt`, an SPDX SBOM per archive, and a SLSA Build Level 3 provenance attestation. Verifying both proves the archive came out of this repository's release workflow on GitHub-hosted runners.
 
 ```bash
-TAG=v1.5.1   # the release you downloaded
+TAG=v1.6.1   # the release you downloaded
 ARCHIVE=layerx_linux_amd64.tar.gz
 BASE="https://github.com/deveshctl/layerx/releases/download/${TAG}"
 
