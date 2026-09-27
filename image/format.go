@@ -62,5 +62,30 @@ func FormatMode(m fs.FileMode) string {
 			buf[1+i] = '-'
 		}
 	}
+	// Overlay special bits onto the execute positions, following ls(1) conventions:
+	//   setuid → owner-execute: 'x'→'s', '-'→'S'
+	//   setgid → group-execute: 'x'→'s', '-'→'S'
+	//   sticky → other-execute: 'x'→'t', '-'→'T'
+	if m&fs.ModeSetuid != 0 {
+		if buf[3] == 'x' {
+			buf[3] = 's'
+		} else {
+			buf[3] = 'S'
+		}
+	}
+	if m&fs.ModeSetgid != 0 {
+		if buf[6] == 'x' {
+			buf[6] = 's'
+		} else {
+			buf[6] = 'S'
+		}
+	}
+	if m&fs.ModeSticky != 0 {
+		if buf[9] == 'x' {
+			buf[9] = 't'
+		} else {
+			buf[9] = 'T'
+		}
+	}
 	return string(buf[:])
 }
