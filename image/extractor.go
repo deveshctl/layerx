@@ -145,7 +145,7 @@ func (e *DockerExtractor) Extract(ctx context.Context, imageRef string, filePath
 
 	totalSize := copyResult.Stat.Size
 
-	data, err := readFirstFileFromTar(copyResult.Content, totalSize)
+	data, err := readFirstFileFromTar(copyResult.Content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", filePath, err)
 	}
@@ -182,7 +182,7 @@ func (e *DockerExtractor) ExtractRaw(ctx context.Context, imageRef string, fileP
 // Docker's CopyFromContainer wraps the file in a single-entry tar.
 // Non-regular entries (directories, symlinks, hardlinks, devices, fifos) are
 // skipped — the contract is "read the first *regular file* in the stream".
-func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
+func readFirstFileFromTar(r io.Reader) ([]byte, error) {
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
@@ -196,13 +196,15 @@ func readFirstFileFromTar(r io.Reader, expectedSize int64) ([]byte, error) {
 			continue
 		}
 
+		// Always read one byte past MaxViewSize so we can detect overflow even
+		// when the tar header understates the actual stream length.
 		limit := int64(MaxViewSize + 1)
-		if expectedSize > 0 && expectedSize < limit {
-			limit = expectedSize
-		}
 		data, err := io.ReadAll(io.LimitReader(tr, limit))
 		if err != nil {
 			return nil, err
+		}
+		if int64(len(data)) > MaxViewSize {
+			data = data[:MaxViewSize]
 		}
 		return data, nil
 	}

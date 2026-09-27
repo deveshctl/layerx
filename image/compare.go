@@ -111,8 +111,8 @@ func CompareAnalysis(before, after *Analysis) *CompareResult {
 		after = &Analysis{}
 	}
 
-	beforeEff := Efficiency(before.Layers)
-	afterEff := Efficiency(after.Layers)
+	beforeEff := EfficiencyFromAnalysis(before)
+	afterEff := EfficiencyFromAnalysis(after)
 
 	bothPopulated := len(before.Layers) > 0 && len(after.Layers) > 0
 	var afterPeer *EfficiencyResult
@@ -151,10 +151,10 @@ func (r *CompareResult) IsRegression() bool {
 	if r == nil {
 		return false
 	}
-	if r.AfterEfficiency.WastedBytesDelta > 0 {
+	if -r.AfterEfficiency.ScoreDelta > scoreEpsilon {
 		return true
 	}
-	if -r.AfterEfficiency.ScoreDelta > scoreEpsilon {
+	if r.AfterEfficiency.WastedBytesDelta > 0 {
 		return true
 	}
 	return false

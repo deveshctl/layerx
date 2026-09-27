@@ -59,7 +59,7 @@ type Layer struct {
 	ID      string    // short digest (first 12 chars of sha256)
 	Size    int64
 	Command string    // Dockerfile instruction that created this layer
-	Tree    *FileTree // nil until M05 populates it
+	Tree    *FileTree // nil for empty layers
 	// NetDelta is the merged-filesystem change at this step.
 	// [0] = live file bytes after the first layer (full size, not 0).
 	// [i>0] = live bytes in stacked[i] minus stacked[i-1]. Negative when

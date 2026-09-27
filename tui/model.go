@@ -2020,8 +2020,9 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		}
 	} else {
 		enterDesc := "view"
+		activeCursor := m.treeCursorFor(m.activeTreeFocus())
 		if !compact && m.useTreeCollapse() &&
-			m.treeCursor < len(treeFiles) && treeFiles[m.treeCursor].IsDir {
+			activeCursor < len(treeFiles) && treeFiles[activeCursor].IsDir {
 			enterDesc = "toggle"
 		}
 		hints = []hint{

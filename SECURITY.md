@@ -33,9 +33,9 @@ Out of scope:
 
 ## Hardening notes for users
 
-- `layerx` reads tar entries with a hard 2 GiB-per-entry cap; a crafted size header cannot exhaust memory.
+- `layerx` caps individual file reads at 2 GiB (`MaxSaveSize`) and full layer-blob reads at 16 GiB (`MaxLayerBlobSize`); a crafted size header cannot exhaust memory.
 - Cache writes use temp file + fsync + atomic rename; a partial write cannot leave a corrupted cache entry.
-- File extraction (`x` in the TUI) writes only into the current directory and validates paths before opening files.
+- File extraction (`x` in the TUI) writes only into the current directory; the tar entry path is reduced to its base name via `filepath.Base`, so directory-traversal components in the path are stripped before the file is written.
 
 If any of these guarantees are observably broken, that's a security bug — please report it.
 

@@ -9,8 +9,8 @@ import (
 type Analysis struct {
 	ImageRef        string
 	Layers          []Layer
-	StackedTrees    []*FileTree // Dive's CompareSingleLayer view: per-layer changes only.
-	AggregatedTrees []*FileTree // Dive's CompareAllLayers view: cumulative provenance from L0.
+	StackedTrees    []*FileTree // per-layer delta view: filesystem changes introduced by each layer only.
+	AggregatedTrees []*FileTree // cumulative provenance view: full filesystem state from layer 0 up to each layer.
 	TotalSize       int64
 }
 

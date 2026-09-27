@@ -332,7 +332,9 @@ func ensureIIDFile(args *[]string) (path string, ownsFile bool, err error) {
 	}
 	p := f.Name()
 	_ = f.Close()
-	_ = os.Remove(p)
+	if err := os.Remove(p); err != nil {
+		return "", false, fmt.Errorf("could not prepare iidfile path: %w", err)
+	}
 	*args = append(*args, "--iidfile", p)
 	return p, true, nil
 }

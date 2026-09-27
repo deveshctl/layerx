@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `layerx compare` daemon and resolver errors now go through the same friendly error formatter as `layerx ci` and `layerx` itself, so actionable hints ("Is Docker running?", "pass a saved-image archive path instead") are shown consistently.
+- `ErrPodmanSocketNotSet.Error()` wording now matches the hint shown by the CLI, so the message is consistent across all output paths.
+- Status bar "toggle / view" hint in split-pane mode now tracks the correct pane's cursor; previously it read the top pane's cursor position even when the bottom pane had focus.
+- File viewer (`readFirstFileFromTar`) now reads up to the full `MaxViewSize` limit regardless of the tar entry's declared size, consistent with the save-file path. A crafted archive with an understated size header no longer silently truncates the viewed content.
+- `layerx build` iidfile setup now surfaces a removal error instead of silently discarding it; on Windows a failed removal no longer leaves a zero-byte file that causes the engine to report an empty image ID.
+- `ErrNoEngineFound` now implements `Unwrap()`, consistent with all other error types in the package.
+- `FormatBytes` now delegates to the internal `formatUnsignedBytes` helper, removing ~15 lines of duplicated formatting logic.
+- CLI error message for `--engine podman` now mentions `DOCKER_HOST` alongside `CONTAINER_HOST`, matching the hint in the library error.
+- Usage synopsis now uses `IMAGE_OR_ARCHIVE` consistently where both image references and local archives are accepted.
+- `layerx compare` now uses the pre-computed stacked trees from the analysis for efficiency scoring, consistent with every other caller. Previously it re-stacked from raw layers, which could produce mismatched efficiency and file-diff results when the analysis carried custom stacked trees (e.g. from a cache path).
+- `layerx compare` regression detection now checks efficiency score drop before wasted-bytes increase, matching the order in which regression reasons are reported.
+- A file that a layer both deletes (`.wh.<name>`) and re-adds within that same layer now shows as Modified with its new contents, instead of being reported as Removed. The re-add correctly shadows the deletion, matching how the file viewer resolves the same case and how opaque-whiteout re-adds were already handled.
+
 ## [v1.6.1] - 2026-08-08
 
 An efficiency-scoring correction, friendlier error messages across the
