@@ -24,7 +24,7 @@ func formatUnsignedBytes(b uint64) string {
 }
 
 func FormatBytes(b int64) string {
-	return formatUnsignedBytes(uint64(b))
+	return formatUnsignedBytes(uint64(b)) //nolint:gosec // callers always pass non-negative sizes
 }
 
 // FormatSignedBytes formats b like FormatBytes but with an explicit sign
