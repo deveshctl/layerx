@@ -1,6 +1,7 @@
 package image
 
 import (
+	"io/fs"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,3 +53,39 @@ func TestFormatSignedBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     fs.FileMode
+		expected string
+	}{
+		// plain files
+		{"regular rw-r--r--", 0644, "-rw-r--r--"},
+		{"regular rwxr-xr-x", 0755, "-rwxr-xr-x"},
+		{"regular no perms", 0000, "----------"},
+		{"regular rwx------", 0700, "-rwx------"},
+		// directory
+		{"dir rwxr-xr-x", fs.ModeDir | 0755, "drwxr-xr-x"},
+		// symlink
+		{"symlink", fs.ModeSymlink | 0777, "lrwxrwxrwx"},
+		// setuid: execute bit present → 's'; absent → 'S'
+		{"setuid with exec", fs.ModeSetuid | 0755, "-rwsr-xr-x"},
+		{"setuid no exec", fs.ModeSetuid | 0644, "-rwSr--r--"},
+		// setgid: execute bit present → 's'; absent → 'S'
+		{"setgid with exec", fs.ModeSetgid | 0755, "-rwxr-sr-x"},
+		{"setgid no exec", fs.ModeSetgid | 0644, "-rw-r-Sr--"},
+		// sticky: execute bit present → 't'; absent → 'T'
+		{"sticky dir with exec", fs.ModeDir | fs.ModeSticky | 0755, "drwxr-xr-t"},
+		{"sticky dir no exec", fs.ModeDir | fs.ModeSticky | 0644, "drw-r--r-T"},
+		// combined setuid+setgid
+		{"setuid+setgid with exec", fs.ModeSetuid | fs.ModeSetgid | 0755, "-rwsr-sr-x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, FormatMode(tt.mode))
+		})
+	}
+}
+
