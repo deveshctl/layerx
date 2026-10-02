@@ -13,8 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Status bar "toggle / view" hint in split-pane mode now tracks the correct pane's cursor; previously it read the top pane's cursor position even when the bottom pane had focus.
 - File viewer (`readFirstFileFromTar`) now reads up to the full `MaxViewSize` limit regardless of the tar entry's declared size, consistent with the save-file path. A crafted archive with an understated size header no longer silently truncates the viewed content.
 - `layerx build` iidfile setup now surfaces a removal error instead of silently discarding it; on Windows a failed removal no longer leaves a zero-byte file that causes the engine to report an empty image ID.
-- `ErrNoEngineFound` now implements `Unwrap()`, consistent with all other error types in the package.
-- `FormatBytes` now delegates to the internal `formatUnsignedBytes` helper, removing ~15 lines of duplicated formatting logic.
 - CLI error message for `--engine podman` now mentions `DOCKER_HOST` alongside `CONTAINER_HOST`, matching the hint in the library error.
 - Usage synopsis now uses `IMAGE_OR_ARCHIVE` consistently where both image references and local archives are accepted.
 - `layerx compare` now uses the pre-computed stacked trees from the analysis for efficiency scoring, consistent with every other caller. Previously it re-stacked from raw layers, which could produce mismatched efficiency and file-diff results when the analysis carried custom stacked trees (e.g. from a cache path).
@@ -23,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The file-permission display in the layer browser now shows setuid (`s`/`S`),
   setgid (`s`/`S`), and sticky (`t`/`T`) bits. Previously, a file with mode
   `04755` was shown as `-rwxr-xr-x` instead of `-rwsr-xr-x`.
+- `FormatBytes` now returns a sign-prefixed string for negative inputs instead of silently wrapping to a large positive value via an unchecked `uint64` cast.
+- Daemon file-viewer (`DockerExtractor.Extract`) now correctly marks the returned `FileContent` as truncated when the extracted file exceeds the 1 MB view limit. Previously the flag was always false for daemon-extracted files, suppressing the truncation notice in the viewer.
+- `ErrNoEngineFound.Cause` field and its `Unwrap()` method removed; neither construction site ever populated the field, so `errors.Unwrap` always returned `nil`, making the method misleading.
 
 ## [v1.6.1] - 2026-08-08
 
