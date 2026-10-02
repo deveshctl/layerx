@@ -145,9 +145,12 @@ func (e *DockerExtractor) Extract(ctx context.Context, imageRef string, filePath
 
 	totalSize := copyResult.Stat.Size
 
-	data, err := readFirstFileFromTar(copyResult.Content)
+	data, declaredSize, err := readFirstFileFromTar(copyResult.Content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", filePath, err)
+	}
+	if declaredSize > totalSize {
+		totalSize = declaredSize
 	}
 
 	return processContent(filePath, data, totalSize), nil
@@ -178,19 +181,23 @@ func (e *DockerExtractor) ExtractRaw(ctx context.Context, imageRef string, fileP
 	return readFullFileFromTar(copyResult.Content)
 }
 
-// readFirstFileFromTar reads the first regular file from a tar stream.
+// readFirstFileFromTar reads the first regular file from a tar stream,
+// returning the (possibly truncated) data and the declared file size from the
+// tar header. The declared size lets the caller set FileContent.Truncated when
+// the stream exceeds MaxViewSize — without it, processContent always sees
+// len(data) <= MaxViewSize and silently suppresses the truncated notice.
 // Docker's CopyFromContainer wraps the file in a single-entry tar.
 // Non-regular entries (directories, symlinks, hardlinks, devices, fifos) are
 // skipped — the contract is "read the first *regular file* in the stream".
-func readFirstFileFromTar(r io.Reader) ([]byte, error) {
+func readFirstFileFromTar(r io.Reader) ([]byte, int64, error) {
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("no file found in tar stream")
+			return nil, 0, fmt.Errorf("no file found in tar stream")
 		}
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if hdr.Typeflag != tar.TypeReg {
 			continue
@@ -201,12 +208,19 @@ func readFirstFileFromTar(r io.Reader) ([]byte, error) {
 		limit := int64(MaxViewSize + 1)
 		data, err := io.ReadAll(io.LimitReader(tr, limit))
 		if err != nil {
-			return nil, err
+			return nil, 0, err
+		}
+		// Return the declared size from the header so the caller can set
+		// Truncated correctly. If the stream was larger than the header claimed,
+		// use the actual bytes read as the size floor.
+		declaredSize := hdr.Size
+		if int64(len(data)) > declaredSize {
+			declaredSize = int64(len(data))
 		}
 		if int64(len(data)) > MaxViewSize {
 			data = data[:MaxViewSize]
 		}
-		return data, nil
+		return data, declaredSize, nil
 	}
 }
 

@@ -1,8 +1,6 @@
 package image
 
 // Regression tests for confirmed compare bugs.
-// See internal-docs/compare-audit.md for full analysis.
-//
 // All tests use in-process fixtures only — no Docker required.
 
 import (
