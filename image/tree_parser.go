@@ -103,6 +103,7 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink b
 				existing.GID = gid
 				existing.IsHardlink = isHardlink
 				existing.Linkname = linkname
+				existing.Inferred = false
 			} else {
 				node := &FileNode{
 					Name:       part,
@@ -121,10 +122,11 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink b
 			if existing == nil {
 				dirPath := "/" + path.Join(parts[:i+1]...)
 				existing = &FileNode{
-					Name:  part,
-					Path:  dirPath,
-					IsDir: true,
-					Mode:  fs.ModeDir | 0755,
+					Name:     part,
+					Path:     dirPath,
+					IsDir:    true,
+					Mode:     fs.ModeDir | 0755,
+					Inferred: true,
 				}
 				current.AddChild(existing)
 			} else if !existing.IsDir {
@@ -137,6 +139,7 @@ func insertNode(root *FileNode, fullPath string, size int64, isDir, isHardlink b
 				existing.Linkname = ""
 				existing.IsHardlink = false
 				existing.Mode = fs.ModeDir | 0755
+				existing.Inferred = true
 			}
 			current = existing
 		}

@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FormatBytes` now returns a sign-prefixed string for negative inputs instead of silently wrapping to a large positive value via an unchecked `uint64` cast.
 - Daemon file-viewer (`DockerExtractor.Extract`) now correctly marks the returned `FileContent` as truncated when the extracted file exceeds the 1 MB view limit. Previously the flag was always false for daemon-extracted files, suppressing the truncation notice in the viewer.
 - `ErrNoEngineFound.Cause` field and its `Unwrap()` method removed; neither construction site ever populated the field, so `errors.Unwrap` always returned `nil`, making the method misleading.
+- Archive analysis now rejects an image archive where a manifest-referenced layer blob is absent from the outer tar. Previously the missing layer was silently treated as empty, which could cause CI rules to pass on incomplete input.
+- Directory metadata (mode, UID, GID) set by an earlier layer is no longer overwritten by an implicit parent directory node created when a later layer adds a child without including an explicit directory header. The placeholder node is now marked inferred and skipped during metadata merging.
+- Hardlink-aliased content is no longer counted as wasted bytes when the original filename is deleted but a hardlink pointing at the same payload survives in the final image. Previously the deleted name's bytes were charged as waste even though the payload remained reachable.
 
 ## [v1.6.1] - 2026-08-08
 

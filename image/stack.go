@@ -66,9 +66,9 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 		IntroducedInLayer: cumulative.IntroducedInLayer,
 	}
 
-	metadataChanged := cumulative.Mode != layerRoot.Mode ||
+	metadataChanged := !layerRoot.Inferred && (cumulative.Mode != layerRoot.Mode ||
 		cumulative.UID != layerRoot.UID ||
-		cumulative.GID != layerRoot.GID
+		cumulative.GID != layerRoot.GID)
 	if metadataChanged {
 		merged.Mode = layerRoot.Mode
 		merged.UID = layerRoot.UID

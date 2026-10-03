@@ -1,6 +1,8 @@
 package image
 
 import (
+	"archive/tar"
+	"bytes"
 	"io/fs"
 	"testing"
 
@@ -953,4 +955,52 @@ func TestBuildAggregatedTrees_EmptyLayerSnapshotsBaseline(t *testing.T) {
 	b2 := findChildPath(t, r2, "b")
 	require.NotNil(t, b2)
 	assert.Equal(t, Added, b2.DiffType)
+}
+
+// An implicit parent directory node must not overwrite the real metadata an
+// earlier layer recorded for that directory.
+func TestStack_ImplicitParentDoesNotOverwriteMetadata(t *testing.T) {
+	// Layer 0: explicit /app dir header with mode 0700 and uid/gid 1000.
+	var buf0 bytes.Buffer
+	tw0 := tar.NewWriter(&buf0)
+	require.NoError(t, tw0.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     "app/",
+		Mode:     0700,
+		Uid:      1000,
+		Gid:      1000,
+	}))
+	require.NoError(t, tw0.Close())
+	tree0, err := ParseLayerTar(&buf0)
+	require.NoError(t, err)
+
+	// Layer 1: only app/new.txt — no explicit app/ header, so insertNode
+	// creates an inferred placeholder for app/ with mode 0755 and uid/gid 0.
+	var buf1 bytes.Buffer
+	tw1 := tar.NewWriter(&buf1)
+	require.NoError(t, tw1.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "app/new.txt",
+		Size:     10,
+		Mode:     0644,
+	}))
+	_, err = tw1.Write(make([]byte, 10))
+	require.NoError(t, err)
+	require.NoError(t, tw1.Close())
+	tree1, err := ParseLayerTar(&buf1)
+	require.NoError(t, err)
+
+	layers := []Layer{
+		{Index: 0, Tree: tree0},
+		{Index: 1, Tree: tree1},
+	}
+	stacked := Stack(layers)
+	require.Len(t, stacked, 2)
+
+	app := stacked[1].Root.FindChild("app")
+	require.NotNil(t, app)
+	assert.Equal(t, fs.ModeDir|fs.FileMode(0700), app.Mode,
+		"layer 0's explicit mode 0700 must survive the implicit parent in layer 1")
+	assert.Equal(t, 1000, app.UID, "UID must not be reset to 0 by the inferred placeholder")
+	assert.Equal(t, 1000, app.GID, "GID must not be reset to 0 by the inferred placeholder")
 }
