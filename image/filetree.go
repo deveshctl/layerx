@@ -33,6 +33,10 @@ type FileNode struct {
 	Children          []*FileNode
 	IsDir             bool
 	IsHardlink        bool
+	// Inferred is true for directory nodes created implicitly by insertNode
+	// because no explicit tar header existed for them. Their Mode/UID/GID are
+	// structural defaults, not authoritative image metadata.
+	Inferred bool
 }
 
 func NewFileTree() *FileTree {

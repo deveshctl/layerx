@@ -1,6 +1,9 @@
 package image
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 type WastedFile struct {
 	Path        string
@@ -71,8 +74,8 @@ type pathRun struct {
 func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	// Build a path→FileNode index per stacked snapshot once. pathRuns then does
 	// O(1) lookups instead of recursing through the tree once per (path,
-	// snapshot) pair, which restored the analysis from quadratic to linear in
-	// total file count for layered images with many shared paths.
+	// snapshot) pair, which keeps the analysis linear in total file count for
+	// layered images with many shared paths.
 	indices := make([]map[string]*FileNode, len(stacked))
 	for i, tree := range stacked {
 		if tree == nil || tree.Root == nil {
@@ -81,6 +84,15 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		idx := make(map[string]*FileNode)
 		indexTree(tree.Root, idx)
 		indices[i] = idx
+	}
+
+	// Build the set of Linkname values for hardlinks that survive in the final
+	// stacked snapshot. A deleted path whose content is still reachable via a
+	// surviving hardlink alias is not truly wasted — the payload stays in the
+	// image and can be read through the alias.
+	survivingHardlinkTargets := make(map[string]struct{})
+	if n := len(stacked); n > 0 && stacked[n-1] != nil && stacked[n-1].Root != nil {
+		walkSurvivingHardlinks(stacked[n-1].Root, survivingHardlinkTargets)
 	}
 
 	paths := make(map[string]struct{})
@@ -115,6 +127,10 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 					continue
 				}
 				charged = run.occ[:len(run.occ)-1]
+			} else if _, alive := survivingHardlinkTargets[path]; alive {
+				// The path was deleted, but a hardlink alias pointing at it
+				// survives in the final tree — the payload is still live.
+				continue
 			}
 			for _, occ := range charged {
 				pathWaste += occ.size
@@ -285,6 +301,22 @@ func walkFiles(node *FileNode, fn func(path string, size int64)) {
 			walkFiles(child, fn)
 		} else if !child.IsHardlink {
 			fn(child.Path, child.Size)
+		}
+	}
+}
+
+// walkSurvivingHardlinks collects the Linkname (target path) of every
+// non-removed hardlink in the tree into targets. Used to avoid charging
+// deleted original paths as waste when a hardlink alias still references them.
+func walkSurvivingHardlinks(node *FileNode, targets map[string]struct{}) {
+	for _, child := range node.Children {
+		if isWhiteoutName(child.Name) || child.DiffType == Removed {
+			continue
+		}
+		if child.IsDir {
+			walkSurvivingHardlinks(child, targets)
+		} else if child.IsHardlink && child.Linkname != "" {
+			targets["/"+strings.TrimPrefix(child.Linkname, "/")] = struct{}{}
 		}
 	}
 }

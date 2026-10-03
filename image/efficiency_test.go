@@ -429,3 +429,38 @@ func TestEfficiency_Golden(t *testing.T) {
 	assert.Equal(t, int64(300), result.WastedFiles[1].TotalWasted)
 	assert.Equal(t, 2, result.WastedFiles[1].LayerCount)
 }
+
+// Deleting the original filename of a hardlink pair must not be counted as
+// waste when a surviving alias still holds the payload in the final image.
+func TestEfficiency_HardlinkAlias_DeletedOriginal_NotWasted(t *testing.T) {
+	// Layer 0: /data/a is a 1 MiB regular file; /data/b is a hardlink → data/a.
+	hardlink := &FileNode{
+		Name:       "b",
+		Path:       "/data/b",
+		Size:       0,
+		IsHardlink: true,
+		Linkname:   "data/a",
+	}
+	layer0 := makeTree(
+		makeDir("data", "/data",
+			makeFile("a", "/data/a", 1<<20),
+			hardlink,
+		),
+	)
+	// Layer 1: .wh.a deletes /data/a; /data/b (the alias) survives.
+	layer1 := makeTree(
+		makeDir("data", "/data",
+			makeFile(".wh.a", "/data/.wh.a", 0),
+		),
+	)
+
+	layers := []Layer{
+		{Index: 0, Tree: layer0},
+		{Index: 1, Tree: layer1},
+	}
+	result := Efficiency(layers)
+	assert.Equal(t, int64(0), result.WastedBytes,
+		"payload is still reachable via /data/b — must not be charged as waste")
+	assert.Empty(t, result.WastedFiles)
+	assert.Equal(t, 1.0, result.Score)
+}

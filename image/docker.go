@@ -658,6 +658,13 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 		layers[idx].Tree = tree
 	}
 
+	for i, layerPath := range manifest.Layers {
+		if _, present := headers[layerPath]; !present {
+			return nil, fmt.Errorf("layer %d (%s) is referenced in the manifest but absent from the archive",
+				i, layers[i].ID)
+		}
+	}
+
 	return layers, nil
 }
 

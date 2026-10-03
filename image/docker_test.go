@@ -964,3 +964,31 @@ func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotF
 	// pinning to exactly one inspect locks the win in.
 	assert.Equal(t, 1, inspectCalls, "platform classifier should reach enumeratePlatforms directly, no probe inspect needed")
 }
+
+func TestParseLayers_MissingLayerBlob_ReturnsError(t *testing.T) {
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar", "layer1/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	configData := buildConfig(t, []string{"RUN step0", "RUN step1"})
+
+	// Build a valid (empty) tar for layer0 so parseLayers succeeds Pass 2 for it;
+	// layer1 is absent entirely, which is what we want the new check to catch.
+	var layer0Buf bytes.Buffer
+	require.NoError(t, tar.NewWriter(&layer0Buf).Close())
+
+	// Only layer0 is present; layer1 is absent from the archive.
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": layer0Buf.Bytes(),
+	})
+
+	_, err = parseLayers(context.Background(), tarBuf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "layer 1")
+	assert.Contains(t, err.Error(), "absent from the archive")
+}
