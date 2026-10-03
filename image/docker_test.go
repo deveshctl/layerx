@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	mobyimage "github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
@@ -581,12 +582,13 @@ func TestIsDaemonUnreachable(t *testing.T) {
 }
 
 // fakeAPIClient embeds client.APIClient so unspecified methods compile but
-// panic at runtime; only ImageList, ImagePull, and ImageInspect are wired.
+// panic at runtime; only ImageList, ImagePull, ImageInspect, and Info are wired.
 type fakeAPIClient struct {
 	client.APIClient
 	imageList    func(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
 	imagePull    func(ctx context.Context, ref string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 	imageInspect func(ctx context.Context, ref string) (client.ImageInspectResult, error)
+	info         func(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error)
 }
 
 func (f *fakeAPIClient) ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error) {
@@ -599,6 +601,10 @@ func (f *fakeAPIClient) ImagePull(ctx context.Context, ref string, options clien
 
 func (f *fakeAPIClient) ImageInspect(ctx context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
 	return f.imageInspect(ctx, ref)
+}
+
+func (f *fakeAPIClient) Info(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error) {
+	return f.info(ctx, options)
 }
 
 func TestEnsureImage_PullNotFound_ReturnsErrImageNotFound(t *testing.T) {
@@ -991,4 +997,64 @@ func TestParseLayers_MissingLayerBlob_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "layer 1")
 	assert.Contains(t, err.Error(), "absent from the archive")
+}
+
+func TestSaveOpts_NoPlatform_UsesNativePlatform(t *testing.T) {
+	// When --platform is not set, saveOpts must scope ImageSave to the daemon's
+	// native platform so containerd-store daemons don't try to export a full OCI
+	// index that may contain missing blobs for other variants.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "arm64")}, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	opts := dr.saveOpts(context.Background())
+	require.Len(t, opts, 1, "expected exactly one ImageSaveOption scoped to native platform")
+}
+
+func TestSaveOpts_NoPlatform_InfoFails_ReturnsNil(t *testing.T) {
+	// If Info fails (old daemon, network error), saveOpts falls back to nil
+	// (unscoped) — preserving the pre-fix behaviour rather than erroring.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{}, errors.New("daemon unreachable")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	opts := dr.saveOpts(context.Background())
+	assert.Nil(t, opts, "Info failure must produce unscoped save (nil opts)")
+}
+
+func TestSaveOpts_WithPlatform_UsesPinnedPlatform(t *testing.T) {
+	// When --platform is explicitly set, saveOpts uses it directly without
+	// calling Info — the pinned platform always wins.
+	infoCalls := 0
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			infoCalls++
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "amd64")}, nil
+		},
+	}
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	opts := dr.saveOpts(context.Background())
+	require.Len(t, opts, 1)
+	assert.Equal(t, 0, infoCalls, "Info must not be called when --platform is pinned")
+}
+
+// systemInfoWith constructs a system.Info with the given OS and arch for use
+// in test fakes.
+func systemInfoWith(os, arch string) system.Info {
+	return system.Info{OSType: os, Architecture: arch}
 }

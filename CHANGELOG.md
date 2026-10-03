@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `layerx` now resolves registry credentials from `~/.docker/config.json` (including `credHelpers` per-registry entries, the global `credsStore`, and inline `auths` tokens) before calling the Docker daemon's pull API. Previously the pull was always sent unauthenticated, causing private-registry pulls to fail with "unauthorized" even when `docker pull` of the same reference succeeded.
+- `layerx <image>` no longer fails with "unable to create manifests file" on containerd-store daemons (Docker Desktop 25+ / Rancher Desktop) when a non-native platform variant was pulled first. `layerx` now queries the daemon's native OS/arch and scopes `ImageSave` to that platform, so only the locally-present variant is exported. Explicitly passing `--platform` continues to work as before.
 - `layerx compare` daemon and resolver errors now go through the same friendly error formatter as `layerx ci` and `layerx` itself, so actionable hints ("Is Docker running?", "pass a saved-image archive path instead") are shown consistently.
 - `ErrPodmanSocketNotSet.Error()` wording now matches the hint shown by the CLI, so the message is consistent across all output paths.
 - Status bar "toggle / view" hint in split-pane mode now tracks the correct pane's cursor; previously it read the top pane's cursor position even when the bottom pane had focus.
