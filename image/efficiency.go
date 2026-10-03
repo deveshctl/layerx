@@ -72,6 +72,10 @@ type pathRun struct {
 }
 
 func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
+	// Build a path→FileNode index per stacked snapshot once. pathRuns then does
+	// O(1) lookups instead of recursing through the tree once per (path,
+	// snapshot) pair, which keeps the analysis linear in total file count for
+	// layered images with many shared paths.
 	indices := make([]map[string]*FileNode, len(stacked))
 	for i, tree := range stacked {
 		if tree == nil || tree.Root == nil {
@@ -109,9 +113,17 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		var pathWaste int64
 		var occurrenceCount int
 		for _, run := range runs {
+			// A run that ended in deletion ships every one of its copies with
+			// nothing surviving into the final image, so all occurrences are
+			// waste. A run still live at the top of the stack keeps its last
+			// occurrence (the copy present in the image); only the earlier,
+			// shadowed copies are waste.
 			charged := run.occ
 			if !run.endedInDeletion {
 				if len(run.occ) < 2 {
+					// Single live occurrence with no prior copy in this run: no
+					// waste, and the path's reinstall copy must not inflate
+					// LayerCount for waste entries produced by earlier deleted runs.
 					continue
 				}
 				charged = run.occ[:len(run.occ)-1]
@@ -123,6 +135,13 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 			for _, occ := range charged {
 				pathWaste += occ.size
 			}
+			// LayerCount counts byte-contributing occurrences across charged
+			// copies only. For deleted runs, every occurrence is charged. For
+			// live runs, the surviving last copy is excluded from charged but
+			// is still a real byte-contributor visible to the user, so include
+			// all non-zero occurrences in the run (not just the charged slice).
+			// The single-occurrence live run above is skipped entirely, so
+			// reinstalled copies from a separate run do not inflate the count.
 			for _, occ := range run.occ {
 				if occ.size > 0 {
 					occurrenceCount++

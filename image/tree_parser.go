@@ -49,7 +49,7 @@ func ParseLayerTar(r io.Reader) (*FileTree, error) {
 		uid := hdr.Uid
 		gid := hdr.Gid
 
-		insertNode(tree.Root, name, size, isDir, isHardlink, hdr.Linkname, mode, uid, gid)
+		insertNode(tree.Root, name, size, isDir, isHardlink, cleanTarPath(hdr.Linkname), mode, uid, gid)
 	}
 
 	return tree, nil

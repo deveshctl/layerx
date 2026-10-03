@@ -975,11 +975,16 @@ func TestParseLayers_MissingLayerBlob_ReturnsError(t *testing.T) {
 
 	configData := buildConfig(t, []string{"RUN step0", "RUN step1"})
 
+	// Build a valid (empty) tar for layer0 so parseLayers succeeds Pass 2 for it;
+	// layer1 is absent entirely, which is what we want the new check to catch.
+	var layer0Buf bytes.Buffer
+	require.NoError(t, tar.NewWriter(&layer0Buf).Close())
+
 	// Only layer0 is present; layer1 is absent from the archive.
 	tarBuf := buildTar(t, map[string][]byte{
 		"manifest.json":    manifestData,
 		"config.json":      configData,
-		"layer0/layer.tar": make([]byte, 1024),
+		"layer0/layer.tar": layer0Buf.Bytes(),
 	})
 
 	_, err = parseLayers(context.Background(), tarBuf)
