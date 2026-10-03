@@ -275,7 +275,7 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 
 	emitProgress(progress, ProgressEvent{Phase: PhasePulling})
 
-	rc, err := r.cli.ImagePull(ctx, imageRef, r.pullOpts())
+	rc, err := r.cli.ImagePull(ctx, imageRef, r.pullOpts(ctx, imageRef))
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
@@ -312,10 +312,13 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	return nil
 }
 
-func (r *DockerResolver) pullOpts() client.ImagePullOptions {
+func (r *DockerResolver) pullOpts(ctx context.Context, imageRef string) client.ImagePullOptions {
 	opts := client.ImagePullOptions{}
 	if r.platform != nil {
 		opts.Platforms = []ocispec.Platform{*r.platform}
+	}
+	if auth, err := resolveRegistryAuth(ctx, registryHostFrom(imageRef)); err == nil && auth != "" {
+		opts.RegistryAuth = auth
 	}
 	return opts
 }
