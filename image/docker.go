@@ -201,7 +201,7 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseExporting})
 
-	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, r.saveOpts()...)
+	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, r.saveOpts(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
@@ -212,24 +212,46 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 	return parseLayers(ctx, rc)
 }
 
-// saveOpts builds the per-call ImageSaveOption slice, scoping the export to
-// the resolver's pinned --platform when set. Without this, ImageSave on a
-// multi-platform-image-store daemon (Docker 25+ with containerd image store)
-// emits an OCI index containing every variant — and parseLayers picks the
-// first manifest, which is not necessarily the one the user asked for.
+// saveOpts builds the per-call ImageSaveOption slice, always scoping the
+// export to a single platform. When --platform is pinned that platform is
+// used directly. When it is not set, daemonPlatform queries the daemon's
+// native OS/arch so the export is still scoped to one variant.
 //
-// The save-side platform option requires daemon API 1.48 or newer; older
-// daemons return an error from ImageSave that we surface verbatim. There is
-// no point papering over that, because the same daemon ignored the pull-side
-// platform option too, so the wrong variant is what is local — silently
-// falling back would lie about which image we exported.
-func (r *DockerResolver) saveOpts() []client.ImageSaveOption {
-	if r.platform == nil {
+// Without a platform filter, ImageSave on a containerd-store daemon (Docker
+// 25+ / Rancher Desktop) attempts to export the full OCI manifest index.
+// If a non-native variant was pulled first and some blobs for the native
+// platform are absent, the daemon errors with "unable to create manifests
+// file: NotFound: content digest …: not found". Scoping to the native
+// platform avoids this.
+//
+// If daemonPlatform fails (network issue, old daemon), saveOpts falls back
+// to nil — the historic unscoped behaviour — so the fix is safe on daemons
+// that predate the platform-filter API.
+func (r *DockerResolver) saveOpts(ctx context.Context) []client.ImageSaveOption {
+	p := r.platform
+	if p == nil {
+		p = r.daemonPlatform(ctx)
+	}
+	if p == nil {
 		return nil
 	}
 	return []client.ImageSaveOption{
-		client.ImageSaveWithPlatforms(*r.platform),
+		client.ImageSaveWithPlatforms(*p),
 	}
+}
+
+// daemonPlatform queries the daemon's native OS and architecture via Info.
+// Returns nil on any error so callers can fall back to unscoped behaviour.
+func (r *DockerResolver) daemonPlatform(ctx context.Context) *ocispec.Platform {
+	result, err := r.cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return nil
+	}
+	info := result.Info
+	if info.OSType == "" || info.Architecture == "" {
+		return nil
+	}
+	return &ocispec.Platform{OS: info.OSType, Architecture: info.Architecture}
 }
 
 // ensureImageWithProgress checks if the image exists locally; if not, pulls it with progress.

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container image base updated to `alpine:3.24.2` and `distroless/static-debian13`.
 
 ### Fixed
+- `layerx <image>` no longer fails with "unable to create manifests file" on containerd-store daemons (Docker Desktop 25+ / Rancher Desktop) when a non-native platform variant was pulled first. `ImageSave` is now scoped to the daemon's native OS/arch, so only the locally-present variant is exported. Explicitly passing `--platform` continues to work as before.
 - Analysis cache listing and pruning now work correctly when the cache root path contains bracket characters (e.g. a Windows username like `user[1]`). Previously `filepath.Glob` interpreted the brackets as a pattern and returned `ErrBadPattern`, causing `cache list` to return empty results and auto-prune to skip all entries silently.
 - `cache prune` MaxBytes eviction now sorts entries by their oldest file's mtime, consistent with the TTL pass. Previously the MaxBytes sort used the newest mtime, so a multi-platform directory with a fresh default file could survive while a uniformly-older directory was evicted first.
 
