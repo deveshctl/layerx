@@ -60,7 +60,7 @@ func TestStderrProgress_ThrottlesHeartbeat(t *testing.T) {
 		events = append(events, image.ProgressEvent{
 			Phase:      image.PhasePulling,
 			BytesCurr:  int64(i * 1024 * 1024),
-			BytesTotal: 20 * 1024 * 1024,
+			BytesTotal: 21 * 1024 * 1024, // never reaches 100% so saturation doesn't fire
 		})
 	}
 	tick := make(chan time.Time, 1)
@@ -166,4 +166,60 @@ func TestHumanBytes(t *testing.T) {
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, humanBytes(tc.in))
 	}
+}
+
+// TestStderrProgress_SuppressZeroLayerCount verifies that the "pulled 0 / 1
+// layers" line is not printed when the first event has no byte data yet.
+// Previously this appeared on every single-layer pull before bytes arrived.
+func TestStderrProgress_SuppressZeroLayerCount(t *testing.T) {
+	events := []image.ProgressEvent{
+		{Phase: image.PhasePulling},
+		// First event from Docker: layer registered, no bytes yet.
+		{Phase: image.PhasePulling, LayersDone: 0, LayersTotal: 1, BytesCurr: 0, BytesTotal: 0},
+	}
+	tick := make(chan time.Time, 1)
+	tick <- time.Now()
+	out := driveProgress(t, context.Background(), events, tick, true)
+
+	assert.NotContains(t, out, "pulled 0 / 1 layers", "zero-progress layer count line must be suppressed")
+}
+
+// TestStderrProgress_100PercentPrintsOnce verifies that hitting 100% causes
+// exactly one "pulled X / X (100%)" line even when Docker continues to emit
+// "Pull complete" / "Download complete" events afterwards.
+func TestStderrProgress_100PercentPrintsOnce(t *testing.T) {
+	const total = 10 * 1024 * 1024
+	events := []image.ProgressEvent{
+		{Phase: image.PhasePulling},
+		{Phase: image.PhasePulling, BytesCurr: total / 2, BytesTotal: total},
+		// Reaches 100%.
+		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
+		// Docker trailing events after completion — should all be dropped.
+		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
+		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
+		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
+	}
+	tick := make(chan time.Time, 1)
+	tick <- time.Now()
+	out := driveProgress(t, context.Background(), events, tick, true)
+
+	count := strings.Count(out, "100%")
+	assert.Equal(t, 1, count, "100%% must appear exactly once, got output: %q", out)
+}
+
+// TestStderrProgress_PullCompleteOnPhaseTransition verifies that transitioning
+// away from PhasePulling after saturation emits "pull complete" instead of
+// reprinting the 100% line.
+func TestStderrProgress_PullCompleteOnPhaseTransition(t *testing.T) {
+	const total = 5 * 1024 * 1024
+	events := []image.ProgressEvent{
+		{Phase: image.PhasePulling},
+		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
+		// Phase transition — saturation path should print "pull complete".
+		{Phase: image.PhaseExporting},
+	}
+	out := driveProgress(t, context.Background(), events, make(chan time.Time), true)
+
+	assert.Contains(t, out, "pull complete", "saturated phase transition must print 'pull complete'")
+	assert.Equal(t, 1, strings.Count(out, "100%"), "100%% must appear exactly once")
 }

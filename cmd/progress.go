@@ -65,6 +65,11 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 		curPhase    = image.PhaseUnknown
 		buffered    image.ProgressEvent // most-recent in-flight event for the current phase
 		hasBuffered bool
+		// saturated is set when a PhasePulling event reaches 100%. Once set,
+		// further pull events are dropped so the 100% line prints exactly once
+		// and identical repetitions from Docker's trailing "Pull complete"
+		// stream are suppressed.
+		saturated bool
 	)
 
 	flush := func() {
@@ -87,7 +92,16 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 				return
 			}
 			if ev.Phase != curPhase {
-				flush()
+				// On transition away from PhasePulling: if we were saturated,
+				// suppress the normal flush (would reprint 100%) and instead
+				// print a single "pull complete" line.
+				if curPhase == image.PhasePulling && saturated {
+					fmt.Fprintln(w, "layerx:   pull complete")
+					hasBuffered = false
+				} else {
+					flush()
+				}
+				saturated = false
 				writePhase(w, ev)
 				curPhase = ev.Phase
 				continue
@@ -98,8 +112,19 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 				continue
 			}
 			if ev.Phase == image.PhasePulling || ev.Phase == image.PhaseExporting {
+				if saturated {
+					// Already at 100% — drop trailing Docker events.
+					continue
+				}
 				buffered = ev
 				hasBuffered = true
+				// Flush immediately and lock out further updates once we hit
+				// 100% so the completion line prints promptly without waiting
+				// for the next tick.
+				if ev.Phase == image.PhasePulling && ev.BytesTotal > 0 && ev.BytesCurr >= ev.BytesTotal {
+					flush()
+					saturated = true
+				}
 			}
 		}
 	}
@@ -135,7 +160,10 @@ func writeHeartbeat(w io.Writer, ev image.ProgressEvent) {
 			pct := float64(ev.BytesCurr) * 100 / float64(ev.BytesTotal)
 			fmt.Fprintf(w, "layerx:   pulled %s / %s (%.0f%%)\n",
 				humanBytes(ev.BytesCurr), humanBytes(ev.BytesTotal), pct)
-		} else if ev.LayersTotal > 0 {
+		} else if ev.LayersTotal > 0 && (ev.LayersDone > 0 || ev.LayersTotal > 1) {
+			// Only show the layer-count line when there is genuine progress
+			// to report — suppress the initial "pulled 0 / 1 layers" that
+			// fires before any byte data arrives on single-layer images.
 			fmt.Fprintf(w, "layerx:   pulled %d / %d layers\n", ev.LayersDone, ev.LayersTotal)
 		}
 	case image.PhaseExporting:
