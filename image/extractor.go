@@ -17,6 +17,12 @@ import (
 
 const MaxViewSize = 1 << 20 // 1 MB
 
+// maxTarSkip caps the number of non-regular entries (directories, symlinks,
+// devices, fifos) skipped before finding a regular file in a daemon-extracted
+// tar stream. Docker's CopyFromContainer wraps one file per stream; any
+// legitimate archive has far fewer preamble entries than this limit.
+const maxTarSkip = 1024
+
 // MaxSaveSize bounds save-to-disk extraction. The viewer caps reads at
 // MaxViewSize, but the save path historically called io.ReadAll with no
 // limit — a 10 GB file inside a layer (or a maliciously crafted tar entry
@@ -191,6 +197,7 @@ func (e *DockerExtractor) ExtractRaw(ctx context.Context, imageRef string, fileP
 // skipped — the contract is "read the first *regular file* in the stream".
 func readFirstFileFromTar(r io.Reader) ([]byte, int64, error) {
 	tr := tar.NewReader(r)
+	skipped := 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -200,6 +207,10 @@ func readFirstFileFromTar(r io.Reader) ([]byte, int64, error) {
 			return nil, 0, err
 		}
 		if hdr.Typeflag != tar.TypeReg {
+			skipped++
+			if skipped > maxTarSkip {
+				return nil, 0, fmt.Errorf("tar stream contains more than %d non-regular entries before the first regular file", maxTarSkip)
+			}
 			continue
 		}
 
@@ -232,6 +243,7 @@ func readFirstFileFromTar(r io.Reader) ([]byte, int64, error) {
 // skipped — the contract is "read the first *regular file* in the stream".
 func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	tr := tar.NewReader(r)
+	skipped := 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -241,6 +253,10 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 			return nil, err
 		}
 		if hdr.Typeflag != tar.TypeReg {
+			skipped++
+			if skipped > maxTarSkip {
+				return nil, fmt.Errorf("tar stream contains more than %d non-regular entries before the first regular file", maxTarSkip)
+			}
 			continue
 		}
 		if hdr.Size > MaxSaveSize {
