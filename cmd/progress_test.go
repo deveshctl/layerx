@@ -186,7 +186,7 @@ func TestStderrProgress_SuppressZeroLayerCount(t *testing.T) {
 
 // TestStderrProgress_100PercentPrintsOnce verifies that hitting 100% causes
 // exactly one "pulled X / X (100%)" line even when Docker continues to emit
-// "Pull complete" / "Download complete" events afterwards.
+// identical trailing events afterwards (deduplication by value).
 func TestStderrProgress_100PercentPrintsOnce(t *testing.T) {
 	const total = 10 * 1024 * 1024
 	events := []image.ProgressEvent{
@@ -194,32 +194,60 @@ func TestStderrProgress_100PercentPrintsOnce(t *testing.T) {
 		{Phase: image.PhasePulling, BytesCurr: total / 2, BytesTotal: total},
 		// Reaches 100%.
 		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
-		// Docker trailing events after completion — should all be dropped.
+		// Identical trailing Docker events — deduplication must suppress repeats.
 		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
 		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
 		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
 	}
-	tick := make(chan time.Time, 1)
-	tick <- time.Now()
-	out := driveProgress(t, context.Background(), events, tick, true)
+	// No tick: only the immediate 100% flush and the close-flush fire.
+	out := driveProgress(t, context.Background(), events, make(chan time.Time), true)
 
 	count := strings.Count(out, "100%")
 	assert.Equal(t, 1, count, "100%% must appear exactly once, got output: %q", out)
 }
 
-// TestStderrProgress_PullCompleteOnPhaseTransition verifies that transitioning
-// away from PhasePulling after saturation emits "pull complete" instead of
-// reprinting the 100% line.
-func TestStderrProgress_PullCompleteOnPhaseTransition(t *testing.T) {
+// TestStderrProgress_GrowingTotalAllowsProgress verifies that when Docker
+// reports a larger BytesTotal after an apparent 100% (multi-layer pull where
+// additional layer sizes become known mid-stream), new progress lines are
+// still emitted rather than being permanently suppressed.
+func TestStderrProgress_GrowingTotalAllowsProgress(t *testing.T) {
+	const layer1 = 5 * 1024 * 1024
+	const layer2 = 8 * 1024 * 1024
+	events := []image.ProgressEvent{
+		{Phase: image.PhasePulling},
+		// Layer 1 appears to hit 100% before layer 2 is announced.
+		{Phase: image.PhasePulling, BytesCurr: int64(layer1), BytesTotal: layer1},
+		// Docker announces layer 2; total grows — this must not be suppressed.
+		{Phase: image.PhasePulling, BytesCurr: int64(layer1), BytesTotal: layer1 + layer2},
+		{Phase: image.PhasePulling, BytesCurr: int64(layer1 + layer2/2), BytesTotal: layer1 + layer2},
+		{Phase: image.PhasePulling, BytesCurr: int64(layer1 + layer2), BytesTotal: layer1 + layer2},
+	}
+	tick := make(chan time.Time, 1)
+	tick <- time.Now() // one tick to flush mid-stream
+	out := driveProgress(t, context.Background(), events, tick, true)
+
+	// Must contain at least one intermediate progress line (not just 100%).
+	assert.Contains(t, out, "5.0 MB", "layer-1-only progress line must appear")
+	// Final 100% must still appear exactly once.
+	assert.Equal(t, 1, strings.Count(out, "100%"), "final 100%% must appear exactly once: %q", out)
+}
+
+// TestStderrProgress_PhaseTransitionFlushesLastProgress verifies that
+// transitioning away from PhasePulling flushes the last buffered progress
+// line (if not already printed) before emitting the new phase header.
+func TestStderrProgress_PhaseTransitionFlushesLastProgress(t *testing.T) {
 	const total = 5 * 1024 * 1024
 	events := []image.ProgressEvent{
 		{Phase: image.PhasePulling},
 		{Phase: image.PhasePulling, BytesCurr: int64(total), BytesTotal: total},
-		// Phase transition — saturation path should print "pull complete".
+		// Phase transition — the 100% line should appear before "exporting".
 		{Phase: image.PhaseExporting},
 	}
 	out := driveProgress(t, context.Background(), events, make(chan time.Time), true)
 
-	assert.Contains(t, out, "pull complete", "saturated phase transition must print 'pull complete'")
 	assert.Equal(t, 1, strings.Count(out, "100%"), "100%% must appear exactly once")
+	// 100% line must come before the exporting line.
+	idx100 := strings.Index(out, "100%")
+	idxExp := strings.Index(out, "exporting")
+	assert.Less(t, idx100, idxExp, "100%% must appear before 'exporting'")
 }

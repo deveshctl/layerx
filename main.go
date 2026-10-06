@@ -45,10 +45,12 @@ func main() {
 	if e, ok := errors.AsType[*cmd.ErrBuildFailed](err); ok {
 		// Mirror the engine's exit code so CI scripts treat
 		// `layerx build` exactly like `docker build` / `podman build`.
-		// Clamp to 1-125: signal-killed builds yield -1 from ExitCode(),
-		// and os.Exit(-1) wraps to 255 on Linux/macOS, misleading callers.
+		// Preserve all positive codes (126 = not executable, 137 = OOM kill,
+		// 255 = daemon-reported failure) — only map negative values (signal-
+		// killed processes return -1 from ExitCode()) to 1 so os.Exit never
+		// receives a negative argument.
 		code := e.ExitCode
-		if code <= 0 || code > 125 {
+		if code < 0 {
 			code = 1
 		}
 		os.Exit(code)

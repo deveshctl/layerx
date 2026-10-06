@@ -65,18 +65,26 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 		curPhase    = image.PhaseUnknown
 		buffered    image.ProgressEvent // most-recent in-flight event for the current phase
 		hasBuffered bool
-		// saturated is set when a PhasePulling event reaches 100%. Once set,
-		// further pull events are dropped so the 100% line prints exactly once
-		// and identical repetitions from Docker's trailing "Pull complete"
-		// stream are suppressed.
-		saturated bool
+		// lastPrinted tracks the last event written by writeHeartbeat so
+		// identical consecutive updates (Docker's trailing "Pull complete"
+		// stream) are deduplicated without permanently suppressing progress
+		// when the total grows after an apparent 100%.
+		lastPrinted image.ProgressEvent
+		hasLast     bool
 	)
 
 	flush := func() {
 		if !hasBuffered {
 			return
 		}
-		writeHeartbeat(w, buffered)
+		// Suppress the write when the event is byte-for-byte identical to the
+		// last printed one — avoids repeating "100%" when Docker keeps emitting
+		// the same totals, while still allowing a new line if BytesTotal grows.
+		if !hasLast || buffered != lastPrinted {
+			writeHeartbeat(w, buffered)
+			lastPrinted = buffered
+			hasLast = true
+		}
 		hasBuffered = false
 	}
 
@@ -92,16 +100,8 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 				return
 			}
 			if ev.Phase != curPhase {
-				// On transition away from PhasePulling: if we were saturated,
-				// suppress the normal flush (would reprint 100%) and instead
-				// print a single "pull complete" line.
-				if curPhase == image.PhasePulling && saturated {
-					fmt.Fprintln(w, "layerx:   pull complete")
-					hasBuffered = false
-				} else {
-					flush()
-				}
-				saturated = false
+				flush()
+				hasLast = false
 				writePhase(w, ev)
 				curPhase = ev.Phase
 				continue
@@ -112,18 +112,12 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 				continue
 			}
 			if ev.Phase == image.PhasePulling || ev.Phase == image.PhaseExporting {
-				if saturated {
-					// Already at 100% — drop trailing Docker events.
-					continue
-				}
 				buffered = ev
 				hasBuffered = true
-				// Flush immediately and lock out further updates once we hit
-				// 100% so the completion line prints promptly without waiting
-				// for the next tick.
+				// Flush immediately when bytes hit 100% so the completion line
+				// prints promptly without waiting for the next tick.
 				if ev.Phase == image.PhasePulling && ev.BytesTotal > 0 && ev.BytesCurr >= ev.BytesTotal {
 					flush()
-					saturated = true
 				}
 			}
 		}

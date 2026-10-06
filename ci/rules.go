@@ -141,7 +141,11 @@ func (r HighestUserWastedPercent) Evaluate(ctx EvalContext) []RuleResult {
 	// the ratio can exceed 100% and is inconsistent with the efficiency score.
 	// Use 1-Score instead: the score denominator is (liveBytes + wastedBytes),
 	// both uncompressed, giving the correct waste fraction on the same units.
-	pct := 1.0 - ctx.Efficiency.Score
+	//
+	// Round to 9 decimal places before comparing to avoid floating-point
+	// representation noise (e.g. 1-0.95 = 0.050000000000000044) causing a
+	// boundary value that should pass to fail.
+	pct := math.Round((1.0-ctx.Efficiency.Score)*1e9) / 1e9
 	passed := true
 	if r.Threshold > 0 {
 		passed = pct <= r.Threshold
