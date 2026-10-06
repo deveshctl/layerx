@@ -992,3 +992,78 @@ func TestParseLayers_MissingLayerBlob_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "layer 1")
 	assert.Contains(t, err.Error(), "absent from the archive")
 }
+
+// TestParseLayers_DuplicateBlobPath verifies that a manifest referencing the
+// same blob path for multiple layers (docker save deduplication) loads a valid
+// Tree for every referencing index rather than only the last one.
+func TestParseLayers_DuplicateBlobPath(t *testing.T) {
+	const sharedBlob = "blobs/sha256/aaaa/layer.tar"
+
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{sharedBlob, sharedBlob, sharedBlob},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	configData := buildConfig(t, []string{"RUN step0", "RUN step1", "RUN step2"})
+
+	// Build a minimal valid inner tar (one file) to serve as the shared blob.
+	var inner bytes.Buffer
+	iw := tar.NewWriter(&inner)
+	content := []byte("hello")
+	require.NoError(t, iw.WriteHeader(&tar.Header{Name: "hello.txt", Size: int64(len(content)), Mode: 0644}))
+	_, err = iw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, iw.Close())
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json": manifestData,
+		"config.json":   configData,
+		sharedBlob:      inner.Bytes(),
+	})
+
+	layers, err := parseLayers(context.Background(), tarBuf)
+	require.NoError(t, err)
+	require.Len(t, layers, 3)
+	for i, l := range layers {
+		assert.NotNil(t, l.Tree, "layer %d Tree must not be nil", i)
+	}
+}
+
+// TestParseLayers_ZeroSizeBlobLayer verifies that a blob entry with hdr.Size==0
+// is treated as a valid empty layer rather than being silently dropped.
+func TestParseLayers_ZeroSizeBlobLayer(t *testing.T) {
+	manifest := []dockerManifest{{
+		Config: "config.json",
+		Layers: []string{"layer0/layer.tar", "layer1/layer.tar"},
+	}}
+	manifestData, err := json.Marshal(manifest)
+	require.NoError(t, err)
+
+	configData := buildConfig(t, []string{"RUN step0", "RUN step1"})
+
+	// layer0: normal non-empty layer.
+	var layer0Buf bytes.Buffer
+	iw := tar.NewWriter(&layer0Buf)
+	body := []byte("data")
+	require.NoError(t, iw.WriteHeader(&tar.Header{Name: "file.txt", Size: int64(len(body)), Mode: 0644}))
+	_, err = iw.Write(body)
+	require.NoError(t, err)
+	require.NoError(t, iw.Close())
+
+	// layer1: blob entry with size 0 (no body). buildTar uses len(content) for
+	// the header size, so pass nil to get a genuine zero-size entry.
+	tarBuf := buildTar(t, map[string][]byte{
+		"manifest.json":    manifestData,
+		"config.json":      configData,
+		"layer0/layer.tar": layer0Buf.Bytes(),
+		"layer1/layer.tar": nil, // produces hdr.Size == 0
+	})
+
+	layers, err := parseLayers(context.Background(), tarBuf)
+	require.NoError(t, err)
+	require.Len(t, layers, 2)
+	assert.NotNil(t, layers[0].Tree, "layer 0 Tree must not be nil")
+	assert.NotNil(t, layers[1].Tree, "layer 1 (zero-size blob) Tree must not be nil")
+}

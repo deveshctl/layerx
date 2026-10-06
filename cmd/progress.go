@@ -57,6 +57,26 @@ func stderrProgress(ctx context.Context, w io.Writer) (chan image.ProgressEvent,
 	return ch, stop
 }
 
+// progressKey captures the fields that writeHeartbeat uses to format output.
+// Two events with the same key produce the same displayed line; deduplicating
+// by key rather than the full ProgressEvent struct prevents duplicate lines
+// when fields like LayersDone change without affecting the displayed output.
+type progressKey struct {
+	BytesCurr   int64
+	BytesTotal  int64
+	LayersDone  int
+	LayersTotal int
+}
+
+func progressKeyOf(ev image.ProgressEvent) progressKey {
+	return progressKey{
+		BytesCurr:   ev.BytesCurr,
+		BytesTotal:  ev.BytesTotal,
+		LayersDone:  ev.LayersDone,
+		LayersTotal: ev.LayersTotal,
+	}
+}
+
 // runProgressLoop is the body of the goroutine started by stderrProgress.
 // Split out so tests can drive it with a hand-managed tick channel and
 // without spinning up a real timer.
@@ -65,13 +85,25 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 		curPhase    = image.PhaseUnknown
 		buffered    image.ProgressEvent // most-recent in-flight event for the current phase
 		hasBuffered bool
+		// lastKey tracks the display key of the last line written by
+		// writeHeartbeat. Two events with the same key render to the same
+		// output line; deduplicating by key (not the full struct) prevents
+		// duplicate lines when LayersDone changes but the displayed bytes
+		// are identical, while still allowing a new line if BytesTotal grows.
+		lastKey progressKey
+		hasLast bool
 	)
 
 	flush := func() {
 		if !hasBuffered {
 			return
 		}
-		writeHeartbeat(w, buffered)
+		k := progressKeyOf(buffered)
+		if !hasLast || k != lastKey {
+			writeHeartbeat(w, buffered)
+			lastKey = k
+			hasLast = true
+		}
 		hasBuffered = false
 	}
 
@@ -88,6 +120,7 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 			}
 			if ev.Phase != curPhase {
 				flush()
+				hasLast = false
 				writePhase(w, ev)
 				curPhase = ev.Phase
 				continue
@@ -100,6 +133,11 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 			if ev.Phase == image.PhasePulling || ev.Phase == image.PhaseExporting {
 				buffered = ev
 				hasBuffered = true
+				// Flush immediately when bytes hit 100% so the completion line
+				// prints promptly without waiting for the next tick.
+				if ev.Phase == image.PhasePulling && ev.BytesTotal > 0 && ev.BytesCurr >= ev.BytesTotal {
+					flush()
+				}
 			}
 		}
 	}
@@ -135,7 +173,10 @@ func writeHeartbeat(w io.Writer, ev image.ProgressEvent) {
 			pct := float64(ev.BytesCurr) * 100 / float64(ev.BytesTotal)
 			fmt.Fprintf(w, "layerx:   pulled %s / %s (%.0f%%)\n",
 				humanBytes(ev.BytesCurr), humanBytes(ev.BytesTotal), pct)
-		} else if ev.LayersTotal > 0 {
+		} else if ev.LayersTotal > 0 && (ev.LayersDone > 0 || ev.LayersTotal > 1) {
+			// Only show the layer-count line when there is genuine progress
+			// to report — suppress the initial "pulled 0 / 1 layers" that
+			// fires before any byte data arrives on single-layer images.
 			fmt.Fprintf(w, "layerx:   pulled %d / %d layers\n", ev.LayersDone, ev.LayersTotal)
 		}
 	case image.PhaseExporting:

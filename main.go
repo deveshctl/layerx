@@ -33,25 +33,46 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	err := cmd.ExecuteContext(ctx)
+	if code := exitCodeFor(err); code != 0 {
+		os.Exit(code)
+	}
+}
+
+// exitCodeFor maps an error from cmd.ExecuteContext to an OS exit code.
+// Extracted from main so the mapping logic is unit-testable without os.Exit.
+//
+//   - nil → 0
+//   - ErrCIFailed / ErrCompareRegression → 1
+//   - ErrBuildFailed → engine exit code (negative mapped to 1)
+//   - anything else → 2
+func exitCodeFor(err error) int {
 	if err == nil {
-		return
+		return 0
 	}
 	if _, ok := errors.AsType[*cmd.ErrCIFailed](err); ok {
-		os.Exit(1)
+		return 1
 	}
 	if _, ok := errors.AsType[*cmd.ErrCompareRegression](err); ok {
-		os.Exit(1)
+		return 1
 	}
 	if e, ok := errors.AsType[*cmd.ErrBuildFailed](err); ok {
 		// Mirror the engine's exit code so CI scripts treat
 		// `layerx build` exactly like `docker build` / `podman build`.
-		os.Exit(e.ExitCode)
+		// Preserve all positive codes (126 = not executable, 137 = OOM kill,
+		// 255 = daemon-reported failure) — only map negative values (signal-
+		// killed processes return -1 from ExitCode()) to 1 so os.Exit never
+		// receives a negative argument.
+		code := e.ExitCode
+		if code < 0 {
+			code = 1
+		}
+		return code
 	}
 	// Exit 2 covers ErrCIUsage, ErrCompareUsage, and any unrecognised error.
 	// Usage errors are deliberately distinct from rule failures (ErrCIFailed →
 	// 1) and build failures (ErrBuildFailed → engine code): do NOT remap
 	// ErrCIUsage/ErrCompareUsage to exit 1.
-	os.Exit(2)
+	return 2
 }
 
 // resolveBuildInfo is consulted only when ldflags were not injected at link time;

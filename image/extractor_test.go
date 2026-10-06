@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -139,6 +140,49 @@ func TestReadFullFileFromTar_EmptyTar(t *testing.T) {
 	_, err := readFullFileFromTar(&buf)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no file found")
+}
+
+func TestReadFullFileFromTar_SkipCapEnforced(t *testing.T) {
+	// maxTarSkip+1 directory entries before a regular file must be rejected.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := range maxTarSkip + 1 {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     fmt.Sprintf("dir%d/", i),
+			Typeflag: tar.TypeDir,
+		}))
+	}
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: "file.txt", Size: 1, Typeflag: tar.TypeReg,
+	}))
+	tw.Write([]byte("x"))
+	tw.Close()
+
+	_, err := readFullFileFromTar(&buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-regular entries")
+}
+
+func TestReadFirstFileFromTar_SkipCapEnforced(t *testing.T) {
+	// maxTarSkip+1 symlinks before a regular file must be rejected.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := range maxTarSkip + 1 {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     fmt.Sprintf("link%d", i),
+			Typeflag: tar.TypeSymlink,
+			Linkname: "target",
+		}))
+	}
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: "file.txt", Size: 1, Typeflag: tar.TypeReg,
+	}))
+	tw.Write([]byte("x"))
+	tw.Close()
+
+	_, _, err := readFirstFileFromTar(&buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-regular entries")
 }
 
 // --- ExtractFromLayer / ExtractRawFromLayer (Bug #3) -----------------------

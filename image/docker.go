@@ -617,9 +617,16 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	// gzip-detector lets ParseLayerTar consume the layer without buffering
 	// the full compressed blob. Peak heap = the FileTree of the layer being
 	// parsed, not the gzip bytes feeding it.
-	keep := make(map[string]int, len(manifest.Layers))
+	//
+	// keep maps blob path → all layer indices that reference it. docker save
+	// deduplicates identical layers by pointing multiple manifest entries at
+	// the same blob path, so a path may appear more than once. Keying by index
+	// alone misses duplicates; keying by path alone loses all but the last
+	// index. Parse the blob once and fan the result out to every referencing
+	// index.
+	keep := make(map[string][]int, len(manifest.Layers))
 	for i, p := range manifest.Layers {
-		keep[p] = i
+		keep[p] = append(keep[p], i)
 	}
 
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
@@ -637,11 +644,17 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		idx, want := keep[hdr.Name]
+		indices, want := keep[hdr.Name]
 		if !want {
 			continue
 		}
 		if hdr.Size == 0 {
+			// Empty blob: assign an empty tree to every referencing index so
+			// the nil-tree guard below does not reject a legitimate empty layer.
+			empty, _ := ParseLayerTar(io.LimitReader(bytes.NewReader(nil), 0))
+			for _, idx := range indices {
+				layers[idx].Tree = empty
+			}
 			continue
 		}
 		dec, err := decompressIfGzipStream(tr)
@@ -658,13 +671,19 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 		if parseErr != nil {
 			return nil, fmt.Errorf("parsing layer %s: %w", hdr.Name, parseErr)
 		}
-		layers[idx].Tree = tree
+		for _, idx := range indices {
+			layers[idx].Tree = tree
+		}
 	}
 
-	for i, layerPath := range manifest.Layers {
-		if _, present := headers[layerPath]; !present {
+	// Verify every manifest layer was encountered and parsed. A nil Tree means
+	// the blob path was referenced in the manifest but the entry was never
+	// found in the archive — reject rather than silently analyse an incomplete
+	// image.
+	for i, l := range layers {
+		if l.Tree == nil {
 			return nil, fmt.Errorf("layer %d (%s) is referenced in the manifest but absent from the archive",
-				i, layers[i].ID)
+				i, l.ID)
 		}
 	}
 
