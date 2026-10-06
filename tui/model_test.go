@@ -2822,6 +2822,37 @@ func TestInspectMsgSuccessSetsImageSize(t *testing.T) {
 	assert.Empty(t, m.statusMsg)
 }
 
+func TestAnalysisSuccessClearsInspectErrorStatus(t *testing.T) {
+	// Regression: inspect fails while the image is being pulled (image not
+	// local yet), then analysis succeeds after the pull finishes. The stale
+	// "Inspect failed" footer must be cleared so it does not persist in the
+	// ready state.
+	m := NewModel(Config{ImageRef: "test:latest"})
+	require.Equal(t, stateLoading, m.state)
+
+	m = send(m, inspectMsg{err: errors.New("No such image: test:latest")})
+	require.NotEmpty(t, m.statusMsg, "pre-condition: inspect error must be visible during loading")
+	require.True(t, m.statusIsError)
+
+	m = send(m, analysisMsg{analysis: testAnalysis()})
+	assert.Equal(t, stateReady, m.state)
+	assert.Empty(t, m.statusMsg, "analysis success must clear the stale inspect error")
+	assert.False(t, m.statusIsError)
+}
+
+func TestAnalysisSuccessPreservesNonErrorStatus(t *testing.T) {
+	// An informational status set during loading (e.g. cache warning) must
+	// not be cleared when analysis succeeds — only error-flagged messages are
+	// stale loading-phase diagnostics.
+	m := NewModel(Config{ImageRef: "test:latest"})
+	m.setStatus("cache: stale entry pruned")
+	require.False(t, m.statusIsError)
+
+	m = send(m, analysisMsg{analysis: testAnalysis()})
+	assert.Equal(t, stateReady, m.state)
+	assert.Equal(t, "cache: stale entry pruned", m.statusMsg, "non-error status must survive analysis success")
+}
+
 // --- friendlySaveError (ERR-2 write phase) -----------------------------------
 
 func TestFriendlySaveErrorENOSPC(t *testing.T) {
