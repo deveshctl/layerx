@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Archive analysis now rejects an image archive where a manifest-referenced layer blob is absent from the outer tar. Previously the missing layer was silently treated as empty, which could cause CI rules to pass on incomplete input.
 - Directory metadata (mode, UID, GID) set by an earlier layer is no longer overwritten by an implicit parent directory node created when a later layer adds a child without including an explicit directory header. The placeholder node is now marked inferred and skipped during metadata merging.
 - Hardlink-aliased content is no longer counted as wasted bytes when the original filename is deleted but a hardlink pointing at the same payload survives in the final image. Previously the deleted name's bytes were charged as waste even though the payload remained reachable.
+- Images where `docker save` points multiple manifest layers at the same blob path (deduplication) now load correctly. Previously only the last layer referencing a shared blob received a file tree; earlier layers silently had no tree, and the archive was rejected as incomplete.
+- A layer blob entry with a zero-byte tar size is now treated as a valid empty layer rather than being silently skipped, which previously left the layer with no file tree and caused the archive to be rejected.
+- The `wasted %` CI rule now uses the efficiency score's uncompressed denominator instead of the compressed manifest size (`TotalSize`). Previously the ratio could exceed 100% on compressed archives and was inconsistent with the efficiency score displayed elsewhere.
+- `layerx build` exit code is now clamped to 1–125 when the underlying engine exits abnormally (e.g. killed by a signal, which yields -1). Previously `os.Exit(-1)` was called, which wraps to 255 on Linux/macOS.
 
 ## [v1.6.1] - 2026-08-08
 

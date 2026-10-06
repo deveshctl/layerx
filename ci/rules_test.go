@@ -58,25 +58,28 @@ func TestHighestWastedBytes_DisabledWhenZero(t *testing.T) {
 
 func TestHighestUserWastedPercent_Pass(t *testing.T) {
 	r := HighestUserWastedPercent{Threshold: 0.1}
-	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{WastedBytes: 50}, TotalSize: 1000})
+	// Score = 0.95 → waste fraction = 5%, under 10% threshold.
+	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{Score: 0.95}})
 	assert.True(t, result.Passed)
 }
 
 func TestHighestUserWastedPercent_Fail(t *testing.T) {
 	r := HighestUserWastedPercent{Threshold: 0.1}
-	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{WastedBytes: 200}, TotalSize: 1000})
+	// Score = 0.80 → waste fraction = 20%, over 10% threshold.
+	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{Score: 0.80}})
 	assert.False(t, result.Passed)
 }
 
-func TestHighestUserWastedPercent_ZeroTotal(t *testing.T) {
+func TestHighestUserWastedPercent_ZeroWaste(t *testing.T) {
 	r := HighestUserWastedPercent{Threshold: 0.1}
-	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{WastedBytes: 100}, TotalSize: 0})
+	// Score = 1.0 → waste fraction = 0%, always passes.
+	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{Score: 1.0}})
 	assert.True(t, result.Passed)
 }
 
 func TestHighestUserWastedPercent_DisabledWhenZero(t *testing.T) {
 	r := HighestUserWastedPercent{Threshold: 0}
-	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{WastedBytes: 999999}, TotalSize: 1000})
+	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{Score: 0.0}})
 	assert.True(t, result.Passed)
 }
 
@@ -84,7 +87,8 @@ func TestHighestUserWastedPercent_DisabledWhenZero(t *testing.T) {
 // "wasted %: 0.10 (threshold: 0.10)" don't misread 10% as 0.10%.
 func TestHighestUserWastedPercent_ActualAndThresholdRenderedAsPercent(t *testing.T) {
 	r := HighestUserWastedPercent{Threshold: 0.1}
-	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{WastedBytes: 100}, TotalSize: 1000})
+	// Score = 0.90 → waste fraction = 10%.
+	result := evalOne(t, r, EvalContext{Efficiency: &image.EfficiencyResult{Score: 0.90}})
 	assert.Equal(t, "10.0%", result.Actual)
 	assert.Equal(t, "10.0%", result.Threshold)
 }

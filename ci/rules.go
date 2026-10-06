@@ -137,12 +137,11 @@ type HighestUserWastedPercent struct {
 func (r HighestUserWastedPercent) Name() string { return "wasted %" }
 
 func (r HighestUserWastedPercent) Evaluate(ctx EvalContext) []RuleResult {
-	result := ctx.Efficiency
-	totalSize := ctx.TotalSize
-	var pct float64
-	if totalSize > 0 {
-		pct = float64(result.WastedBytes) / float64(totalSize)
-	}
+	// WastedBytes is uncompressed; ctx.TotalSize is compressed blob bytes, so
+	// the ratio can exceed 100% and is inconsistent with the efficiency score.
+	// Use 1-Score instead: the score denominator is (liveBytes + wastedBytes),
+	// both uncompressed, giving the correct waste fraction on the same units.
+	pct := 1.0 - ctx.Efficiency.Score
 	passed := true
 	if r.Threshold > 0 {
 		passed = pct <= r.Threshold

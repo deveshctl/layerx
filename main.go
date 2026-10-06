@@ -45,7 +45,13 @@ func main() {
 	if e, ok := errors.AsType[*cmd.ErrBuildFailed](err); ok {
 		// Mirror the engine's exit code so CI scripts treat
 		// `layerx build` exactly like `docker build` / `podman build`.
-		os.Exit(e.ExitCode)
+		// Clamp to 1-125: signal-killed builds yield -1 from ExitCode(),
+		// and os.Exit(-1) wraps to 255 on Linux/macOS, misleading callers.
+		code := e.ExitCode
+		if code <= 0 || code > 125 {
+			code = 1
+		}
+		os.Exit(code)
 	}
 	// Exit 2 covers ErrCIUsage, ErrCompareUsage, and any unrecognised error.
 	// Usage errors are deliberately distinct from rule failures (ErrCIFailed →
