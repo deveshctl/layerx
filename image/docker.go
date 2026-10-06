@@ -827,17 +827,13 @@ func extractShortID(layerPath string) string {
 // user to check the image name when the real cause is elsewhere. The needles
 // below all reference the image, manifest, or repository unambiguously.
 //
-// "pull access denied" and "repository does not exist" are intentionally
-// absent: both are also emitted when a private image is pulled without
-// valid credentials. Classifying them as "not found" drops the daemon's
-// full error text (including any "docker login" hint) before the user sees
-// it. Those failures fall through to ErrPullFailed, which preserves the
-// cause verbatim.
 func isImageNotFoundMessage(s string) bool {
 	s = strings.ToLower(s)
 	for _, needle := range []string{
 		"manifest unknown",
 		"manifest for ",
+		"repository does not exist",
+		"pull access denied",
 		"name unknown",
 		"name not known",
 	} {

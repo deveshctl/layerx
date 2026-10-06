@@ -25,6 +25,9 @@ func friendlyCLIError(err error) string {
 		return daemonNotRunningLine(e)
 	}
 	if e, ok := errors.AsType[*image.ErrImageNotFound](err); ok {
+		if e.Cause != nil {
+			return fmt.Sprintf("image %q not found: %v", e.Ref, e.Cause)
+		}
 		return fmt.Sprintf("image %q not found", e.Ref)
 	}
 	if e, ok := errors.AsType[*image.ErrPullFailed](err); ok {
