@@ -483,6 +483,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.extractor = src.NewExtractor()
 		}
 		m.clampCursors()
+		// Clear any stale loading-phase status (e.g. "Inspect failed" set while
+		// the image was being pulled). The analysis supersedes that diagnostic.
+		if m.statusIsError {
+			m.statusMsg = ""
+			m.statusIsError = false
+		}
 		return m, nil
 
 	case clearCopyMsg:
