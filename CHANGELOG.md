@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- `layerx` now resolves registry credentials from `~/.docker/config.json` (including `credHelpers` per-registry entries, the global `credsStore`, and inline `auths` tokens) before calling the Docker daemon's pull API. Previously the pull was always sent unauthenticated, causing private-registry pulls to fail with "unauthorized" even when `docker pull` of the same reference succeeded.
+- `wasted %` CI rule boundary tests now use correct fixtures: byte totals derive from integer arithmetic so the score equals exactly the intended percentage. A 30% boundary case was added.
 - Docker Hub credentials stored by `docker login` under the canonical key `https://index.docker.io/v1/` are now found correctly. Previously the lookup used `docker.io` as the key, missing credentials for inline `auths` entries and third-party credential helpers that store the canonical URL exactly.
 - Podman credentials in `$REGISTRY_AUTH_FILE` (or `~/.config/containers/auth.json` when the env var is unset) are now consulted when no matching entry is found in the Docker config. Covers remote Podman connections and setups where `podman login` wrote to the Podman-native auth file.
 - Inline `identityToken` entries in `~/.docker/config.json` `auths` are now forwarded correctly as bearer tokens. Previously only the `auth` field was read; CI environments and token-refresh tooling that write `identityToken` directly were silently ignored.

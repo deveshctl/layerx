@@ -98,16 +98,13 @@ func TestHighestUserWastedPercent_ActualAndThresholdRenderedAsPercent(t *testing
 // efficiency score is derived from integer arithmetic rather than a hand-
 // crafted float, exposing any floating-point boundary failures.
 //
-// Fixture: 95 live bytes + 5 wasted bytes → score = 95/100 = 0.95
-// Threshold = 0.05 (5%). The waste fraction is exactly at the limit → PASS.
+// Fixture: layer0 writes a(5)+b(90); layer1 overwrites a(5).
+// liveBytes=5+90=95, wastedBytes=5, total=100.
+// score = 1 - 5/100 = 0.95, pct = 5%. Threshold 5% → exactly passes.
 func TestHighestUserWastedPercent_BoundaryExact(t *testing.T) {
-	// Build two layers: layer0 writes file A (5 bytes), layer1 overwrites it.
-	// Result: 5 wasted bytes, 5 live bytes (the overwrite) — but we want
-	// exactly 5% waste, so we need: wastedBytes=5, liveBytes=95.
-	// Simplest: layer0 writes A (5 bytes) + B (95 bytes); layer1 overwrites A.
 	tree0 := image.NewFileTree()
 	tree0.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: 5, DiffType: image.Added})
-	tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: 95, DiffType: image.Added})
+	tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: 90, DiffType: image.Added})
 	tree1 := image.NewFileTree()
 	tree1.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: 5, DiffType: image.Modified})
 
@@ -116,8 +113,8 @@ func TestHighestUserWastedPercent_BoundaryExact(t *testing.T) {
 		{Index: 1, Tree: tree1},
 	}
 	eff := image.Efficiency(layers)
-	// Sanity: score should be 0.95 (5 wasted out of 100 total uncompressed).
-	assert.InDelta(t, 0.95, eff.Score, 0.001, "fixture score mismatch")
+	assert.InDelta(t, 0.95, eff.Score, 0.001, "fixture score mismatch: want 5/100=0.95")
+	assert.Equal(t, int64(5), eff.WastedBytes, "fixture waste mismatch: want 5 bytes wasted")
 
 	r := HighestUserWastedPercent{Threshold: 0.05}
 	result := evalOne(t, r, EvalContext{Efficiency: eff})
@@ -126,15 +123,19 @@ func TestHighestUserWastedPercent_BoundaryExact(t *testing.T) {
 
 // TestHighestUserWastedPercent_BoundaryBelow verifies a value just below the
 // threshold passes.
+//
+// Fixture: layer0 writes a(4)+b(92); layer1 overwrites a(4).
+// liveBytes=4+92=96, wastedBytes=4, total=100. pct=4% < 5% → passes.
 func TestHighestUserWastedPercent_BoundaryBelow(t *testing.T) {
-	// 4 wasted, 96 live → score = 96/100 = 0.96, waste fraction = 4%.
 	tree0 := image.NewFileTree()
 	tree0.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: 4, DiffType: image.Added})
-	tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: 96, DiffType: image.Added})
+	tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: 92, DiffType: image.Added})
 	tree1 := image.NewFileTree()
 	tree1.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: 4, DiffType: image.Modified})
 	layers := []image.Layer{{Index: 0, Tree: tree0}, {Index: 1, Tree: tree1}}
 	eff := image.Efficiency(layers)
+	assert.InDelta(t, 0.96, eff.Score, 0.001, "fixture score mismatch: want 4/100=0.96")
+	assert.Equal(t, int64(4), eff.WastedBytes, "fixture waste mismatch: want 4 bytes wasted")
 
 	r := HighestUserWastedPercent{Threshold: 0.05}
 	result := evalOne(t, r, EvalContext{Efficiency: eff})
@@ -143,17 +144,52 @@ func TestHighestUserWastedPercent_BoundaryBelow(t *testing.T) {
 
 // TestHighestUserWastedPercent_BoundaryAbove verifies a value just above the
 // threshold fails.
+//
+// Fixture: layer0 writes a(6)+b(88); layer1 overwrites a(6).
+// liveBytes=6+88=94, wastedBytes=6, total=100. pct=6% > 5% → fails.
 func TestHighestUserWastedPercent_BoundaryAbove(t *testing.T) {
-	// 6 wasted, 94 live → score = 94/100 = 0.94, waste fraction = 6%.
 	tree0 := image.NewFileTree()
 	tree0.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: 6, DiffType: image.Added})
-	tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: 94, DiffType: image.Added})
+	tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: 88, DiffType: image.Added})
 	tree1 := image.NewFileTree()
 	tree1.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: 6, DiffType: image.Modified})
 	layers := []image.Layer{{Index: 0, Tree: tree0}, {Index: 1, Tree: tree1}}
 	eff := image.Efficiency(layers)
+	assert.InDelta(t, 0.94, eff.Score, 0.001, "fixture score mismatch: want 6/100=0.94")
+	assert.Equal(t, int64(6), eff.WastedBytes, "fixture waste mismatch: want 6 bytes wasted")
 
 	r := HighestUserWastedPercent{Threshold: 0.05}
 	result := evalOne(t, r, EvalContext{Efficiency: eff})
 	assert.False(t, result.Passed, "above threshold must fail (got actual=%s)", result.Actual)
+}
+
+// TestHighestUserWastedPercent_Boundary30Pct verifies the boundary behaviour
+// at a different threshold (30%) to confirm the rule is not hard-coded for 5%.
+//
+// Fixture: layer0 writes a(30)+b(40); layer1 overwrites a(30).
+// liveBytes=30+40=70, wastedBytes=30, total=100.
+// score=1-30/100=0.70, pct=30%. Tests at/above threshold.
+func TestHighestUserWastedPercent_Boundary30Pct(t *testing.T) {
+	buildLayers := func(aSize, bSize int64) *image.EfficiencyResult {
+		tree0 := image.NewFileTree()
+		tree0.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: aSize, DiffType: image.Added})
+		tree0.Root.AddChild(&image.FileNode{Name: "b", Path: "/b", Size: bSize, DiffType: image.Added})
+		tree1 := image.NewFileTree()
+		tree1.Root.AddChild(&image.FileNode{Name: "a", Path: "/a", Size: aSize, DiffType: image.Modified})
+		return image.Efficiency([]image.Layer{{Index: 0, Tree: tree0}, {Index: 1, Tree: tree1}})
+	}
+
+	// Exactly 30%: a=30, b=40 → liveBytes=70, wastedBytes=30, total=100.
+	eff := buildLayers(30, 40)
+	assert.InDelta(t, 0.70, eff.Score, 0.001, "fixture score mismatch: want 30/100=0.70")
+	assert.Equal(t, int64(30), eff.WastedBytes)
+	r30 := HighestUserWastedPercent{Threshold: 0.30}
+	result := evalOne(t, r30, EvalContext{Efficiency: eff})
+	assert.True(t, result.Passed, "exactly at 30%% threshold must pass (got actual=%s)", result.Actual)
+
+	// Just above 30%: a=31, b=38 → liveBytes=69, wastedBytes=31, total=100.
+	eff2 := buildLayers(31, 38)
+	assert.Equal(t, int64(31), eff2.WastedBytes)
+	result2 := evalOne(t, r30, EvalContext{Efficiency: eff2})
+	assert.False(t, result2.Passed, "31%% must fail the 30%% threshold (got actual=%s)", result2.Actual)
 }
