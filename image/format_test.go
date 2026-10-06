@@ -80,6 +80,12 @@ func TestFormatMode(t *testing.T) {
 		{"sticky dir no exec", fs.ModeDir | fs.ModeSticky | 0644, "drw-r--r-T"},
 		// combined setuid+setgid
 		{"setuid+setgid with exec", fs.ModeSetuid | fs.ModeSetgid | 0755, "-rwsr-sr-x"},
+		// special node types (device, fifo, socket)
+		{"block device", fs.ModeDevice | 0660, "brw-rw----"},
+		{"char device", fs.ModeDevice | fs.ModeCharDevice | 0660, "crw-rw----"},
+		{"named pipe / fifo", fs.ModeNamedPipe | 0644, "prw-r--r--"},
+		{"socket", fs.ModeSocket | 0600, "srw-------"},
+		{"irregular", fs.ModeIrregular, "?---------"},
 	}
 
 	for _, tt := range tests {

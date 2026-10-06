@@ -208,7 +208,7 @@ func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, c
 	}
 
 	analysis, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
-		image.AnalyzeOptions{NoCache: noCache, Progress: progress})
+		image.AnalyzeOptions{NoCache: noCache, Progress: progress, Platform: activePlatformDisplay()})
 	if err != nil {
 		return nil, err
 	}

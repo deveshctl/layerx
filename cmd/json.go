@@ -74,7 +74,7 @@ func runJSONExport(ctx context.Context, imageRef, outputPath string, noCache boo
 	defer stop()
 
 	analysis, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
-		image.AnalyzeOptions{NoCache: noCache, Progress: progCh})
+		image.AnalyzeOptions{NoCache: noCache, Progress: progCh, Platform: activePlatformDisplay()})
 	if err != nil {
 		return presentCLIError(os.Stderr, err)
 	}

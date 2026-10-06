@@ -273,6 +273,7 @@ func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string,
 	analysis, err := image.AnalyzeWithOptions(ctx, resolver, ref, image.AnalyzeOptions{
 		NoCache:  noCache,
 		Progress: progress,
+		Platform: activePlatformDisplay(),
 	})
 
 	if err != nil {

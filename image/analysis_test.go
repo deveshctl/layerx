@@ -307,6 +307,63 @@ func TestAnalyze_ImageIDError_FallsBackToColdResolve(t *testing.T) {
 	assert.Equal(t, 1, resolver.resolveCalls, "ImageID error -> cold resolve still works")
 }
 
+func TestAnalyze_PlatformPin_DoesNotShareCacheWithUnpinned(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("LAYERX_CACHE_DIR", cacheRoot)
+
+	layers := []Layer{{Index: 0, ID: "aa", Size: 100, Tree: makeTree(makeFile("f", "/f", 50))}}
+	resolver := &mockResolver{layers: layers, imageID: "sha256:" + strings.Repeat("7", 64)}
+
+	// Warm the cache without a platform pin.
+	_, err := AnalyzeWithOptions(context.Background(), resolver, "img", AnalyzeOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, resolver.resolveCalls)
+
+	// A pinned request must not hit the un-pinned cache entry.
+	_, err = AnalyzeWithOptions(context.Background(), resolver, "img",
+		AnalyzeOptions{Platform: "linux/arm64"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolver.resolveCalls, "platform-pinned request must not hit an un-pinned cache entry")
+}
+
+func TestAnalyze_DifferentPlatformPins_DoNotShareCache(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("LAYERX_CACHE_DIR", cacheRoot)
+
+	layers := []Layer{{Index: 0, ID: "aa", Size: 100, Tree: makeTree(makeFile("f", "/f", 50))}}
+	resolver := &mockResolver{layers: layers, imageID: "sha256:" + strings.Repeat("8", 64)}
+
+	// Warm the cache for linux/amd64.
+	_, err := AnalyzeWithOptions(context.Background(), resolver, "img",
+		AnalyzeOptions{Platform: "linux/amd64"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, resolver.resolveCalls)
+
+	// An arm64 request must not hit the amd64 cache entry.
+	_, err = AnalyzeWithOptions(context.Background(), resolver, "img",
+		AnalyzeOptions{Platform: "linux/arm64"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolver.resolveCalls, "linux/arm64 must not hit a linux/amd64 cache entry")
+
+	// A second arm64 request must hit the arm64 cache.
+	_, err = AnalyzeWithOptions(context.Background(), resolver, "img",
+		AnalyzeOptions{Platform: "linux/arm64"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolver.resolveCalls, "same platform pin must hit its own cache entry")
+
+	// A three-component variant (linux/arm/v7) must not share with linux/arm64.
+	_, err = AnalyzeWithOptions(context.Background(), resolver, "img",
+		AnalyzeOptions{Platform: "linux/arm/v7"})
+	require.NoError(t, err)
+	assert.Equal(t, 3, resolver.resolveCalls, "linux/arm/v7 must not hit linux/arm64 cache entry")
+
+	// A second linux/arm/v7 request must hit its own cache.
+	_, err = AnalyzeWithOptions(context.Background(), resolver, "img",
+		AnalyzeOptions{Platform: "linux/arm/v7"})
+	require.NoError(t, err)
+	assert.Equal(t, 3, resolver.resolveCalls, "same triple-component pin must hit its own cache entry")
+}
+
 func TestAnalyze_CacheHit_EmitsPhaseCacheLoad(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("LAYERX_CACHE_DIR", cacheRoot)

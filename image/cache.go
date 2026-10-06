@@ -232,11 +232,34 @@ func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
 }
 
 func cachePath(root, digest string) (string, error) {
+	return cachePathWithPlatform(root, digest, "")
+}
+
+// cachePathWithPlatform returns the path to the cache file for the given
+// digest and optional platform. When platform is non-empty the cache file is
+// stored as "layers-<platform-slug>.gob" alongside "layers.gob" so that
+// analyses pinned to different platforms of the same image never share a
+// cache entry. Both files live under the same digest directory and are
+// recognised by ListCache/PruneCache via the "layers*.gob" glob.
+func cachePathWithPlatform(root, digest, platform string) (string, error) {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, norm, "layers.gob"), nil
+	file := "layers.gob"
+	if platform != "" {
+		// Replace '/' with '-' so the slug is a valid file-name component on
+		// all supported OSes. "linux/amd64" → "layers-linux-amd64.gob".
+		slug := strings.ReplaceAll(platform, "/", "-")
+		// Reject slugs that could escape the digest directory (e.g. "..").
+		// activePlatformDisplay() sanitises via ParsePlatform/FormatPlatform,
+		// but defence-in-depth here costs nothing.
+		if strings.Contains(slug, "..") || strings.ContainsAny(slug, `/\`) {
+			return "", fmt.Errorf("invalid platform slug %q", slug)
+		}
+		file = "layers-" + slug + ".gob"
+	}
+	return filepath.Join(root, norm, file), nil
 }
 
 // normalizeDigest strips the "sha256:" prefix when present and enforces the
@@ -274,7 +297,11 @@ func normalizeDigest(digest string) (string, error) {
 //     The file is NOT removed in this branch — a transient EIO/EBUSY/perm
 //     failure should not evict an otherwise-valid cache.
 func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
-	path, err := cachePath(root, digest)
+	return loadCacheWithPlatform(root, digest, "")
+}
+
+func loadCacheWithPlatform(root, digest, platform string) (layers []Layer, ok bool, err error) {
+	path, err := cachePathWithPlatform(root, digest, platform)
 	if err != nil {
 		return nil, false, err
 	}
@@ -371,6 +398,10 @@ func isTransientIOError(err error) bool {
 // fsync + atomic rename. Errors are returned but should be treated as
 // non-fatal by callers (the user already has the live result).
 func saveCache(root, digest string, imageRef string, layers []Layer, progress chan<- ProgressEvent) error {
+	return saveCacheWithPlatform(root, digest, "", imageRef, layers, progress)
+}
+
+func saveCacheWithPlatform(root, digest, platform, imageRef string, layers []Layer, progress chan<- ProgressEvent) error {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return err
@@ -418,7 +449,11 @@ func saveCache(root, digest string, imageRef string, layers []Layer, progress ch
 		return fmt.Errorf("closing temp cache file: %w", closeErr)
 	}
 
-	finalPath := filepath.Join(dir, "layers.gob")
+	finalPath, err := cachePathWithPlatform(root, digest, platform)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("resolving cache path: %w", err)
+	}
 	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
@@ -512,11 +547,29 @@ func sweepOrphanTempFiles(dir string) {
 	}
 }
 
+// gobFilesInDir returns the combined size and newest mtime of all
+// layers*.gob files in dir. ok is false when no such file exists.
+func gobFilesInDir(dir string) (size int64, mtime time.Time, ok bool) {
+	matches, _ := filepath.Glob(filepath.Join(dir, "layers*.gob"))
+	for _, m := range matches {
+		info, err := os.Stat(m)
+		if err != nil {
+			continue
+		}
+		ok = true
+		size += info.Size()
+		if info.ModTime().After(mtime) {
+			mtime = info.ModTime()
+		}
+	}
+	return size, mtime, ok
+}
+
 // ListCache returns every valid digest dir under root with its size and
 // mtime. A missing root is not an error; it returns ([], nil, nil) — the
 // cache simply hasn't been populated yet. Foreign files at root, dirs
-// whose names fail digest validation, and dirs whose layers.gob is
-// missing are silently skipped (same rule as the auto-prune).
+// whose names fail digest validation, and dirs with no layers*.gob files
+// are silently skipped (same rule as the auto-prune).
 //
 // Warnings are returned as plain strings so the caller (cmd/cache.go)
 // can render them. ListCache itself never writes to stderr.
@@ -541,15 +594,14 @@ func ListCache(root string) ([]CacheEntry, []string, error) {
 			continue
 		}
 		entryDir := filepath.Join(root, d.Name())
-		gobPath := filepath.Join(entryDir, "layers.gob")
-		info, statErr := os.Stat(gobPath)
-		if statErr != nil {
+		size, mtime, ok := gobFilesInDir(entryDir)
+		if !ok {
 			continue
 		}
 		out = append(out, CacheEntry{
 			Digest:   d.Name(),
-			Size:     info.Size(),
-			CachedAt: info.ModTime(),
+			Size:     size,
+			CachedAt: mtime,
 			ImageRef: readMetaSidecar(entryDir),
 		})
 	}
@@ -594,16 +646,16 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		if _, err := normalizeDigest(d.Name()); err != nil {
 			continue
 		}
-		gobPath := filepath.Join(root, d.Name(), "layers.gob")
-		info, statErr := os.Stat(gobPath)
-		if statErr != nil {
+		entryPath := filepath.Join(root, d.Name())
+		size, mtime, ok := gobFilesInDir(entryPath)
+		if !ok {
 			continue
 		}
 		records = append(records, pruneEntry{
 			name:  d.Name(),
-			path:  filepath.Join(root, d.Name()),
-			mtime: info.ModTime(),
-			size:  info.Size(),
+			path:  entryPath,
+			mtime: mtime,
+			size:  size,
 		})
 	}
 

@@ -27,6 +27,13 @@ type AnalyzeOptions struct {
 	// Tests can also set LAYERX_CACHE_DIR; this field exists for callers
 	// that want explicit control without environment.
 	CacheRoot string
+
+	// Platform is the canonical "os/arch[/variant]" string the caller
+	// requested via --platform (e.g. "linux/arm64"). When non-empty it is
+	// appended to the cache key so that analyses for different platforms of
+	// the same image digest never share a cache entry. Empty = no platform
+	// pin; the behaviour is identical to before this field was added.
+	Platform string
 }
 
 func Analyze(ctx context.Context, resolver Resolver, imageRef string) (*Analysis, error) {
@@ -74,7 +81,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		fromCache bool
 	)
 	if canCache && !opts.NoCache {
-		cached, ok, loadErr := loadCache(cacheRoot, digest)
+		cached, ok, loadErr := loadCacheWithPlatform(cacheRoot, digest, opts.Platform)
 		if loadErr != nil && !errors.Is(loadErr, errBadDigest) {
 			emitCacheWarn(opts.Progress, fmt.Sprintf("cache load failed: %v", loadErr))
 		}
@@ -109,8 +116,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 			case digestErr != nil:
 				// Pre-resolve digest was unknown (image was not local); the
 				// post-resolve digest is now authoritative.
-				digest = postDigest
-				if err := saveCache(cacheRoot, digest, imageRef, layers, opts.Progress); err != nil {
+				if err := saveCacheWithPlatform(cacheRoot, postDigest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
 			case postDigest != digest:
@@ -118,7 +124,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 				emitCacheWarn(opts.Progress,
 					"cache write skipped: image digest changed during analysis (concurrent pull?)")
 			default:
-				if err := saveCache(cacheRoot, digest, imageRef, layers, opts.Progress); err != nil {
+				if err := saveCacheWithPlatform(cacheRoot, digest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
 			}

@@ -1067,3 +1067,41 @@ func TestPruneCache_Wrapper_StillEmitsSingleEntryOverflowWarn(t *testing.T) {
 	}
 	assert.True(t, found, "wrapper must still surface single-entry overflow warn; got %+v", events)
 }
+
+func TestCachePathWithPlatform_RejectsPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	adversarial := []string{
+		"../evil",
+		"linux/../../../../etc/passwd",
+		`linux\..\..\evil`,
+	}
+	for _, p := range adversarial {
+		_, err := cachePathWithPlatform(root, strings.Repeat("a", 64), p)
+		assert.Error(t, err, "platform %q should be rejected", p)
+	}
+}
+
+func TestListCache_PlatformOnly_DigestsAreVisible(t *testing.T) {
+	root := t.TempDir()
+	digest := strings.Repeat("d", 64)
+	dir := filepath.Join(root, digest)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	// Write only a platform-pinned file; no layers.gob.
+	env := cacheEnvelope{
+		Digest:        digest,
+		SchemaVersion: SchemaVersion,
+		CachedAt:      time.Now().UTC(),
+		Layers:        []cachedLayer{{Index: 0, ID: digest, Size: 512}},
+	}
+	f, err := os.Create(filepath.Join(dir, "layers-linux-arm64.gob"))
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	require.Len(t, entries, 1, "platform-only digest dir must appear in ListCache output")
+	assert.Equal(t, digest, entries[0].Digest)
+}

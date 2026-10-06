@@ -406,7 +406,7 @@ func (m model) fetchAnalysisWithProgress(progressCh chan<- image.ProgressEvent) 
 	return func() tea.Msg {
 		defer close(progressCh)
 		result, err := image.AnalyzeWithOptions(ctx, resolver, imageRef,
-			image.AnalyzeOptions{NoCache: noCache, Progress: progressCh})
+			image.AnalyzeOptions{NoCache: noCache, Progress: progressCh, Platform: m.platform})
 		return analysisMsg{analysis: result, err: err}
 	}
 }
