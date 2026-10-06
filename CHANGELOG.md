@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `layerx` now resolves registry credentials from `~/.docker/config.json` (including `credHelpers` per-registry entries, the global `credsStore`, and inline `auths` tokens) before calling the Docker daemon's pull API. Previously the pull was always sent unauthenticated, causing private-registry pulls to fail with "unauthorized" even when `docker pull` of the same reference succeeded.
+- Docker Hub credentials stored by `docker login` under the canonical key `https://index.docker.io/v1/` are now found correctly. Previously the lookup used `docker.io` as the key, missing credentials for inline `auths` entries and third-party credential helpers that store the canonical URL exactly.
+- Podman credentials in `$REGISTRY_AUTH_FILE` (or `~/.config/containers/auth.json` when the env var is unset) are now consulted when no matching entry is found in the Docker config. Covers remote Podman connections and setups where `podman login` wrote to the Podman-native auth file.
+- Inline `identityToken` entries in `~/.docker/config.json` `auths` are now forwarded correctly as bearer tokens. Previously only the `auth` field was read; CI environments and token-refresh tooling that write `identityToken` directly were silently ignored.
+- Pull failures caused by missing or wrong credentials now surface the daemon's full error message (including any `docker login` hint) instead of reporting the image as "not found". The `pull access denied` message is no longer misclassified as a missing-image error.
 - `layerx compare` daemon and resolver errors now go through the same friendly error formatter as `layerx ci` and `layerx` itself, so actionable hints ("Is Docker running?", "pass a saved-image archive path instead") are shown consistently.
 - `ErrPodmanSocketNotSet.Error()` wording now matches the hint shown by the CLI, so the message is consistent across all output paths.
 - Status bar "toggle / view" hint in split-pane mode now tracks the correct pane's cursor; previously it read the top pane's cursor position even when the bottom pane had focus.
