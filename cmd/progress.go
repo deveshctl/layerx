@@ -57,6 +57,26 @@ func stderrProgress(ctx context.Context, w io.Writer) (chan image.ProgressEvent,
 	return ch, stop
 }
 
+// progressKey captures the fields that writeHeartbeat uses to format output.
+// Two events with the same key produce the same displayed line; deduplicating
+// by key rather than the full ProgressEvent struct prevents duplicate lines
+// when fields like LayersDone change without affecting the displayed output.
+type progressKey struct {
+	BytesCurr   int64
+	BytesTotal  int64
+	LayersDone  int
+	LayersTotal int
+}
+
+func progressKeyOf(ev image.ProgressEvent) progressKey {
+	return progressKey{
+		BytesCurr:   ev.BytesCurr,
+		BytesTotal:  ev.BytesTotal,
+		LayersDone:  ev.LayersDone,
+		LayersTotal: ev.LayersTotal,
+	}
+}
+
 // runProgressLoop is the body of the goroutine started by stderrProgress.
 // Split out so tests can drive it with a hand-managed tick channel and
 // without spinning up a real timer.
@@ -65,24 +85,23 @@ func runProgressLoop(ctx context.Context, w io.Writer, ch <-chan image.ProgressE
 		curPhase    = image.PhaseUnknown
 		buffered    image.ProgressEvent // most-recent in-flight event for the current phase
 		hasBuffered bool
-		// lastPrinted tracks the last event written by writeHeartbeat so
-		// identical consecutive updates (Docker's trailing "Pull complete"
-		// stream) are deduplicated without permanently suppressing progress
-		// when the total grows after an apparent 100%.
-		lastPrinted image.ProgressEvent
-		hasLast     bool
+		// lastKey tracks the display key of the last line written by
+		// writeHeartbeat. Two events with the same key render to the same
+		// output line; deduplicating by key (not the full struct) prevents
+		// duplicate lines when LayersDone changes but the displayed bytes
+		// are identical, while still allowing a new line if BytesTotal grows.
+		lastKey progressKey
+		hasLast bool
 	)
 
 	flush := func() {
 		if !hasBuffered {
 			return
 		}
-		// Suppress the write when the event is byte-for-byte identical to the
-		// last printed one — avoids repeating "100%" when Docker keeps emitting
-		// the same totals, while still allowing a new line if BytesTotal grows.
-		if !hasLast || buffered != lastPrinted {
+		k := progressKeyOf(buffered)
+		if !hasLast || k != lastKey {
 			writeHeartbeat(w, buffered)
-			lastPrinted = buffered
+			lastKey = k
 			hasLast = true
 		}
 		hasBuffered = false

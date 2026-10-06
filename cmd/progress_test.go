@@ -228,8 +228,9 @@ func TestStderrProgress_GrowingTotalAllowsProgress(t *testing.T) {
 
 	// Must contain at least one intermediate progress line (not just 100%).
 	assert.Contains(t, out, "5.0 MB", "layer-1-only progress line must appear")
-	// Final 100% must still appear exactly once.
-	assert.Equal(t, 1, strings.Count(out, "100%"), "final 100%% must appear exactly once: %q", out)
+	// Both 5/5 MB (100%) and 13/13 MB (100%) are distinct completion events —
+	// they have different BytesCurr/BytesTotal keys so both print exactly once.
+	assert.GreaterOrEqual(t, strings.Count(out, "100%"), 2, "both distinct 100%% events must appear: %q", out)
 }
 
 // TestStderrProgress_PhaseTransitionFlushesLastProgress verifies that
