@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.2] - 2026-10-07
+
+Bug fixes across credential resolution, pull progress output, file tree
+correctness, archive loading, TUI display, CI rules, and build exit codes.
+
 ### Fixed
 - Credential resolution now handles Docker Hub's canonical registry key (`https://index.docker.io/v1/`), Podman's native auth file (`$REGISTRY_AUTH_FILE` / `~/.config/containers/auth.json`), and inline `identityToken` entries. Pull failures caused by wrong credentials now surface the daemon's full error message and any `docker login` hint instead of reporting the image as not found.
 - Pull progress output no longer repeats lines when Docker emits duplicate trailing events: deduplication now keys on displayed values (bytes and layer counts) rather than the full event struct. The 100% completion line flushes immediately instead of waiting for the next 2-second tick. The spurious `pulled 0 / 1 layers` line at the start of a single-layer pull is suppressed.
