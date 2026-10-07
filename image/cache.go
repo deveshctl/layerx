@@ -105,8 +105,8 @@ const (
 
 type CacheEntry struct {
 	Digest   string
-	Size     int64     // bytes — size of the layers.gob file on disk
-	CachedAt time.Time // mtime of layers.gob; honestly named (not "LastUsed")
+	Size     int64     // bytes — combined size of all layers*.gob files in the digest directory
+	CachedAt time.Time // newest mtime among all layers*.gob files; honestly named (not "LastUsed")
 	// ImageRef is the image reference the cache was originally written with
 	// (e.g. "nginx:latest", "/build/app.tar"). Empty when the sidecar
 	// meta.json is missing — entries written by older versions, or by
