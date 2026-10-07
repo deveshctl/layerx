@@ -40,3 +40,6 @@ internal-docs/
 
 # Vendor (we use modules, not vendoring)
 /vendor/
+
+# graphify output
+/graphify-out/
