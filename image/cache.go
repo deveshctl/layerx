@@ -450,11 +450,16 @@ func saveCacheWithPlatform(root, digest, platform, imageRef string, layers []Lay
 		return fmt.Errorf("closing temp cache file: %w", closeErr)
 	}
 
-	finalPath, err := cachePathWithPlatform(root, digest, platform)
-	if err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("resolving cache path: %w", err)
+	file := "layers.gob"
+	if platform != "" {
+		slug := strings.ReplaceAll(platform, "/", "-")
+		if strings.Contains(slug, "..") || strings.ContainsAny(slug, `/\`) {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("invalid platform slug %q", slug)
+		}
+		file = "layers-" + slug + ".gob"
 	}
+	finalPath := filepath.Join(dir, file)
 	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
