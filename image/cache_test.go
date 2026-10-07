@@ -1081,6 +1081,62 @@ func TestCachePathWithPlatform_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
+// writeFakeCachePlatform creates {root}/{digest}/layers-<platform-slug>.gob
+// with the given size and mtime. Used to seed multi-platform prune fixtures.
+func writeFakeCachePlatform(t *testing.T, root, digest, platform string, size int64, mtime time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, digest)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	slug := strings.ReplaceAll(platform, "/", "-")
+	path := filepath.Join(dir, "layers-"+slug+".gob")
+	env := cacheEnvelope{
+		Digest:        digest,
+		SchemaVersion: SchemaVersion,
+		CachedAt:      mtime,
+		Layers:        []cachedLayer{{Index: 0, ID: digest, Size: size}},
+	}
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+	require.NoError(t, os.Truncate(path, size))
+	require.NoError(t, os.Chtimes(path, mtime, mtime))
+}
+
+// TestPruneCache_TTL_PlatformMixedAge verifies that when a digest directory
+// contains both an old platform-pinned file and a freshly-written default
+// file, the directory is evicted based on the oldest file's mtime — not the
+// newest. Before the fix, gobFilesInDir returned the newest mtime, so a
+// 25-day-old layers-linux-amd64.gob next to a fresh layers.gob would never
+// be evicted at TTL_DAYS=7.
+func TestPruneCache_TTL_PlatformMixedAge(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	mixed := strings.Repeat("a", 64)
+	// Old platform-pinned file: 31 days old (stale at 30-day TTL).
+	writeFakeCachePlatform(t, root, mixed, "linux/amd64", 1024, now.Add(-31*24*time.Hour))
+	// Fresh default file: written today.
+	writeFakeCache(t, root, mixed, 1024, now.Add(-1*time.Hour))
+
+	// Also a genuinely fresh digest (both files recent) that must survive.
+	fresh := strings.Repeat("b", 64)
+	writeFakeCache(t, root, fresh, 1024, now.Add(-1*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	pruneCache(root, "", nil)
+
+	// 'mixed' must be evicted: its oldest file is 31 days old.
+	_, errMixed := os.Stat(filepath.Join(root, mixed))
+	assert.True(t, os.IsNotExist(errMixed), "digest with stale platform file must be evicted")
+
+	// 'fresh' must survive: all files are recent.
+	_, errFresh := os.Stat(filepath.Join(root, fresh))
+	assert.NoError(t, errFresh, "all-fresh digest must survive TTL")
+}
+
 func TestListCache_PlatformOnly_DigestsAreVisible(t *testing.T) {
 	root := t.TempDir()
 	digest := strings.Repeat("d", 64)

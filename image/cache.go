@@ -195,15 +195,16 @@ func loadPruneLimits(progress chan<- ProgressEvent) (ttl time.Duration, maxBytes
 	return time.Duration(ttlDays) * 24 * time.Hour, maxBytes
 }
 
-// pruneEntry is one candidate during prune. mtime is the layers.gob's
-// modtime — used as a CachedAt proxy because it is fixed by os.Rename
-// at the same instant the envelope's CachedAt is, and avoids decoding
-// every gob in the cache root just to choose evictees.
+// pruneEntry is one candidate during prune. mtime is the newest layers*.gob
+// modtime — used as CachedAt display proxy. oldest is the oldest layers*.gob
+// modtime — used as the effective age for TTL eviction, so a stale
+// platform-pinned file is not shielded by a freshly-written sibling.
 type pruneEntry struct {
-	name  string // digest directory name (no path separators)
-	path  string // {root}/{name}
-	mtime time.Time
-	size  int64
+	name   string // digest directory name (no path separators)
+	path   string // {root}/{name}
+	mtime  time.Time
+	oldest time.Time
+	size   int64
 }
 
 // pruneCache enforces TTL and size-cap limits on the cache root.
@@ -547,9 +548,14 @@ func sweepOrphanTempFiles(dir string) {
 	}
 }
 
-// gobFilesInDir returns the combined size and newest mtime of all
-// layers*.gob files in dir. ok is false when no such file exists.
-func gobFilesInDir(dir string) (size int64, mtime time.Time, ok bool) {
+// gobFilesInDir returns the combined size, newest mtime, and oldest mtime of
+// all layers*.gob files in dir. ok is false when no such file exists.
+//
+// newest is used as CachedAt in display (shows when any platform was last
+// cached). oldest is used by PruneCache's TTL check so that a stale
+// per-platform file is not shielded from eviction by a freshly-written
+// sibling: the directory's effective age is its oldest resident file.
+func gobFilesInDir(dir string) (size int64, newest, oldest time.Time, ok bool) {
 	matches, _ := filepath.Glob(filepath.Join(dir, "layers*.gob"))
 	for _, m := range matches {
 		info, err := os.Stat(m)
@@ -558,11 +564,15 @@ func gobFilesInDir(dir string) (size int64, mtime time.Time, ok bool) {
 		}
 		ok = true
 		size += info.Size()
-		if info.ModTime().After(mtime) {
-			mtime = info.ModTime()
+		mt := info.ModTime()
+		if mt.After(newest) {
+			newest = mt
+		}
+		if oldest.IsZero() || mt.Before(oldest) {
+			oldest = mt
 		}
 	}
-	return size, mtime, ok
+	return size, newest, oldest, ok
 }
 
 // ListCache returns every valid digest dir under root with its size and
@@ -594,14 +604,14 @@ func ListCache(root string) ([]CacheEntry, []string, error) {
 			continue
 		}
 		entryDir := filepath.Join(root, d.Name())
-		size, mtime, ok := gobFilesInDir(entryDir)
+		size, newest, _, ok := gobFilesInDir(entryDir)
 		if !ok {
 			continue
 		}
 		out = append(out, CacheEntry{
 			Digest:   d.Name(),
 			Size:     size,
-			CachedAt: mtime,
+			CachedAt: newest,
 			ImageRef: readMetaSidecar(entryDir),
 		})
 	}
@@ -647,15 +657,16 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 			continue
 		}
 		entryPath := filepath.Join(root, d.Name())
-		size, mtime, ok := gobFilesInDir(entryPath)
+		size, newest, oldest, ok := gobFilesInDir(entryPath)
 		if !ok {
 			continue
 		}
 		records = append(records, pruneEntry{
-			name:  d.Name(),
-			path:  entryPath,
-			mtime: mtime,
-			size:  size,
+			name:   d.Name(),
+			path:   entryPath,
+			mtime:  newest,
+			oldest: oldest,
+			size:   size,
 		})
 	}
 
@@ -709,7 +720,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		survivors := records[:0]
 		t := now()
 		for _, r := range records {
-			if r.name != opts.Keep && t.Sub(r.mtime) > opts.TTL && tryRemove(r.path) {
+			if r.name != opts.Keep && t.Sub(r.oldest) > opts.TTL && tryRemove(r.path) {
 				res.Removed = append(res.Removed, toEntry(r))
 				continue
 			}
