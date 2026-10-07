@@ -116,6 +116,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 			case digestErr != nil:
 				// Pre-resolve digest was unknown (image was not local); the
 				// post-resolve digest is now authoritative.
+				digest = postDigest
 				if err := saveCacheWithPlatform(cacheRoot, postDigest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
