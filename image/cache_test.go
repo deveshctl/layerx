@@ -1074,6 +1074,16 @@ func TestCachePathWithPlatform_RejectsPathTraversal(t *testing.T) {
 		"../evil",
 		"linux/../../../../etc/passwd",
 		`linux\..\..\evil`,
+		// Windows reserved device names — on Windows, a path component equal
+		// to one of these names (case-insensitive) is treated as a device
+		// (NUL discards data, CON reads stdin, etc.).
+		"linux/NUL",
+		"linux/nul",
+		"linux/CON",
+		"linux/PRN",
+		"linux/AUX",
+		"linux/COM1",
+		"linux/LPT9",
 	}
 	for _, p := range adversarial {
 		_, err := cachePathWithPlatform(root, strings.Repeat("a", 64), p)

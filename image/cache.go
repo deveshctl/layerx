@@ -251,19 +251,46 @@ func cachePathWithPlatform(root, digest, platform string) (string, error) {
 	if platform != "" {
 		// Replace '/' with '-' so the slug is a valid file-name component on
 		// all supported OSes. "linux/amd64" → "layers-linux-amd64.gob".
-		slug := strings.ReplaceAll(platform, "/", "-")
-		// Reject slugs that could escape the digest directory (e.g. "..").
 		// activePlatformDisplay() sanitises via ParsePlatform/FormatPlatform,
 		// but defence-in-depth here costs nothing.
-		if strings.Contains(slug, "..") || strings.ContainsAny(slug, `/\`) {
-			return "", fmt.Errorf("invalid platform slug %q", slug)
+		slug, err := platformSlug(platform)
+		if err != nil {
+			return "", err
 		}
 		file = "layers-" + slug + ".gob"
 	}
 	return filepath.Join(root, norm, file), nil
 }
 
-// normalizeDigest strips the "sha256:" prefix when present and enforces the
+// platformSlug converts a platform string ("linux/amd64") to a filename
+// component ("linux-amd64") and validates it against known attack vectors:
+// path traversal sequences (".."), path separators, and Windows reserved
+// device names (NUL, CON, PRN, AUX, COM1-COM9, LPT1-LPT9). On Windows,
+// a path component that equals a reserved name (case-insensitive) refers
+// to the device rather than a file — NUL discards data, CON reads stdin.
+// The '-' separator used by the slug means each original segment maps to
+// a single slug segment, so we check each segment independently.
+func platformSlug(platform string) (string, error) {
+	slug := strings.ReplaceAll(platform, "/", "-")
+	if strings.Contains(slug, "..") || strings.ContainsAny(slug, `/\`) {
+		return "", fmt.Errorf("invalid platform slug %q", slug)
+	}
+	for _, seg := range strings.Split(slug, "-") {
+		upper := strings.ToUpper(seg)
+		switch upper {
+		case "CON", "PRN", "AUX", "NUL":
+			return "", fmt.Errorf("invalid platform slug %q: reserved device name", slug)
+		}
+		if len(upper) == 4 && (upper[:3] == "COM" || upper[:3] == "LPT") {
+			if upper[3] >= '1' && upper[3] <= '9' {
+				return "", fmt.Errorf("invalid platform slug %q: reserved device name", slug)
+			}
+		}
+	}
+	return slug, nil
+}
+
+
 // canonical form of a Docker/OCI content digest: exactly 64 lowercase
 // hexadecimal characters. Anything else is rejected.
 //
@@ -452,10 +479,10 @@ func saveCacheWithPlatform(root, digest, platform, imageRef string, layers []Lay
 
 	file := "layers.gob"
 	if platform != "" {
-		slug := strings.ReplaceAll(platform, "/", "-")
-		if strings.Contains(slug, "..") || strings.ContainsAny(slug, `/\`) {
+		slug, slugErr := platformSlug(platform)
+		if slugErr != nil {
 			_ = os.Remove(tmpPath)
-			return fmt.Errorf("invalid platform slug %q", slug)
+			return fmt.Errorf("invalid platform slug: %w", slugErr)
 		}
 		file = "layers-" + slug + ".gob"
 	}
