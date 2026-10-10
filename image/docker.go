@@ -670,7 +670,20 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	}
 
 	if manifestData == nil {
-		return nil, fmt.Errorf("invalid image archive: manifest.json not found")
+		// No Docker manifest.json — attempt OCI image layout fallback.
+		// index.json was collected by scanResolveMetadata into rootJSON.
+		synthetic, err := ociIndexToDockerManifest(rootJSON, spool)
+		if err != nil {
+			return nil, fmt.Errorf("invalid image archive: manifest.json not found and OCI index fallback failed: %w", err)
+		}
+		if synthetic == nil {
+			return nil, fmt.Errorf("invalid image archive: manifest.json not found")
+		}
+		// Proceed with the synthesised manifest.
+		var manifests []dockerManifest
+		manifests = append(manifests, *synthetic)
+		manifest := manifests[0]
+		return parseLayersFromManifest(ctx, spool, manifest, headers, rootJSON)
 	}
 
 	var manifests []dockerManifest
@@ -682,9 +695,17 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	}
 	manifest := manifests[0]
 
+	return parseLayersFromManifest(ctx, spool, manifest, headers, rootJSON)
+}
+
+// parseLayersFromManifest resolves config and layer trees from a dockerManifest,
+// using the pre-built header-size map and any root-level JSON already in rootJSON.
+// Both the Docker-manifest path and the OCI-index fallback path converge here.
+func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest dockerManifest, headers map[string]int64, rootJSON map[string][]byte) ([]Layer, error) {
 	// Resolve config: legacy (<sha>.json at root) or OCI (blobs/sha256/...).
 	configData, ok := rootJSON[manifest.Config]
 	if !ok {
+		var err error
 		configData, err = readEntryFromSpool(spool, manifest.Config)
 		if err != nil {
 			return nil, fmt.Errorf("invalid image archive: config %s not found: %w", manifest.Config, err)
@@ -793,6 +814,63 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	return layers, nil
 }
 
+// ociIndexToDockerManifest synthesises a dockerManifest from a standalone OCI
+// image layout's index.json. It reads index.json from rootJSON (pre-collected
+// by scanResolveMetadata), follows the first descriptor to the OCI image
+// manifest blob in the spool, and converts the OCI manifest's config and layer
+// digest references to blob paths ("blobs/<alg>/<hex>") that the rest of
+// parseLayers can handle identically to a Docker-format archive.
+//
+// Returns (nil, nil) when rootJSON contains no index.json (not an OCI layout).
+// Returns (nil, err) when the index exists but cannot be followed.
+func ociIndexToDockerManifest(rootJSON map[string][]byte, spool *os.File) (*dockerManifest, error) {
+	indexData, ok := rootJSON["index.json"]
+	if !ok {
+		return nil, nil
+	}
+	var idx ociIndex
+	if err := json.Unmarshal(indexData, &idx); err != nil {
+		return nil, fmt.Errorf("cannot parse index.json: %w", err)
+	}
+	if len(idx.Manifests) == 0 {
+		return nil, fmt.Errorf("index.json: no manifests listed")
+	}
+
+	// Use the first manifest descriptor. Multi-arch layouts will hit the
+	// multi-manifest warning path in ResolveWithProgress separately.
+	manifestDesc := idx.Manifests[0]
+	manifestPath := ociDigestToPath(manifestDesc.Digest)
+	if manifestPath == "" {
+		return nil, fmt.Errorf("index.json: invalid manifest digest %q", manifestDesc.Digest)
+	}
+
+	manifestBlob, err := readEntryFromSpool(spool, manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("OCI manifest blob %s: %w", manifestPath, err)
+	}
+
+	var ociMan ociManifest
+	if err := json.Unmarshal(manifestBlob, &ociMan); err != nil {
+		return nil, fmt.Errorf("cannot parse OCI manifest %s: %w", manifestPath, err)
+	}
+
+	configPath := ociDigestToPath(ociMan.Config.Digest)
+	if configPath == "" {
+		return nil, fmt.Errorf("OCI manifest: invalid config digest %q", ociMan.Config.Digest)
+	}
+
+	layerPaths := make([]string, 0, len(ociMan.Layers))
+	for _, l := range ociMan.Layers {
+		p := ociDigestToPath(l.Digest)
+		if p == "" {
+			return nil, fmt.Errorf("OCI manifest: invalid layer digest %q", l.Digest)
+		}
+		layerPaths = append(layerPaths, p)
+	}
+
+	return &dockerManifest{Config: configPath, Layers: layerPaths}, nil
+}
+
 // scanResolveMetadata walks the spool once, returning manifest.json bytes,
 // any root-level *.json blobs (legacy config payloads), and a header map of
 // declared sizes for every entry. Layer / blob bodies are streamed past
@@ -829,6 +907,14 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 				return nil, nil, nil, err
 			}
 			manifestData = data
+		case hdr.Name == "index.json":
+			// Collect index.json so the OCI fallback path in parseLayers can
+			// read it without a second spool scan.
+			data, err := readMetadataEntry(tr, hdr.Size, hdr.Name)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			rootJSON[hdr.Name] = data
 		case strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/"):
 			data, err := readMetadataEntry(tr, hdr.Size, hdr.Name)
 			if err != nil {
@@ -916,6 +1002,36 @@ func decompressIfGzipStream(r io.Reader) (io.ReadCloser, error) {
 type dockerManifest struct {
 	Config string   `json:"Config"`
 	Layers []string `json:"Layers"`
+}
+
+// ociIndex is the top-level index.json in a standalone OCI image layout.
+// See https://github.com/opencontainers/image-spec/blob/v1.1.0/image-layout.md
+type ociIndex struct {
+	Manifests []ociDescriptor `json:"manifests"`
+}
+
+// ociManifest is an OCI image manifest blob (mediaType application/vnd.oci.image.manifest.v1+json).
+type ociManifest struct {
+	Config ociDescriptor   `json:"config"`
+	Layers []ociDescriptor `json:"layers"`
+}
+
+// ociDescriptor references a blob by digest (e.g. "sha256:abc...").
+type ociDescriptor struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Size      int64  `json:"size"`
+}
+
+// ociDigestToPath converts an OCI content digest ("sha256:abc...") to its
+// blob path in the archive ("blobs/sha256/abc..."). Returns "" for any
+// digest that does not contain exactly one colon.
+func ociDigestToPath(digest string) string {
+	i := strings.IndexByte(digest, ':')
+	if i < 0 || i == len(digest)-1 {
+		return ""
+	}
+	return "blobs/" + digest[:i] + "/" + digest[i+1:]
 }
 
 type imageConfig struct {

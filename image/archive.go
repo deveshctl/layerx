@@ -150,17 +150,27 @@ func readArchivePlatform(f *os.File) (*ocispec.Platform, error) {
 	if err != nil {
 		return nil, err
 	}
+	var cfgPath string
 	if manifestData == nil {
-		return nil, errors.New("manifest.json not found")
+		// No Docker manifest.json — try OCI index fallback.
+		synthetic, err := ociIndexToDockerManifest(rootJSON, f)
+		if err != nil {
+			return nil, fmt.Errorf("manifest.json not found and OCI index fallback failed: %w", err)
+		}
+		if synthetic == nil {
+			return nil, errors.New("manifest.json not found")
+		}
+		cfgPath = synthetic.Config
+	} else {
+		var manifests []dockerManifest
+		if err := json.Unmarshal(manifestData, &manifests); err != nil {
+			return nil, fmt.Errorf("cannot parse manifest: %w", err)
+		}
+		if len(manifests) == 0 {
+			return nil, errors.New("empty manifest")
+		}
+		cfgPath = manifests[0].Config
 	}
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return nil, fmt.Errorf("cannot parse manifest: %w", err)
-	}
-	if len(manifests) == 0 {
-		return nil, errors.New("empty manifest")
-	}
-	cfgPath := manifests[0].Config
 	cfgBytes, ok := rootJSON[cfgPath]
 	if !ok {
 		// OCI layout: config lives under blobs/sha256/<digest>.

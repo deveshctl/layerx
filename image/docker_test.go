@@ -407,6 +407,58 @@ func TestParseLayers_OCIFormat(t *testing.T) {
 	assert.Equal(t, "/bin/sh -c #(nop)  CMD [\"nginx\"]", layers[1].Command)
 }
 
+// TestParseLayers_StandaloneOCILayout verifies that a standalone OCI image
+// layout archive (containing index.json but no manifest.json) is resolved
+// correctly via the OCI index fallback path.
+func TestParseLayers_StandaloneOCILayout(t *testing.T) {
+	configDigest := "cfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfg0abc"
+	layerDigest := "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b"
+	manifestDigest := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	configData := buildConfig(t, []string{"RUN echo hello"})
+
+	// OCI image manifest blob
+	ociMan := ociManifest{
+		Config: ociDescriptor{
+			MediaType: "application/vnd.oci.image.config.v1+json",
+			Digest:    "sha256:" + configDigest,
+		},
+		Layers: []ociDescriptor{{
+			MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+			Digest:    "sha256:" + layerDigest,
+		}},
+	}
+	ociManData, err := json.Marshal(ociMan)
+	require.NoError(t, err)
+
+	// OCI index.json
+	idx := ociIndex{
+		Manifests: []ociDescriptor{{
+			MediaType: "application/vnd.oci.image.manifest.v1+json",
+			Digest:    "sha256:" + manifestDigest,
+		}},
+	}
+	indexData, err := json.Marshal(idx)
+	require.NoError(t, err)
+
+	// Layer blob: gzip-compressed tar (OCI layer format).
+	layerBlob := gzipBytes(t, buildSimpleLayerTar(t, map[string][]byte{"etc/hostname": []byte("test")}))
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"index.json":                         indexData,
+		"blobs/sha256/" + manifestDigest:     ociManData,
+		"blobs/sha256/" + configDigest:       configData,
+		"blobs/sha256/" + layerDigest:        layerBlob,
+	})
+
+	layers, err := parseLayers(context.Background(), tarBuf)
+	require.NoError(t, err)
+	require.Len(t, layers, 1)
+	assert.Equal(t, "1a2b3c4d5e6f", layers[0].ID)
+	assert.Equal(t, "RUN echo hello", layers[0].Command)
+	assert.NotNil(t, layers[0].Tree)
+}
+
 // buildGzipLayerTar creates a gzip-compressed tar containing the given entries,
 // simulating how Docker 25+ OCI format stores layer blobs.
 func buildGzipLayerTar(t *testing.T, entries []struct {
