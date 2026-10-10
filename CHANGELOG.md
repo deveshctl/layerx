@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI libraries updated: bubbletea v2.1.0, bubbles v2.2.1, lipgloss v2.0.6.
 - Container image base updated to `alpine:3.24.2` and `distroless/static-debian13`.
 
+### Fixed
+- Analysis cache listing and pruning now work correctly when the cache root path contains bracket characters (e.g. a Windows username like `user[1]`). Previously `filepath.Glob` interpreted the brackets as a pattern and returned `ErrBadPattern`, causing `cache list` to return empty results and auto-prune to skip all entries silently.
+- `cache prune` MaxBytes eviction now sorts entries by their oldest file's mtime, consistent with the TTL pass. Previously the MaxBytes sort used the newest mtime, so a multi-platform directory with a fresh default file could survive while a uniformly-older directory was evicted first.
+
 ## [v1.6.2] - 2026-10-07
 
 Bug fixes across credential resolution, pull progress output, file tree
@@ -24,10 +28,11 @@ correctness, archive loading, TUI display, CI rules, and build exit codes.
 - `layerx compare` now uses the pre-computed stacked trees for efficiency scoring (consistent with every other caller) and routes daemon/resolver errors through the same friendly formatter used by `layerx ci`, so actionable hints appear consistently. Regression detection checks efficiency score drop before wasted-bytes increase, matching the order they are reported.
 - File tree correctness: a file deleted and re-added within the same layer now shows as Modified instead of Removed; directory metadata set by an earlier layer is no longer overwritten by an inferred placeholder node from a later layer; hardlink-surviving content is no longer charged as wasted bytes when only the original name was deleted.
 - Archive loading: a manifest-referenced layer blob absent from the outer tar is now rejected with an error rather than silently treated as empty; multiple manifest layers pointing at the same blob path (deduplication) now all receive a file tree; a zero-byte blob is treated as a valid empty layer rather than being skipped.
-- TUI: split-pane status bar "toggle / view" hint now tracks the focused pane's cursor position. File-permission display now includes setuid (`s`/`S`), setgid (`s`/`S`), and sticky (`t`/`T`) bits. File viewer truncation flag is set correctly for daemon-extracted files. Stale "Inspect failed" footer warning is cleared when analysis succeeds.
+- TUI: split-pane status bar "toggle / view" hint now tracks the focused pane's cursor position. File-permission display now includes setuid (`s`/`S`), setgid (`s`/`S`), and sticky (`t`/`T`) bits, and correctly shows the type character for block devices (`b`), character devices (`c`), named pipes (`p`), sockets (`s`), and irregular files (`?`) instead of treating them all as regular files. File viewer truncation flag is set correctly for daemon-extracted files. Stale "Inspect failed" footer warning is cleared when analysis succeeds.
 - `wasted %` CI rule now uses the efficiency score's uncompressed denominator, preventing ratios above 100% on compressed archives and aligning the CI check with the efficiency score shown in the TUI.
 - `layerx build` exit code: signal-killed processes (which return `ExitCode()` `-1`) are now mapped to `1`; positive codes (126, 137, 255, etc.) pass through unchanged. `iidfile` removal errors are surfaced instead of silently discarded, preventing a zero-byte file from making the engine report an empty image ID on Windows.
 - File viewer and extractor now reject a tar stream with more than 1024 non-regular entries before the first regular file, preventing an unbounded skip loop on a crafted archive. File viewer now reads up to the full `MaxViewSize` limit regardless of the tar entry's declared size.
+- Analysis cache now stores `--platform`-pinned results separately from un-pinned results for the same image digest, preventing a cached `linux/amd64` analysis from being returned for a `linux/arm64` request. TTL eviction now uses the oldest file's mtime within a digest directory, so a stale platform-pinned analysis is not shielded from eviction by a freshly-written sibling.
 - Minor: usage synopsis uses `IMAGE_OR_ARCHIVE` consistently; `--engine podman` error message mentions `DOCKER_HOST` alongside `CONTAINER_HOST`; `ErrPodmanSocketNotSet` message is consistent with the CLI hint; `ErrNoEngineFound.Cause` and its `Unwrap()` removed (field was never populated); `FormatBytes` handles negative inputs correctly.
 
 ## [v1.6.1] - 2026-08-08

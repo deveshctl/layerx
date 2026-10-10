@@ -49,11 +49,22 @@ func FormatSignedBytes(b int64) string {
 
 func FormatMode(m fs.FileMode) string {
 	var buf [10]byte
-	if m.IsDir() {
+	switch {
+	case m.IsDir():
 		buf[0] = 'd'
-	} else if m&fs.ModeSymlink != 0 {
+	case m&fs.ModeSymlink != 0:
 		buf[0] = 'l'
-	} else {
+	case m&fs.ModeDevice != 0 && m&fs.ModeCharDevice != 0:
+		buf[0] = 'c'
+	case m&fs.ModeDevice != 0:
+		buf[0] = 'b'
+	case m&fs.ModeNamedPipe != 0:
+		buf[0] = 'p'
+	case m&fs.ModeSocket != 0:
+		buf[0] = 's'
+	case m&fs.ModeIrregular != 0:
+		buf[0] = '?'
+	default:
 		buf[0] = '-'
 	}
 	const rwx = "rwx"

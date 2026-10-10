@@ -203,7 +203,7 @@ func TestWriteJSONAtomic_OverwritesAndCleansTmp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("new"), got)
 
-	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
+	leftovers, err := readDirGlob(dir, ".layerx-json-", ".tmp")
 	require.NoError(t, err)
 	assert.Empty(t, leftovers, "tmp files must be cleaned up after success")
 }
@@ -219,7 +219,7 @@ func TestWriteJSONAtomic_RenameFailureCleansUpTmp(t *testing.T) {
 	err := writeJSONAtomic(target, []byte(`{"x":1}`))
 	require.Error(t, err)
 
-	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
+	leftovers, err := readDirGlob(dir, ".layerx-json-", ".tmp")
 	require.NoError(t, err)
 	assert.Empty(t, leftovers, "tmp file must be cleaned up after rename failure")
 }
@@ -250,7 +250,7 @@ func TestWriteJSONAtomic_ConcurrentRunsDontCollide(t *testing.T) {
 	require.NoError(t, json.Unmarshal(got, &payload))
 	assert.Contains(t, []string{"a", "b"}, payload["who"])
 
-	leftovers, err := filepath.Glob(filepath.Join(dir, ".layerx-json-*.tmp"))
+	leftovers, err := readDirGlob(dir, ".layerx-json-", ".tmp")
 	require.NoError(t, err)
 	assert.Empty(t, leftovers, "no tmp files must remain after concurrent writes")
 }
@@ -327,4 +327,22 @@ func TestCleanDiskWriteErr_NonENOSPCPassesThrough(t *testing.T) {
 	raw := errors.New("permission denied")
 	got := cleanDiskWriteErr("/home/user/out.json", raw)
 	assert.Same(t, raw, got)
+}
+
+// readDirGlob lists files in dir whose names start with prefix and end with
+// suffix. Uses os.ReadDir instead of filepath.Glob so that bracket characters
+// in dir (e.g. a Windows username like "user[1]") do not cause ErrBadPattern.
+func readDirGlob(dir, prefix, suffix string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
+			out = append(out, filepath.Join(dir, name))
+		}
+	}
+	return out, nil
 }
