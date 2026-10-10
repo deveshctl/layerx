@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.9
+# syntax=docker/dockerfile:1.28.0
 #
 # Container image for layerx.
 #
@@ -17,8 +17,8 @@
 # a prior `goreleaser release` (or `goreleaser build --snapshot`). Buildx sets
 # TARGETOS and TARGETARCH per platform in the manifest list.
 
-ARG BASE_IMAGE=gcr.io/distroless/static-debian12:nonroot
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS stage
+ARG BASE_IMAGE=gcr.io/distroless/static-debian13:nonroot
+FROM --platform=$BUILDPLATFORM alpine:3.24.2 AS stage
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
