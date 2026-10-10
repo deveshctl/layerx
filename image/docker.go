@@ -242,6 +242,11 @@ func (r *DockerResolver) saveOpts(ctx context.Context) []client.ImageSaveOption 
 
 // daemonPlatform queries the daemon's native OS and architecture via Info.
 // Returns nil on any error so callers can fall back to unscoped behaviour.
+//
+// Info.Architecture returns the kernel name (e.g. "x86_64", "aarch64") which
+// must be mapped to the OCI canonical name ("amd64", "arm64") before being
+// used as a platform filter. The client passes the value verbatim to the
+// daemon; sending "x86_64" would silently fail to match "amd64" manifests.
 func (r *DockerResolver) daemonPlatform(ctx context.Context) *ocispec.Platform {
 	result, err := r.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
@@ -251,7 +256,26 @@ func (r *DockerResolver) daemonPlatform(ctx context.Context) *ocispec.Platform {
 	if info.OSType == "" || info.Architecture == "" {
 		return nil
 	}
-	return &ocispec.Platform{OS: info.OSType, Architecture: info.Architecture}
+	arch, variant := normalizeArch(info.Architecture)
+	return &ocispec.Platform{OS: info.OSType, Architecture: arch, Variant: variant}
+}
+
+// normalizeArch converts a kernel architecture name (from uname -m / Docker
+// Info.Architecture) to the OCI canonical architecture and variant.
+// Unknown names are returned unchanged — the daemon may accept them or not.
+func normalizeArch(kernelArch string) (arch, variant string) {
+	switch kernelArch {
+	case "x86_64":
+		return "amd64", ""
+	case "aarch64":
+		return "arm64", ""
+	case "armv7l":
+		return "arm", "v7"
+	case "armv6l":
+		return "arm", "v6"
+	default:
+		return kernelArch, ""
+	}
 }
 
 // ensureImageWithProgress checks if the image exists locally; if not, pulls it with progress.

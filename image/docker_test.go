@@ -604,6 +604,9 @@ func (f *fakeAPIClient) ImageInspect(ctx context.Context, ref string, _ ...clien
 }
 
 func (f *fakeAPIClient) Info(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error) {
+	if f.info == nil {
+		return client.SystemInfoResult{}, errors.New("Info not configured on fakeAPIClient")
+	}
 	return f.info(ctx, options)
 }
 
@@ -1080,7 +1083,7 @@ func TestSaveOpts_NoPlatform_UsesNativePlatform(t *testing.T) {
 	// index that may contain missing blobs for other variants.
 	fake := &fakeAPIClient{
 		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
-			return client.SystemInfoResult{Info: systemInfoWith("linux", "arm64")}, nil
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "aarch64")}, nil
 		},
 	}
 	r, err := NewDockerResolver(WithClient(fake))
@@ -1132,4 +1135,80 @@ func TestSaveOpts_WithPlatform_UsesPinnedPlatform(t *testing.T) {
 // in test fakes.
 func systemInfoWith(os, arch string) system.Info {
 	return system.Info{OSType: os, Architecture: arch}
+}
+
+func TestNormalizeArch(t *testing.T) {
+	cases := []struct {
+		kernel  string
+		arch    string
+		variant string
+	}{
+		{"x86_64", "amd64", ""},
+		{"aarch64", "arm64", ""},
+		{"armv7l", "arm", "v7"},
+		{"armv6l", "arm", "v6"},
+		{"ppc64le", "ppc64le", ""},
+		{"s390x", "s390x", ""},
+		{"riscv64", "riscv64", ""},
+		{"unknown_custom", "unknown_custom", ""},
+	}
+	for _, tc := range cases {
+		arch, variant := normalizeArch(tc.kernel)
+		assert.Equal(t, tc.arch, arch, "arch for kernel %q", tc.kernel)
+		assert.Equal(t, tc.variant, variant, "variant for kernel %q", tc.kernel)
+	}
+}
+
+func TestDaemonPlatform_NormalizesArch(t *testing.T) {
+	// Info returns "x86_64" (uname -m style); daemonPlatform must convert it
+	// to the OCI canonical "amd64" before using it as an ImageSave filter.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "x86_64")}, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	p := dr.daemonPlatform(context.Background())
+	require.NotNil(t, p)
+	assert.Equal(t, "linux", p.OS)
+	assert.Equal(t, "amd64", p.Architecture, "x86_64 must be normalized to amd64")
+	assert.Equal(t, "", p.Variant)
+}
+
+func TestDaemonPlatform_NormalizesArm(t *testing.T) {
+	// armv7l from Info must become arm/v7 so the variant is preserved.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "armv7l")}, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	p := dr.daemonPlatform(context.Background())
+	require.NotNil(t, p)
+	assert.Equal(t, "arm", p.Architecture)
+	assert.Equal(t, "v7", p.Variant)
+}
+
+func TestDaemonPlatform_EmptyOSOrArch_ReturnsNil(t *testing.T) {
+	cases := []system.Info{
+		{OSType: "", Architecture: "x86_64"},
+		{OSType: "linux", Architecture: ""},
+	}
+	for _, info := range cases {
+		fake := &fakeAPIClient{
+			info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+				return client.SystemInfoResult{Info: info}, nil
+			},
+		}
+		r, err := NewDockerResolver(WithClient(fake))
+		require.NoError(t, err)
+		dr := r.(*DockerResolver)
+		assert.Nil(t, dr.daemonPlatform(context.Background()), "empty OS or arch must return nil")
+	}
 }
