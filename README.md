@@ -244,6 +244,9 @@ layerx --json analysis.json nginx:latest
 
 # Shell completion (bash / zsh / fish / PowerShell)
 source <(layerx completion bash)
+
+# Print version
+layerx version
 ```
 
 `IMAGE_OR_ARCHIVE` is auto-detected: an existing regular file is read directly without contacting any runtime; anything else is resolved through the active container engine. Every subcommand (`ci`, `compare`, `build`, `--json`) accepts both forms.
@@ -522,7 +525,7 @@ Full reference, syntax highlighting details, and terminal background notes: [doc
 
 | Variable                 | Purpose                                                                  |
 |--------------------------|--------------------------------------------------------------------------|
-| `CI=true`                | Treat `layerx IMAGE` (no subcommand) as `layerx ci IMAGE`                |
+| `CI=true` (also `1`, `yes`, `True`, `TRUE`) | Treat `layerx IMAGE` (no subcommand) as `layerx ci IMAGE` |
 | `LAYERX_CACHE_DIR`       | Override the default analysis cache directory                            |
 | `LAYERX_CACHE_TTL_DAYS`  | Evict cache entries older than this many days. Default `30`. `0` disables. |
 | `LAYERX_CACHE_MAX_BYTES` | Evict oldest entries until total cache size is at or below this. Default `1073741824` (1 GiB). `0` disables. |
