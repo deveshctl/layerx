@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	mobyimage "github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
@@ -307,7 +308,7 @@ func TestParseLayers_MissingConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	tarBuf := buildTar(t, map[string][]byte{
-		"manifest.json":                     manifestData,
+		"manifest.json":                      manifestData,
 		"aaa000000000000000000000/layer.tar": make([]byte, 100),
 	})
 
@@ -358,10 +359,10 @@ func TestParseLayers_OCIFormat(t *testing.T) {
 	})
 
 	tarBuf := buildTar(t, map[string][]byte{
-		"manifest.json":                    manifestData,
-		"blobs/sha256/" + configDigest:     configData,
-		"blobs/sha256/" + layerDigest1:     make([]byte, 4096),
-		"blobs/sha256/" + layerDigest2:     make([]byte, 2048),
+		"manifest.json":                manifestData,
+		"blobs/sha256/" + configDigest: configData,
+		"blobs/sha256/" + layerDigest1: make([]byte, 4096),
+		"blobs/sha256/" + layerDigest2: make([]byte, 2048),
 	})
 
 	layers, err := parseLayers(context.Background(), tarBuf)
@@ -581,12 +582,17 @@ func TestIsDaemonUnreachable(t *testing.T) {
 }
 
 // fakeAPIClient embeds client.APIClient so unspecified methods compile but
-// panic at runtime; only ImageList, ImagePull, and ImageInspect are wired.
+// panic at runtime; only ImageList, ImagePull, ImageInspect, and Info are wired.
 type fakeAPIClient struct {
 	client.APIClient
 	imageList    func(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
 	imagePull    func(ctx context.Context, ref string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 	imageInspect func(ctx context.Context, ref string) (client.ImageInspectResult, error)
+	info         func(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error)
+}
+
+func (f *fakeAPIClient) ClientVersion() string {
+	return client.MaxAPIVersion
 }
 
 func (f *fakeAPIClient) ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error) {
@@ -599,6 +605,13 @@ func (f *fakeAPIClient) ImagePull(ctx context.Context, ref string, options clien
 
 func (f *fakeAPIClient) ImageInspect(ctx context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
 	return f.imageInspect(ctx, ref)
+}
+
+func (f *fakeAPIClient) Info(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error) {
+	if f.info == nil {
+		return client.SystemInfoResult{}, errors.New("Info not configured on fakeAPIClient")
+	}
+	return f.info(ctx, options)
 }
 
 func TestEnsureImage_PullNotFound_ReturnsErrImageNotFound(t *testing.T) {
@@ -1066,4 +1079,140 @@ func TestParseLayers_ZeroSizeBlobLayer(t *testing.T) {
 	require.Len(t, layers, 2)
 	assert.NotNil(t, layers[0].Tree, "layer 0 Tree must not be nil")
 	assert.NotNil(t, layers[1].Tree, "layer 1 (zero-size blob) Tree must not be nil")
+}
+
+func TestSaveOpts_NoPlatform_UsesNativePlatform(t *testing.T) {
+	// When --platform is not set, saveOpts must scope ImageSave to the daemon's
+	// native platform so containerd-store daemons don't try to export a full OCI
+	// index that may contain missing blobs for other variants.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "aarch64")}, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	opts := dr.saveOpts(context.Background())
+	require.Len(t, opts, 1, "expected exactly one ImageSaveOption scoped to native platform")
+}
+
+func TestSaveOpts_NoPlatform_InfoFails_ReturnsNil(t *testing.T) {
+	// If Info fails (old daemon, network error), saveOpts falls back to nil
+	// (unscoped) — preserving the pre-fix behaviour rather than erroring.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{}, errors.New("daemon unreachable")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	opts := dr.saveOpts(context.Background())
+	assert.Nil(t, opts, "Info failure must produce unscoped save (nil opts)")
+}
+
+func TestSaveOpts_WithPlatform_UsesPinnedPlatform(t *testing.T) {
+	// When --platform is explicitly set, saveOpts uses it directly without
+	// calling Info — the pinned platform always wins.
+	infoCalls := 0
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			infoCalls++
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "amd64")}, nil
+		},
+	}
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	opts := dr.saveOpts(context.Background())
+	require.Len(t, opts, 1)
+	assert.Equal(t, 0, infoCalls, "Info must not be called when --platform is pinned")
+}
+
+// systemInfoWith constructs a system.Info with the given OS and arch for use
+// in test fakes.
+func systemInfoWith(os, arch string) system.Info {
+	return system.Info{OSType: os, Architecture: arch}
+}
+
+func TestNormalizeArch(t *testing.T) {
+	cases := []struct {
+		kernel  string
+		arch    string
+		variant string
+	}{
+		{"x86_64", "amd64", ""},
+		{"aarch64", "arm64", ""},
+		{"armv7l", "arm", "v7"},
+		{"armv6l", "arm", "v6"},
+		{"ppc64le", "ppc64le", ""},
+		{"s390x", "s390x", ""},
+		{"riscv64", "riscv64", ""},
+		{"unknown_custom", "unknown_custom", ""},
+	}
+	for _, tc := range cases {
+		arch, variant := normalizeArch(tc.kernel)
+		assert.Equal(t, tc.arch, arch, "arch for kernel %q", tc.kernel)
+		assert.Equal(t, tc.variant, variant, "variant for kernel %q", tc.kernel)
+	}
+}
+
+func TestDaemonPlatform_NormalizesArch(t *testing.T) {
+	// Info returns "x86_64" (uname -m style); daemonPlatform must convert it
+	// to the OCI canonical "amd64" before using it as an ImageSave filter.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "x86_64")}, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	p := dr.daemonPlatform(context.Background())
+	require.NotNil(t, p)
+	assert.Equal(t, "linux", p.OS)
+	assert.Equal(t, "amd64", p.Architecture, "x86_64 must be normalized to amd64")
+	assert.Equal(t, "", p.Variant)
+}
+
+func TestDaemonPlatform_NormalizesArm(t *testing.T) {
+	// armv7l from Info must become arm/v7 so the variant is preserved.
+	fake := &fakeAPIClient{
+		info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+			return client.SystemInfoResult{Info: systemInfoWith("linux", "armv7l")}, nil
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	p := dr.daemonPlatform(context.Background())
+	require.NotNil(t, p)
+	assert.Equal(t, "arm", p.Architecture)
+	assert.Equal(t, "v7", p.Variant)
+}
+
+func TestDaemonPlatform_EmptyOSOrArch_ReturnsNil(t *testing.T) {
+	cases := []system.Info{
+		{OSType: "", Architecture: "x86_64"},
+		{OSType: "linux", Architecture: ""},
+	}
+	for _, info := range cases {
+		fake := &fakeAPIClient{
+			info: func(_ context.Context, _ client.InfoOptions) (client.SystemInfoResult, error) {
+				return client.SystemInfoResult{Info: info}, nil
+			},
+		}
+		r, err := NewDockerResolver(WithClient(fake))
+		require.NoError(t, err)
+		dr := r.(*DockerResolver)
+		assert.Nil(t, dr.daemonPlatform(context.Background()), "empty OS or arch must return nil")
+	}
 }

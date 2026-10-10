@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Container image base updated to `alpine:3.24.2` and `distroless/static-debian13`.
 
 ### Fixed
+- `layerx <image>` now pulls the daemon's native platform when a tag is cached only for a different architecture, fixing export failures on containerd-store daemons (Docker Desktop / Rancher Desktop). Foreign-platform analyses cannot satisfy the default analysis cache lookup. Exports use the native platform filter on API 1.48+ and retain unfiltered saves on older APIs; native local images remain usable without pulling, and bare image IDs retain their exact image selection. Kernel architecture names from `docker info` (e.g. `x86_64` → `amd64`, `aarch64` → `arm64`) are normalised for platform selection. Explicit `--platform` behavior is unchanged.
 - Analysis cache listing and pruning now work correctly when the cache root path contains bracket characters (e.g. a Windows username like `user[1]`). Previously `filepath.Glob` interpreted the brackets as a pattern and returned `ErrBadPattern`, causing `cache list` to return empty results and auto-prune to skip all entries silently.
 - `cache prune` MaxBytes eviction now sorts entries by their oldest file's mtime, consistent with the TTL pass. Previously the MaxBytes sort used the newest mtime, so a multi-platform directory with a fresh default file could survive while a uniformly-older directory was evicted first.
 

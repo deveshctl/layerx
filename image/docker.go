@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -30,7 +31,7 @@ func WithClient(cli client.APIClient) Option {
 // The platform flows into ImagePull (so the right manifest is fetched on a
 // cold pull), ImageSave (so only the requested variant is exported on a
 // multi-platform image store), and ImageInspect (for the digest read used
-// as the cache key). The pull and save paths work back to API 1.32; the
+// as the cache key). Pull requires API 1.32, save requires API 1.48, and the
 // inspect-side platform option requires API 1.49 (the moby client gates it
 // with requiresVersion and returns an error on older daemons).
 //
@@ -174,7 +175,21 @@ func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, 
 		}
 		return "", fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
+	// The default cache must not reuse an analysis of a foreign variant and
+	// bypass the native-platform pull in ResolveWithProgress. An explicit
+	// image ID, however, identifies that exact image regardless of host arch.
+	if r.platform == nil && !isImageDigestRef(imageRef) {
+		native := r.daemonPlatform(ctx)
+		if !PlatformsEqual(native, inspectedPlatform(inspect)) {
+			return "", fmt.Errorf("image %s has local platform %s, expected daemon platform %s",
+				imageRef, FormatPlatform(inspectedPlatform(inspect)), FormatPlatform(native))
+		}
+	}
 	return inspect.ID, nil
+}
+
+func inspectedPlatform(inspect client.ImageInspectResult) *ocispec.Platform {
+	return &ocispec.Platform{OS: inspect.Os, Architecture: inspect.Architecture, Variant: inspect.Variant}
 }
 
 func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
@@ -201,7 +216,13 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseExporting})
 
-	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, r.saveOpts()...)
+	var saveOpts []client.ImageSaveOption
+	// Bare image IDs refer to an exact local image, which may intentionally
+	// be non-native. Do not replace that choice with the daemon's platform.
+	if r.platform != nil || !isImageDigestRef(imageRef) {
+		saveOpts = r.saveOpts(ctx)
+	}
+	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, saveOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
@@ -212,23 +233,73 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 	return parseLayers(ctx, rc)
 }
 
-// saveOpts builds the per-call ImageSaveOption slice, scoping the export to
-// the resolver's pinned --platform when set. Without this, ImageSave on a
-// multi-platform-image-store daemon (Docker 25+ with containerd image store)
-// emits an OCI index containing every variant — and parseLayers picks the
-// first manifest, which is not necessarily the one the user asked for.
+// saveOpts builds the per-call ImageSaveOption slice, scoping the export
+// to a single platform when supported. A pinned --platform is used
+// directly. When it is not set, daemonPlatform queries the daemon's
+// native OS/arch so the export is still scoped to one variant.
 //
-// The save-side platform option requires daemon API 1.48 or newer; older
-// daemons return an error from ImageSave that we surface verbatim. There is
-// no point papering over that, because the same daemon ignored the pull-side
-// platform option too, so the wrong variant is what is local — silently
-// falling back would lie about which image we exported.
-func (r *DockerResolver) saveOpts() []client.ImageSaveOption {
-	if r.platform == nil {
+// Without a platform filter, ImageSave on a containerd-store daemon (Docker
+// 25+ / Rancher Desktop) attempts to export the full OCI manifest index.
+// If a non-native variant was pulled first and some blobs for the native
+// platform are absent, the daemon errors with "unable to create manifests
+// file: NotFound: content digest …: not found". Scoping to the native
+// platform avoids this.
+//
+// For an inferred platform, Info failure or an API version below 1.48
+// preserves the historic unscoped save. Explicit --platform requests still
+// surface the SDK's version error rather than silently ignoring the pin.
+func (r *DockerResolver) saveOpts(ctx context.Context) []client.ImageSaveOption {
+	p := r.platform
+	if p == nil {
+		p = r.daemonPlatform(ctx)
+		// Info triggers API negotiation; inspect ClientVersion only afterward.
+		if p != nil && versions.LessThan(r.cli.ClientVersion(), "1.48") {
+			return nil
+		}
+	}
+	if p == nil {
 		return nil
 	}
 	return []client.ImageSaveOption{
-		client.ImageSaveWithPlatforms(*r.platform),
+		client.ImageSaveWithPlatforms(*p),
+	}
+}
+
+// daemonPlatform queries the daemon's native OS and architecture via Info.
+// Returns nil on any error so callers can fall back to unscoped behaviour.
+//
+// Info.Architecture returns the kernel name (e.g. "x86_64", "aarch64") which
+// must be mapped to the OCI canonical name ("amd64", "arm64") before being
+// used as a platform filter. The client passes the value verbatim to the
+// daemon; sending "x86_64" would silently fail to match "amd64" manifests.
+func (r *DockerResolver) daemonPlatform(ctx context.Context) *ocispec.Platform {
+	result, err := r.cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return nil
+	}
+	info := result.Info
+	if info.OSType == "" || info.Architecture == "" {
+		return nil
+	}
+	arch, variant := normalizeArch(info.Architecture)
+	return &ocispec.Platform{OS: info.OSType, Architecture: arch, Variant: variant}
+}
+
+// normalizeArch converts a kernel architecture name (from uname -m / Docker
+// Info.Architecture) to the OCI canonical architecture and variant.
+// Unknown names are returned unchanged — the daemon may accept them or not.
+func normalizeArch(kernelArch string) (arch, variant string) {
+	switch kernelArch {
+	case "x86_64":
+		return "amd64", ""
+	case "aarch64":
+		return "arm64", ""
+	case "armv7l":
+		return "arm", "v7"
+	case "armv6l":
+		return "arm", "v6"
+	default:
+		return kernelArch, ""
 	}
 }
 
@@ -259,7 +330,9 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 	// run — the daemon's content store deduplicates layers, so the cost of
 	// the redundant pull is at most the manifest fetch when every layer
 	// blob is already present.
+	var native *ocispec.Platform
 	if r.platform == nil {
+		native = r.daemonPlatform(ctx)
 		f := make(client.Filters).Add("reference", imageRef)
 		result, err := r.cli.ImageList(ctx, client.ImageListOptions{Filters: f})
 		if err != nil {
@@ -269,13 +342,35 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 			return r.daemonErr(err)
 		}
 		if len(result.Items) > 0 {
-			return nil
+			if native == nil {
+				return nil // Best effort: preserve local reuse when Info is unavailable.
+			}
+			// A tag can be local with only a foreign variant cached. Check
+			// the actual image before allowing it to satisfy a native request.
+			// Unfiltered inspect also works before API 1.49.
+			inspect, err := r.cli.ImageInspect(ctx, imageRef)
+			if err == nil && PlatformsEqual(native, inspectedPlatform(inspect)) {
+				return nil
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			if err != nil && !isImageInspectNotFound(err) {
+				if isDaemonUnreachable(err) {
+					return r.daemonErr(err)
+				}
+				return fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
+			}
 		}
 	}
 
 	emitProgress(progress, ProgressEvent{Phase: PhasePulling})
 
-	rc, err := r.cli.ImagePull(ctx, imageRef, r.pullOpts(ctx, imageRef))
+	pullOpts := r.pullOpts(ctx, imageRef)
+	if native != nil {
+		pullOpts.Platforms = []ocispec.Platform{*native}
+	}
+	rc, err := r.cli.ImagePull(ctx, imageRef, pullOpts)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
@@ -845,7 +940,6 @@ func extractShortID(layerPath string) string {
 // `route not found`, and header-missing errors, which would misdirect the
 // user to check the image name when the real cause is elsewhere. The needles
 // below all reference the image, manifest, or repository unambiguously.
-//
 func isImageNotFoundMessage(s string) bool {
 	s = strings.ToLower(s)
 	for _, needle := range []string{
@@ -908,4 +1002,3 @@ func isImageInspectNotFound(err error) bool {
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "no such image")
 }
-
