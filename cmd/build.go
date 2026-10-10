@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/deveshctl/layerx/tui"
@@ -315,7 +316,12 @@ func hasPodmanSocket() bool {
 }
 
 func ensureIIDFile(args *[]string) (path string, ownsFile bool, err error) {
+	insertAt := len(*args)
 	for i, a := range *args {
+		if a == "--" {
+			insertAt = i
+			break
+		}
 		if a == "--iidfile" {
 			if i+1 >= len(*args) {
 				return "", false, fmt.Errorf("--iidfile requires a value")
@@ -335,7 +341,8 @@ func ensureIIDFile(args *[]string) (path string, ownsFile bool, err error) {
 	if err := os.Remove(p); err != nil {
 		return "", false, fmt.Errorf("could not prepare iidfile path: %w", err)
 	}
-	*args = append(*args, "--iidfile", p)
+	// Engine flags must precede --; everything following it is positional.
+	*args = slices.Insert(*args, insertAt, "--iidfile", p)
 	return p, true, nil
 }
 

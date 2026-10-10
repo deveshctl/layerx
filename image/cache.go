@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -290,7 +291,6 @@ func platformSlug(platform string) (string, error) {
 	return slug, nil
 }
 
-
 // canonical form of a Docker/OCI content digest: exactly 64 lowercase
 // hexadecimal characters. Anything else is rejected.
 //
@@ -408,18 +408,20 @@ func readCacheFile(path string) (cacheEnvelope, error, bool) {
 
 // isTransientIOError returns true when err looks like a recoverable I/O
 // failure (network share glitch, closed pipe) rather than confirmed file
-// corruption. *os.PathError surfacing from gob.Decode on an already-open
-// handle means a partial/broken read — the saveCache temp+rename pattern
-// guarantees a successful rename produced a complete file, so a read error
-// after open is corruption, not a transient glitch worth retrying forever.
+// corruption. A syscall error during gob.Decode can be wrapped in os.PathError;
+// it does not establish that the bytes in the cache file are corrupt.
 func isTransientIOError(err error) bool {
-	// Bare syscall errors and io.ErrClosedPipe are transient. Plain EOF
-	// without context, *os.PathError, and gob's own decode errors are
-	// treated as corruption (file truncated or otherwise unreadable).
+	// io.ErrClosedPipe is an explicit transient signal.
 	if errors.Is(err, io.ErrClosedPipe) {
 		return true
 	}
-	return false
+	// Bare syscall errors (EIO, EBUSY, EAGAIN, …) that surface through
+	// gob.Decode on a network share or slow disk indicate a read-path hiccup,
+	// not file corruption. The temp+rename write pattern means a successfully
+	// renamed cache file was always written complete, so a syscall.Errno seen
+	// during a read is transient, not proof of corruption.
+	var errno syscall.Errno
+	return errors.As(err, &errno)
 }
 
 // saveCache writes layers to {root}/{digest}/layers.gob using a temp file +

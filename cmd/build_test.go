@@ -155,6 +155,43 @@ func TestEnsureIIDFile_AppendsTempWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestEnsureIIDFile_StopsAtDashDash(t *testing.T) {
+	// --iidfile after -- must be treated as a build-context argument, not a
+	// layerx flag. ensureIIDFile must stop scanning at -- (same as firstTagFromArgs).
+	args := []string{"-t", "x", "--", "--iidfile=/tmp/ignored.iid"}
+	path, owns, err := ensureIIDFile(&args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !owns {
+		t.Fatal("no explicit --iidfile before --, must own the temp file")
+	}
+	defer os.Remove(path)
+	if path == "" {
+		t.Fatal("path is empty")
+	}
+	want := []string{"-t", "x", "--iidfile", path, "--", "--iidfile=/tmp/ignored.iid"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("generated flag must precede -- and preserve the context: got %v, want %v", args, want)
+	}
+}
+
+func TestEnsureIIDFile_ContextAfterDashDash(t *testing.T) {
+	args := []string{"--", "."}
+	path, owns, err := ensureIIDFile(&args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !owns {
+		t.Fatal("expected an owned temporary iidfile")
+	}
+	defer os.Remove(path)
+	want := []string{"--iidfile", path, "--", "."}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
 func TestReadIIDFile_TrimsWhitespace(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "iid")

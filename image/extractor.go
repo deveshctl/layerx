@@ -3,7 +3,6 @@ package image
 import (
 	"archive/tar"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +44,12 @@ const MaxLayerBlobSize = 16 << 30 // 16 GiB
 // via io.ReadAll before any layer is touched. 64 MiB is orders of magnitude
 // above any legitimate descriptor while cheap to reject.
 const MaxMetadataSize = 64 << 20 // 64 MiB
+
+// MaxArchiveEntries caps the number of tar entries scanResolveMetadata will
+// visit. A real Docker/OCI image has at most a few thousand entries (manifest,
+// config, and one entry per layer blob). 1 million entries is orders of
+// magnitude above that ceiling; a tar with more is adversarial input.
+const MaxArchiveEntries = 1_000_000
 
 type FileContent struct {
 	Path      string
@@ -380,21 +385,12 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		return nil, nil, nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 
-	manifestData, err := readManifestFromSpool(spool)
+	metadata, err := readImageArchiveMetadata(spool)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
 	}
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		cleanup()
-		return nil, nil, nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
-	}
-	if len(manifests) == 0 {
-		cleanup()
-		return nil, nil, nil, fmt.Errorf("invalid image archive: empty manifest")
-	}
-	layerPaths = manifests[0].Layers
+	layerPaths = metadata.manifest.Layers
 
 	keepCount := min(maxLayers, len(layerPaths))
 	keep := make(map[string]struct{}, keepCount)
@@ -402,17 +398,11 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		keep[p] = struct{}{}
 	}
 
-	idx, err := scanBlobIndex(spool)
-	if err != nil {
-		cleanup()
-		return nil, nil, nil, err
-	}
-
 	load = func(name string) ([]byte, error) {
 		if _, ok := keep[name]; !ok {
 			return nil, nil
 		}
-		size, present := idx[name]
+		size, present := metadata.headers[name]
 		if !present {
 			return nil, nil
 		}

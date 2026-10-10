@@ -430,10 +430,18 @@ func (r *DockerResolver) classifyPullNotFound(ctx context.Context, imageRef stri
 	}
 	// Try a platform-less inspect to learn whether the image exists at all.
 	// A fresh probe avoids depending on whatever state the failed pull left.
-	if _, err := r.cli.ImageInspect(ctx, imageRef); err == nil {
+	_, inspectErr := r.cli.ImageInspect(ctx, imageRef)
+	if inspectErr == nil {
 		// Image is present locally without the requested platform — this is
 		// the "asked for arm64 on an amd64-only image" case.
 		return r.classifyPlatformMissing(ctx, imageRef, cause)
+	}
+	// If the inspect itself failed because the daemon was unreachable, surface
+	// that as an infrastructure error rather than silently mislabelling it as
+	// "image not found". A briefly-unreachable daemon is not the same as a
+	// missing image and should not produce a misleading ErrImageNotFound.
+	if isDaemonUnreachable(inspectErr) {
+		return r.daemonErr(inspectErr)
 	}
 	return &ErrImageNotFound{Ref: imageRef, Cause: cause}
 }
@@ -653,30 +661,59 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 		return nil, &ErrArchiveInfra{Op: "spooling image archive", Cause: err}
 	}
 
-	// Pass 1: collect manifest.json, root *.json (legacy config), and a
-	// header map of every entry's declared size. Bodies of layer/blob
-	// entries are streamed past without buffering.
+	metadata, err := readImageArchiveMetadata(spool)
+	if err != nil {
+		return nil, err
+	}
+	return parseLayersFromManifest(ctx, spool, metadata.manifest, metadata.headers, metadata.rootJSON)
+}
+
+type imageArchiveMetadata struct {
+	manifest      dockerManifest
+	manifestCount int
+	rootJSON      map[string][]byte
+	headers       map[string]int64
+}
+
+// readImageArchiveMetadata gives analysis, metadata, and extraction the same
+// first-image selection for Docker-save and standalone OCI layout archives.
+func readImageArchiveMetadata(spool *os.File) (*imageArchiveMetadata, error) {
 	manifestData, rootJSON, headers, err := scanResolveMetadata(spool)
 	if err != nil {
 		return nil, err
 	}
+	metadata := &imageArchiveMetadata{rootJSON: rootJSON, headers: headers}
+	if manifestData != nil {
+		var manifests []dockerManifest
+		if err := json.Unmarshal(manifestData, &manifests); err != nil {
+			return nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
+		}
+		if len(manifests) == 0 {
+			return nil, fmt.Errorf("invalid image archive: empty manifest")
+		}
+		metadata.manifest, metadata.manifestCount = manifests[0], len(manifests)
+		return metadata, nil
+	}
 
-	if manifestData == nil {
+	manifest, count, err := ociIndexToDockerManifest(rootJSON, spool)
+	if err != nil {
+		return nil, fmt.Errorf("invalid image archive: OCI index fallback failed: %w", err)
+	}
+	if manifest == nil {
 		return nil, fmt.Errorf("invalid image archive: manifest.json not found")
 	}
+	metadata.manifest, metadata.manifestCount = *manifest, count
+	return metadata, nil
+}
 
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
-	}
-	if len(manifests) == 0 {
-		return nil, fmt.Errorf("invalid image archive: empty manifest")
-	}
-	manifest := manifests[0]
-
+// parseLayersFromManifest resolves config and layer trees from a dockerManifest,
+// using the pre-built header-size map and any root-level JSON already in rootJSON.
+// Both the Docker-manifest path and the OCI-index fallback path converge here.
+func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest dockerManifest, headers map[string]int64, rootJSON map[string][]byte) ([]Layer, error) {
 	// Resolve config: legacy (<sha>.json at root) or OCI (blobs/sha256/...).
 	configData, ok := rootJSON[manifest.Config]
 	if !ok {
+		var err error
 		configData, err = readEntryFromSpool(spool, manifest.Config)
 		if err != nil {
 			return nil, fmt.Errorf("invalid image archive: config %s not found: %w", manifest.Config, err)
@@ -785,6 +822,62 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 	return layers, nil
 }
 
+// ociIndexToDockerManifest synthesises a dockerManifest from a standalone OCI
+// image layout's index.json. It reads index.json from rootJSON (pre-collected
+// by scanResolveMetadata), follows the first descriptor to the OCI image
+// manifest blob in the spool, and converts the OCI manifest's config and layer
+// digest references to blob paths ("blobs/<alg>/<hex>") that the rest of
+// parseLayers can handle identically to a Docker-format archive.
+//
+// The count records the index's manifest entries for the first-image warning.
+// Returns a nil manifest when index.json is absent.
+func ociIndexToDockerManifest(rootJSON map[string][]byte, spool *os.File) (*dockerManifest, int, error) {
+	indexData, ok := rootJSON["index.json"]
+	if !ok {
+		return nil, 0, nil
+	}
+	var idx ociIndex
+	if err := json.Unmarshal(indexData, &idx); err != nil {
+		return nil, 0, fmt.Errorf("cannot parse index.json: %w", err)
+	}
+	if len(idx.Manifests) == 0 {
+		return nil, 0, fmt.Errorf("index.json: no manifests listed")
+	}
+
+	// Keep the historical first-image selection; --platform is a sanity check.
+	manifestDesc := idx.Manifests[0]
+	manifestPath := ociDigestToPath(manifestDesc.Digest)
+	if manifestPath == "" {
+		return nil, 0, fmt.Errorf("index.json: invalid manifest digest %q", manifestDesc.Digest)
+	}
+
+	manifestBlob, err := readEntryFromSpool(spool, manifestPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("OCI manifest blob %s: %w", manifestPath, err)
+	}
+
+	var ociMan ociManifest
+	if err := json.Unmarshal(manifestBlob, &ociMan); err != nil {
+		return nil, 0, fmt.Errorf("cannot parse OCI manifest %s: %w", manifestPath, err)
+	}
+
+	configPath := ociDigestToPath(ociMan.Config.Digest)
+	if configPath == "" {
+		return nil, 0, fmt.Errorf("OCI manifest: invalid config digest %q", ociMan.Config.Digest)
+	}
+
+	layerPaths := make([]string, 0, len(ociMan.Layers))
+	for _, l := range ociMan.Layers {
+		p := ociDigestToPath(l.Digest)
+		if p == "" {
+			return nil, 0, fmt.Errorf("OCI manifest: invalid layer digest %q", l.Digest)
+		}
+		layerPaths = append(layerPaths, p)
+	}
+
+	return &dockerManifest{Config: configPath, Layers: layerPaths}, len(idx.Manifests), nil
+}
+
 // scanResolveMetadata walks the spool once, returning manifest.json bytes,
 // any root-level *.json blobs (legacy config payloads), and a header map of
 // declared sizes for every entry. Layer / blob bodies are streamed past
@@ -798,6 +891,7 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 	var manifestData []byte
 	rootJSON := make(map[string][]byte)
 	headers := make(map[string]int64)
+	entries := 0
 
 	for {
 		hdr, err := tr.Next()
@@ -806,6 +900,10 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 		}
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		entries++
+		if entries > MaxArchiveEntries {
+			return nil, nil, nil, fmt.Errorf("invalid image archive: too many entries (limit %d)", MaxArchiveEntries)
 		}
 		headers[hdr.Name] = hdr.Size
 
@@ -816,6 +914,14 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 				return nil, nil, nil, err
 			}
 			manifestData = data
+		case hdr.Name == "index.json":
+			// Collect index.json so the OCI fallback path in parseLayers can
+			// read it without a second spool scan.
+			data, err := readMetadataEntry(tr, hdr.Size, hdr.Name)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			rootJSON[hdr.Name] = data
 		case strings.HasSuffix(hdr.Name, ".json") && !strings.Contains(hdr.Name, "/"):
 			data, err := readMetadataEntry(tr, hdr.Size, hdr.Name)
 			if err != nil {
@@ -905,6 +1011,36 @@ type dockerManifest struct {
 	Layers []string `json:"Layers"`
 }
 
+// ociIndex is the top-level index.json in a standalone OCI image layout.
+// See https://github.com/opencontainers/image-spec/blob/v1.1.0/image-layout.md
+type ociIndex struct {
+	Manifests []ociDescriptor `json:"manifests"`
+}
+
+// ociManifest is an OCI image manifest blob (mediaType application/vnd.oci.image.manifest.v1+json).
+type ociManifest struct {
+	Config ociDescriptor   `json:"config"`
+	Layers []ociDescriptor `json:"layers"`
+}
+
+// ociDescriptor references a blob by digest (e.g. "sha256:abc...").
+type ociDescriptor struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Size      int64  `json:"size"`
+}
+
+// ociDigestToPath converts an OCI content digest ("sha256:abc...") to its
+// blob path in the archive ("blobs/sha256/abc..."). Returns "" for any
+// digest that does not contain exactly one colon.
+func ociDigestToPath(digest string) string {
+	i := strings.IndexByte(digest, ':')
+	if i <= 0 || i == len(digest)-1 || strings.ContainsAny(digest[i+1:], ":/\\") || strings.ContainsAny(digest[:i], "/\\") {
+		return ""
+	}
+	return "blobs/" + digest[:i] + "/" + digest[i+1:]
+}
+
 type imageConfig struct {
 	OS           string               `json:"os"`
 	Architecture string               `json:"architecture"`
@@ -921,7 +1057,14 @@ func extractShortID(layerPath string) string {
 	parts := strings.Split(layerPath, "/")
 	var id string
 	if len(parts) >= 3 && parts[0] == "blobs" {
-		id = parts[2]
+		algo, hex := parts[1], parts[2]
+		if algo == "sha256" {
+			id = hex
+		} else {
+			// Non-sha256 OCI blob: include the algorithm so the short ID is
+			// not confused with a sha256 digest.
+			return algo + ":" + hex[:min(6, len(hex))]
+		}
 	} else {
 		id = parts[0]
 	}

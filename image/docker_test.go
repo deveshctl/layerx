@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	mobyimage "github.com/moby/moby/api/types/image"
@@ -180,6 +181,25 @@ func TestParseLayers_ManifestExceedsMetadataCap(t *testing.T) {
 	assert.Contains(t, err.Error(), "manifest.json too large")
 }
 
+func TestParseLayers_TooManyEntries_ReturnsError(t *testing.T) {
+	// Build a tar with MaxArchiveEntries+1 zero-length entries. scanResolveMetadata
+	// must stop and return an error rather than growing the headers map unboundedly.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := range MaxArchiveEntries + 1 {
+		hdr := &tar.Header{
+			Name: fmt.Sprintf("entry-%d", i),
+			Mode: 0644,
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+	}
+	require.NoError(t, tw.Close())
+
+	_, err := parseLayers(context.Background(), &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too many entries")
+}
+
 // readMetadataEntry must also reject a stream that overruns the cap when the
 // header understated the size (a lying header in the opposite direction).
 func TestReadMetadataEntry_StreamOverrunRejected(t *testing.T) {
@@ -338,6 +358,13 @@ func TestExtractShortID_OCIFormat(t *testing.T) {
 	assert.Equal(t, "aabbccddee11", id)
 }
 
+func TestExtractShortID_OCIFormat_NonSHA256(t *testing.T) {
+	// Non-sha256 OCI blob paths must include the algorithm prefix so the
+	// short ID is distinguishable from a sha256 short ID.
+	id := extractShortID("blobs/sha512/aabbccddee112233445566778899aabb")
+	assert.Equal(t, "sha512:aabbcc", id)
+}
+
 func TestParseLayers_OCIFormat(t *testing.T) {
 	configDigest := "aabbccddee112233445566778899aabbccddeeff00112233445566778899aa00"
 	layerDigest1 := "1111111111111111111111111111111111111111111111111111111111111111"
@@ -378,6 +405,58 @@ func TestParseLayers_OCIFormat(t *testing.T) {
 	assert.Equal(t, "222222222222", layers[1].ID)
 	assert.Equal(t, int64(2048), layers[1].Size)
 	assert.Equal(t, "/bin/sh -c #(nop)  CMD [\"nginx\"]", layers[1].Command)
+}
+
+// TestParseLayers_StandaloneOCILayout verifies that a standalone OCI image
+// layout archive (containing index.json but no manifest.json) is resolved
+// correctly via the OCI index fallback path.
+func TestParseLayers_StandaloneOCILayout(t *testing.T) {
+	configDigest := "cfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfgcfg0abc"
+	layerDigest := "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b"
+	manifestDigest := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	configData := buildConfig(t, []string{"RUN echo hello"})
+
+	// OCI image manifest blob
+	ociMan := ociManifest{
+		Config: ociDescriptor{
+			MediaType: "application/vnd.oci.image.config.v1+json",
+			Digest:    "sha256:" + configDigest,
+		},
+		Layers: []ociDescriptor{{
+			MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+			Digest:    "sha256:" + layerDigest,
+		}},
+	}
+	ociManData, err := json.Marshal(ociMan)
+	require.NoError(t, err)
+
+	// OCI index.json
+	idx := ociIndex{
+		Manifests: []ociDescriptor{{
+			MediaType: "application/vnd.oci.image.manifest.v1+json",
+			Digest:    "sha256:" + manifestDigest,
+		}},
+	}
+	indexData, err := json.Marshal(idx)
+	require.NoError(t, err)
+
+	// Layer blob: gzip-compressed tar (OCI layer format).
+	layerBlob := gzipBytes(t, buildSimpleLayerTar(t, map[string][]byte{"etc/hostname": []byte("test")}))
+
+	tarBuf := buildTar(t, map[string][]byte{
+		"index.json":                         indexData,
+		"blobs/sha256/" + manifestDigest:     ociManData,
+		"blobs/sha256/" + configDigest:       configData,
+		"blobs/sha256/" + layerDigest:        layerBlob,
+	})
+
+	layers, err := parseLayers(context.Background(), tarBuf)
+	require.NoError(t, err)
+	require.Len(t, layers, 1)
+	assert.Equal(t, "1a2b3c4d5e6f", layers[0].ID)
+	assert.Equal(t, "RUN echo hello", layers[0].Command)
+	assert.NotNil(t, layers[0].Tree)
 }
 
 // buildGzipLayerTar creates a gzip-compressed tar containing the given entries,
@@ -976,6 +1055,36 @@ func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotF
 	// classifyPlatformMissing (a second inspect for the manifest list) — so
 	// pinning to exactly one inspect locks the win in.
 	assert.Equal(t, 1, inspectCalls, "platform classifier should reach enumeratePlatforms directly, no probe inspect needed")
+}
+
+// TestClassifyPullNotFound_DaemonUnreachable_SurfacesDaemonError verifies that
+// when classifyPullNotFound's probe inspect fails due to a connection error
+// (daemon briefly unreachable), the result is ErrDaemonNotRunning rather than
+// the misleading ErrImageNotFound.
+func TestClassifyPullNotFound_DaemonUnreachable_SurfacesDaemonError(t *testing.T) {
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			return nil, errors.New("manifest for linux/arm64 not found: not found")
+		},
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			// Simulate a briefly-unreachable daemon on the probe inspect.
+			return client.ImageInspectResult{}, errors.New("error during connect: dial tcp: connection refused")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	var daemonErr *ErrDaemonNotRunning
+	require.ErrorAs(t, err, &daemonErr,
+		"a connection error on the probe inspect must surface as ErrDaemonNotRunning, not ErrImageNotFound")
 }
 
 func TestParseLayers_MissingLayerBlob_ReturnsError(t *testing.T) {

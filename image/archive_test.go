@@ -84,10 +84,10 @@ func TestArchiveResolver_ResolveLegacyDockerSave(t *testing.T) {
 	layer1 := buildSimpleLayerTar(t, map[string][]byte{"app/main.go": []byte("package main")})
 
 	path := writeArchive(t, map[string][]byte{
-		"manifest.json":                            manifestData,
-		"sha256deadbeef.json":                      configData,
-		"aaaaaa11111122223333444455/layer.tar":     layer0,
-		"bbbbbb22222233334444555566/layer.tar":     layer1,
+		"manifest.json":                        manifestData,
+		"sha256deadbeef.json":                  configData,
+		"aaaaaa11111122223333444455/layer.tar": layer0,
+		"bbbbbb22222233334444555566/layer.tar": layer1,
 	})
 
 	r := NewArchiveResolver(path)
@@ -122,9 +122,9 @@ func TestArchiveResolver_ResolveOCIFormat(t *testing.T) {
 	layer1 := gzipBytes(t, buildSimpleLayerTar(t, map[string][]byte{"app/main.go": []byte("package main")}))
 
 	path := writeArchive(t, map[string][]byte{
-		"oci-layout":                              []byte(`{"imageLayoutVersion":"1.0.0"}`),
-		"index.json":                              []byte("{}"),
-		"manifest.json":                           manifestData,
+		"oci-layout":    []byte(`{"imageLayoutVersion":"1.0.0"}`),
+		"index.json":    []byte("{}"),
+		"manifest.json": manifestData,
 		"blobs/sha256/cafebabecafebabe1111222233334444": configData,
 		"blobs/sha256/aaaa1111aaaa1111aaaa1111aaaa1111": layer0,
 		"blobs/sha256/bbbb2222bbbb2222bbbb2222bbbb2222": layer1,
@@ -187,8 +187,8 @@ func TestArchiveResolver_ImageIDStableAcrossPaths(t *testing.T) {
 	manifestData, err := json.Marshal(manifest)
 	require.NoError(t, err)
 	files := map[string][]byte{
-		"manifest.json":        manifestData,
-		"sha256stable12.json":  buildConfig(t, []string{}),
+		"manifest.json":       manifestData,
+		"sha256stable12.json": buildConfig(t, []string{}),
 	}
 
 	pathA := writeArchive(t, files)
@@ -469,4 +469,43 @@ func TestArchiveResolver_NoPlatformPin_AllowsAnyArchive(t *testing.T) {
 	layers, err := r.Resolve(context.Background(), path)
 	require.NoError(t, err)
 	require.Len(t, layers, 1)
+}
+
+func TestArchiveResolver_MultiManifest_EmitsWarning(t *testing.T) {
+	// An archive containing two manifest entries (e.g. docker save with
+	// multiple tags) should succeed but emit a PhaseCacheWarn warning so
+	// the user knows only the first image was analysed.
+	cfg := buildConfigWithPlatform(t, "linux", "amd64", "", []string{"RUN echo first"})
+	layer := buildSimpleLayerTar(t, map[string][]byte{"file": []byte("data")})
+	manifests := []dockerManifest{
+		{Config: "cfg1.json", Layers: []string{"l1/layer.tar"}},
+		{Config: "cfg2.json", Layers: []string{"l2/layer.tar"}},
+	}
+	manifestData, err := json.Marshal(manifests)
+	require.NoError(t, err)
+	path := writeArchive(t, map[string][]byte{
+		"manifest.json": manifestData,
+		"cfg1.json":     cfg,
+		"cfg2.json":     cfg,
+		"l1/layer.tar":  layer,
+		"l2/layer.tar":  layer,
+	})
+
+	progress := make(chan ProgressEvent, 10)
+	r := NewArchiveResolver(path)
+	layers, err := r.ResolveWithProgress(context.Background(), path, progress)
+	require.NoError(t, err)
+	require.NotEmpty(t, layers, "resolve must succeed")
+
+	close(progress)
+	var warnMsgs []string
+	for ev := range progress {
+		if ev.Phase == PhaseCacheWarn {
+			warnMsgs = append(warnMsgs, ev.Message)
+		}
+	}
+	require.NotEmpty(t, warnMsgs, "must emit a warning for multi-manifest archive")
+	assert.Contains(t, warnMsgs[0], "2 manifest entries")
+	assert.Contains(t, warnMsgs[0], "export a single-image archive")
+	assert.NotContains(t, warnMsgs[0], "--platform")
 }
