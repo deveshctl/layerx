@@ -7,6 +7,11 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
+// topWasteLimit is the maximum number of wasted-file entries included in
+// a CI report. Kept named so callers and tests can reference it without
+// repeating the magic number.
+const topWasteLimit = 10
+
 type Report struct {
 	Passed   bool
 	Results  []RuleResult
@@ -38,7 +43,7 @@ func Evaluate(ctx EvalContext, rules []Rule) *Report {
 		}
 	}
 
-	limit := min(10, len(ctx.Efficiency.WastedFiles))
+	limit := min(topWasteLimit, len(ctx.Efficiency.WastedFiles))
 	report.TopWaste = append([]image.WastedFile(nil), ctx.Efficiency.WastedFiles[:limit]...)
 
 	return report
