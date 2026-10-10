@@ -50,7 +50,7 @@ Use it when you need to:
 - **Diff two images** (release vs release, base bump vs no-bump) and see every added/removed file.
 - **Explore images without a daemon** — pass an OCI or `docker save` archive directly, no Docker required.
 
-LayerX Image Inspector is a **single static binary** with no runtime dependencies beyond your container engine. It works on Linux, macOS, and Windows (native — not just WSL). It reads live images through Docker or Podman, or `docker save` / OCI-layout archives directly from disk.
+LayerX Image Inspector is a **single static binary** with no runtime dependencies beyond your container engine. It works on Linux, macOS 13 Ventura or later, and Windows (native — not just WSL). It reads live images through Docker or Podman, or `docker save` / OCI-layout archives directly from disk.
 
 ---
 
@@ -216,7 +216,7 @@ Trade-offs vs. the native binary: the image is a distroless base plus the layerx
 
 ### Build from source
 
-Requires Go 1.26+:
+Requires Go 1.27.2+:
 
 ```bash
 go install github.com/deveshctl/layerx@latest
@@ -654,7 +654,7 @@ Design rules: `image/` has zero imports from `tui/`, `ci/`, or `config/`. TUI an
 
 | Concern  | Choice                                                                                         |
 |----------|------------------------------------------------------------------------------------------------|
-| Language | Go 1.26+                                                                                       |
+| Language | Go 1.27.2+                                                                                       |
 | CLI      | [cobra](https://github.com/spf13/cobra)                                                        |
 | TUI      | [bubbletea v2](https://github.com/charmbracelet/bubbletea) + [lipgloss v2](https://github.com/charmbracelet/lipgloss) + [bubbles v2](https://github.com/charmbracelet/bubbles) |
 | Engine   | [moby/moby client](https://github.com/moby/moby) (Docker + Podman via Docker Engine API)       |

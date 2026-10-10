@@ -6,7 +6,8 @@ For anything beyond a small fix, **open an issue first** to discuss the approach
 
 ## Prerequisites
 
-- Go 1.26+ (`go version`).
+- Go 1.27.2+ (`go version`).
+- macOS 13 Ventura or later when developing on macOS.
 - Docker Engine running locally if you want to test against live images. Tests don't require it.
 
 ## Build & test
