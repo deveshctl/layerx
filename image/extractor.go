@@ -46,6 +46,12 @@ const MaxLayerBlobSize = 16 << 30 // 16 GiB
 // above any legitimate descriptor while cheap to reject.
 const MaxMetadataSize = 64 << 20 // 64 MiB
 
+// MaxArchiveEntries caps the number of tar entries scanResolveMetadata will
+// visit. A real Docker/OCI image has at most a few thousand entries (manifest,
+// config, and one entry per layer blob). 1 million entries is orders of
+// magnitude above that ceiling; a tar with more is adversarial input.
+const MaxArchiveEntries = 1_000_000
+
 type FileContent struct {
 	Path      string
 	Data      []byte

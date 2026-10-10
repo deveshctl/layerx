@@ -430,10 +430,18 @@ func (r *DockerResolver) classifyPullNotFound(ctx context.Context, imageRef stri
 	}
 	// Try a platform-less inspect to learn whether the image exists at all.
 	// A fresh probe avoids depending on whatever state the failed pull left.
-	if _, err := r.cli.ImageInspect(ctx, imageRef); err == nil {
+	_, inspectErr := r.cli.ImageInspect(ctx, imageRef)
+	if inspectErr == nil {
 		// Image is present locally without the requested platform — this is
 		// the "asked for arm64 on an amd64-only image" case.
 		return r.classifyPlatformMissing(ctx, imageRef, cause)
+	}
+	// If the inspect itself failed because the daemon was unreachable, surface
+	// that as an infrastructure error rather than silently mislabelling it as
+	// "image not found". A briefly-unreachable daemon is not the same as a
+	// missing image and should not produce a misleading ErrImageNotFound.
+	if isDaemonUnreachable(inspectErr) {
+		return r.daemonErr(inspectErr)
 	}
 	return &ErrImageNotFound{Ref: imageRef, Cause: cause}
 }
@@ -798,6 +806,7 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 	var manifestData []byte
 	rootJSON := make(map[string][]byte)
 	headers := make(map[string]int64)
+	entries := 0
 
 	for {
 		hdr, err := tr.Next()
@@ -806,6 +815,10 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 		}
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("reading image archive: %w", err)
+		}
+		entries++
+		if entries > MaxArchiveEntries {
+			return nil, nil, nil, fmt.Errorf("invalid image archive: too many entries (limit %d)", MaxArchiveEntries)
 		}
 		headers[hdr.Name] = hdr.Size
 
@@ -921,7 +934,15 @@ func extractShortID(layerPath string) string {
 	parts := strings.Split(layerPath, "/")
 	var id string
 	if len(parts) >= 3 && parts[0] == "blobs" {
-		id = parts[2]
+		algo, hex := parts[1], parts[2]
+		if algo == "sha256" {
+			id = hex
+		} else {
+			// Non-sha256 OCI blob: include the algorithm so the short ID is
+			// not confused with a sha256 digest.
+			combined := algo + ":" + hex
+			id = combined
+		}
 	} else {
 		id = parts[0]
 	}

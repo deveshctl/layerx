@@ -3,11 +3,14 @@ package image
 import (
 	"encoding/gob"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1255,4 +1258,25 @@ func TestPruneCache_MaxBytes_UsesOldestMtime(t *testing.T) {
 	// 'uniform' should survive (it was younger by oldest-mtime criterion).
 	_, errUniform := os.Stat(filepath.Join(root, uniform))
 	assert.NoError(t, errUniform, "'uniform' dir must survive MaxBytes when mixed dir is older")
+}
+
+func TestIsTransientIOError(t *testing.T) {
+	// io.ErrClosedPipe is transient.
+	assert.True(t, isTransientIOError(io.ErrClosedPipe))
+
+	// A wrapped io.ErrClosedPipe is still transient.
+	assert.True(t, isTransientIOError(fmt.Errorf("wrap: %w", io.ErrClosedPipe)))
+
+	// A raw syscall.Errno is transient (network share EIO/EBUSY during read).
+	assert.True(t, isTransientIOError(syscall.EIO))
+	assert.True(t, isTransientIOError(syscall.EBUSY))
+
+	// A wrapped syscall.Errno is transient.
+	assert.True(t, isTransientIOError(fmt.Errorf("reading cache: %w", syscall.EIO)))
+
+	// Plain EOF is NOT transient — it signals a truncated/corrupt file.
+	assert.False(t, isTransientIOError(io.EOF))
+
+	// Arbitrary non-syscall errors are NOT transient.
+	assert.False(t, isTransientIOError(errors.New("gob: unknown type")))
 }

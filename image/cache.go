@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -413,10 +414,17 @@ func readCacheFile(path string) (cacheEnvelope, error, bool) {
 // guarantees a successful rename produced a complete file, so a read error
 // after open is corruption, not a transient glitch worth retrying forever.
 func isTransientIOError(err error) bool {
-	// Bare syscall errors and io.ErrClosedPipe are transient. Plain EOF
-	// without context, *os.PathError, and gob's own decode errors are
-	// treated as corruption (file truncated or otherwise unreadable).
+	// io.ErrClosedPipe is an explicit transient signal.
 	if errors.Is(err, io.ErrClosedPipe) {
+		return true
+	}
+	// Bare syscall errors (EIO, EBUSY, EAGAIN, …) that surface through
+	// gob.Decode on a network share or slow disk indicate a read-path hiccup,
+	// not file corruption. The temp+rename write pattern means a successfully
+	// renamed cache file was always written complete, so a syscall.Errno seen
+	// during a read is transient, not proof of corruption.
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
 		return true
 	}
 	return false

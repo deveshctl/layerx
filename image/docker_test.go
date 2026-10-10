@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	mobyimage "github.com/moby/moby/api/types/image"
@@ -180,6 +181,25 @@ func TestParseLayers_ManifestExceedsMetadataCap(t *testing.T) {
 	assert.Contains(t, err.Error(), "manifest.json too large")
 }
 
+func TestParseLayers_TooManyEntries_ReturnsError(t *testing.T) {
+	// Build a tar with MaxArchiveEntries+1 zero-length entries. scanResolveMetadata
+	// must stop and return an error rather than growing the headers map unboundedly.
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := range MaxArchiveEntries + 1 {
+		hdr := &tar.Header{
+			Name: fmt.Sprintf("entry-%d", i),
+			Mode: 0644,
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+	}
+	require.NoError(t, tw.Close())
+
+	_, err := parseLayers(context.Background(), &buf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too many entries")
+}
+
 // readMetadataEntry must also reject a stream that overruns the cap when the
 // header understated the size (a lying header in the opposite direction).
 func TestReadMetadataEntry_StreamOverrunRejected(t *testing.T) {
@@ -336,6 +356,13 @@ func TestExtractShortID_ExactlyTwelve(t *testing.T) {
 func TestExtractShortID_OCIFormat(t *testing.T) {
 	id := extractShortID("blobs/sha256/aabbccddee112233445566778899aabbccddeeff00112233445566778899aabb")
 	assert.Equal(t, "aabbccddee11", id)
+}
+
+func TestExtractShortID_OCIFormat_NonSHA256(t *testing.T) {
+	// Non-sha256 OCI blob paths must include the algorithm prefix so the
+	// short ID is distinguishable from a sha256 short ID.
+	id := extractShortID("blobs/sha512/aabbccddee112233445566778899aabb")
+	assert.Equal(t, "sha512:aabbcc", id)
 }
 
 func TestParseLayers_OCIFormat(t *testing.T) {
@@ -976,6 +1003,36 @@ func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotF
 	// classifyPlatformMissing (a second inspect for the manifest list) — so
 	// pinning to exactly one inspect locks the win in.
 	assert.Equal(t, 1, inspectCalls, "platform classifier should reach enumeratePlatforms directly, no probe inspect needed")
+}
+
+// TestClassifyPullNotFound_DaemonUnreachable_SurfacesDaemonError verifies that
+// when classifyPullNotFound's probe inspect fails due to a connection error
+// (daemon briefly unreachable), the result is ErrDaemonNotRunning rather than
+// the misleading ErrImageNotFound.
+func TestClassifyPullNotFound_DaemonUnreachable_SurfacesDaemonError(t *testing.T) {
+	plat, err := ParsePlatform("linux/arm64")
+	require.NoError(t, err)
+
+	fake := &fakeAPIClient{
+		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
+			return client.ImageListResult{}, nil
+		},
+		imagePull: func(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+			return nil, errors.New("manifest for linux/arm64 not found: not found")
+		},
+		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
+			// Simulate a briefly-unreachable daemon on the probe inspect.
+			return client.ImageInspectResult{}, errors.New("error during connect: dial tcp: connection refused")
+		},
+	}
+	r, err := NewDockerResolver(WithClient(fake), WithPlatform(plat))
+	require.NoError(t, err)
+	dr := r.(*DockerResolver)
+
+	err = dr.ensureImageWithProgress(context.Background(), "nginx:latest", nil)
+	var daemonErr *ErrDaemonNotRunning
+	require.ErrorAs(t, err, &daemonErr,
+		"a connection error on the probe inspect must surface as ErrDaemonNotRunning, not ErrImageNotFound")
 }
 
 func TestParseLayers_MissingLayerBlob_ReturnsError(t *testing.T) {
