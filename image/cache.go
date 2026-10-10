@@ -800,7 +800,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 			sort.Slice(records, func(i, j int) bool {
 				return records[i].oldest.Before(records[j].oldest)
 			})
-			survivors := records[:0]
+			survivors := make([]pruneEntry, 0, len(records))
 			for _, r := range records {
 				if total <= opts.MaxBytes {
 					survivors = append(survivors, r)
