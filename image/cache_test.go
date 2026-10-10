@@ -1067,3 +1067,192 @@ func TestPruneCache_Wrapper_StillEmitsSingleEntryOverflowWarn(t *testing.T) {
 	}
 	assert.True(t, found, "wrapper must still surface single-entry overflow warn; got %+v", events)
 }
+
+func TestCachePathWithPlatform_RejectsPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	adversarial := []string{
+		"../evil",
+		"linux/../../../../etc/passwd",
+		`linux\..\..\evil`,
+		// Windows reserved device names — on Windows, a path component equal
+		// to one of these names (case-insensitive) is treated as a device
+		// (NUL discards data, CON reads stdin, etc.).
+		"linux/NUL",
+		"linux/nul",
+		"linux/CON",
+		"linux/PRN",
+		"linux/AUX",
+		"linux/COM1",
+		"linux/LPT9",
+	}
+	for _, p := range adversarial {
+		_, err := cachePathWithPlatform(root, strings.Repeat("a", 64), p)
+		assert.Error(t, err, "platform %q should be rejected", p)
+	}
+}
+
+// writeFakeCachePlatform creates {root}/{digest}/layers-<platform-slug>.gob
+// with the given size and mtime. Used to seed multi-platform prune fixtures.
+func writeFakeCachePlatform(t *testing.T, root, digest, platform string, size int64, mtime time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, digest)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	slug, err := platformSlug(platform)
+	require.NoError(t, err, "writeFakeCachePlatform: invalid platform %q", platform)
+	path := filepath.Join(dir, "layers-"+slug+".gob")
+	env := cacheEnvelope{
+		Digest:        digest,
+		SchemaVersion: SchemaVersion,
+		CachedAt:      mtime,
+		Layers:        []cachedLayer{{Index: 0, ID: digest, Size: size}},
+	}
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+	require.NoError(t, os.Truncate(path, size))
+	require.NoError(t, os.Chtimes(path, mtime, mtime))
+}
+
+// TestPruneCache_TTL_PlatformMixedAge verifies that when a digest directory
+// contains both an old platform-pinned file and a freshly-written default
+// file, the directory is evicted based on the oldest file's mtime — not the
+// newest. Before the fix, gobFilesInDir returned the newest mtime, so a
+// 25-day-old layers-linux-amd64.gob next to a fresh layers.gob would never
+// be evicted at TTL_DAYS=7.
+func TestPruneCache_TTL_PlatformMixedAge(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	mixed := strings.Repeat("a", 64)
+	// Old platform-pinned file: 31 days old (stale at 30-day TTL).
+	writeFakeCachePlatform(t, root, mixed, "linux/amd64", 1024, now.Add(-31*24*time.Hour))
+	// Fresh default file: written today.
+	writeFakeCache(t, root, mixed, 1024, now.Add(-1*time.Hour))
+
+	// Also a genuinely fresh digest (both files recent) that must survive.
+	fresh := strings.Repeat("b", 64)
+	writeFakeCache(t, root, fresh, 1024, now.Add(-1*time.Hour))
+
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "30")
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "0")
+
+	pruneCache(root, "", nil)
+
+	// 'mixed' must be evicted: its oldest file is 31 days old.
+	_, errMixed := os.Stat(filepath.Join(root, mixed))
+	assert.True(t, os.IsNotExist(errMixed), "digest with stale platform file must be evicted")
+
+	// 'fresh' must survive: all files are recent.
+	_, errFresh := os.Stat(filepath.Join(root, fresh))
+	assert.NoError(t, errFresh, "all-fresh digest must survive TTL")
+}
+
+func TestListCache_PlatformOnly_DigestsAreVisible(t *testing.T) {
+	root := t.TempDir()
+	digest := strings.Repeat("d", 64)
+	dir := filepath.Join(root, digest)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	// Write only a platform-pinned file; no layers.gob.
+	env := cacheEnvelope{
+		Digest:        digest,
+		SchemaVersion: SchemaVersion,
+		CachedAt:      time.Now().UTC(),
+		Layers:        []cachedLayer{{Index: 0, ID: digest, Size: 512}},
+	}
+	f, err := os.Create(filepath.Join(dir, "layers-linux-arm64.gob"))
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(env))
+	require.NoError(t, f.Close())
+
+	entries, warns, err := ListCache(root)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+	require.Len(t, entries, 1, "platform-only digest dir must appear in ListCache output")
+	assert.Equal(t, digest, entries[0].Digest)
+}
+
+func TestIsCacheGobName(t *testing.T) {
+	yes := []string{
+		"layers.gob",
+		"layers-linux-amd64.gob",
+		"layers-linux-arm64.gob",
+		"layers-linux-arm-v7.gob",
+	}
+	no := []string{
+		"layerssomething.gob", // no dash separator
+		"layers-.gob",         // empty slug
+		"layers-linux.txt",    // wrong extension
+		"",
+		"layers",
+		".gob",
+	}
+	for _, name := range yes {
+		assert.True(t, isCacheGobName(name), "expected true for %q", name)
+	}
+	for _, name := range no {
+		assert.False(t, isCacheGobName(name), "expected false for %q", name)
+	}
+}
+
+// TestGobFilesInDir_BracketPath verifies that gobFilesInDir works correctly
+// when the digest directory path contains bracket characters, which would
+// cause filepath.Glob to return ErrBadPattern and silently return nil.
+// On Windows, usernames like "user[1]" produce cache roots with brackets.
+func TestGobFilesInDir_BracketPath(t *testing.T) {
+	// Create a parent dir whose name contains brackets.
+	base := t.TempDir()
+	bracketDir := filepath.Join(base, "user[1]", "layerx", strings.Repeat("a", 64))
+	require.NoError(t, os.MkdirAll(bracketDir, 0o700))
+
+	// Write a valid cache gob file inside the bracket-named path.
+	gobPath := filepath.Join(bracketDir, "layers.gob")
+	f, err := os.Create(gobPath)
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(cacheEnvelope{
+		Digest:        strings.Repeat("a", 64),
+		SchemaVersion: SchemaVersion,
+		Layers:        []cachedLayer{{Index: 0, ID: "x", Size: 42}},
+	}))
+	require.NoError(t, f.Close())
+
+	size, newest, oldest, ok := gobFilesInDir(bracketDir)
+	assert.True(t, ok, "gobFilesInDir must find the gob file even when dir path contains brackets")
+	assert.Greater(t, size, int64(0))
+	assert.False(t, newest.IsZero())
+	assert.False(t, oldest.IsZero())
+}
+
+// TestPruneCache_MaxBytes_UsesOldestMtime verifies that the MaxBytes eviction
+// pass orders entries by their oldest file's mtime (consistent with the TTL
+// pass), so a mixed-age directory is evicted before a uniformly-newer one.
+func TestPruneCache_MaxBytes_UsesOldestMtime(t *testing.T) {
+	root := t.TempDir()
+	now := withFrozenNow(t)
+
+	// 'mixed': old platform-pinned file (30 days) + fresh default file (1 h).
+	// Oldest mtime = 30 days → should be evicted first by MaxBytes.
+	mixed := strings.Repeat("a", 64)
+	writeFakeCachePlatform(t, root, mixed, "linux/amd64", 512, now.Add(-30*24*time.Hour))
+	writeFakeCache(t, root, mixed, 512, now.Add(-1*time.Hour))
+
+	// 'uniform': both files written 7 days ago — older than the fresh default
+	// file in 'mixed' but younger than the oldest file in 'mixed'.
+	uniform := strings.Repeat("b", 64)
+	writeFakeCache(t, root, uniform, 512, now.Add(-7*24*time.Hour))
+
+	// Set MaxBytes low enough to force eviction of one entry.
+	t.Setenv("LAYERX_CACHE_MAX_BYTES", "768") // 1.5 × 512; forces one 1024-byte dir out
+	t.Setenv("LAYERX_CACHE_TTL_DAYS", "0")    // disable TTL
+
+	pruneCache(root, "", nil)
+
+	// 'mixed' should be evicted first (oldest mtime = 30 days ago).
+	_, errMixed := os.Stat(filepath.Join(root, mixed))
+	assert.True(t, os.IsNotExist(errMixed), "'mixed' dir must be evicted first by MaxBytes (oldest mtime)")
+
+	// 'uniform' should survive (it was younger by oldest-mtime criterion).
+	_, errUniform := os.Stat(filepath.Join(root, uniform))
+	assert.NoError(t, errUniform, "'uniform' dir must survive MaxBytes when mixed dir is older")
+}

@@ -105,8 +105,8 @@ const (
 
 type CacheEntry struct {
 	Digest   string
-	Size     int64     // bytes — size of the layers.gob file on disk
-	CachedAt time.Time // mtime of layers.gob; honestly named (not "LastUsed")
+	Size     int64     // bytes — combined size of all layers*.gob files in the digest directory
+	CachedAt time.Time // newest mtime among all layers*.gob files; honestly named (not "LastUsed")
 	// ImageRef is the image reference the cache was originally written with
 	// (e.g. "nginx:latest", "/build/app.tar"). Empty when the sidecar
 	// meta.json is missing — entries written by older versions, or by
@@ -195,15 +195,16 @@ func loadPruneLimits(progress chan<- ProgressEvent) (ttl time.Duration, maxBytes
 	return time.Duration(ttlDays) * 24 * time.Hour, maxBytes
 }
 
-// pruneEntry is one candidate during prune. mtime is the layers.gob's
-// modtime — used as a CachedAt proxy because it is fixed by os.Rename
-// at the same instant the envelope's CachedAt is, and avoids decoding
-// every gob in the cache root just to choose evictees.
+// pruneEntry is one candidate during prune. mtime is the newest layers*.gob
+// modtime — used as CachedAt display proxy. oldest is the oldest layers*.gob
+// modtime — used as the effective age for TTL eviction, so a stale
+// platform-pinned file is not shielded by a freshly-written sibling.
 type pruneEntry struct {
-	name  string // digest directory name (no path separators)
-	path  string // {root}/{name}
-	mtime time.Time
-	size  int64
+	name   string // digest directory name (no path separators)
+	path   string // {root}/{name}
+	mtime  time.Time
+	oldest time.Time
+	size   int64
 }
 
 // pruneCache enforces TTL and size-cap limits on the cache root.
@@ -232,14 +233,64 @@ func pruneCache(root, keepDigest string, progress chan<- ProgressEvent) {
 }
 
 func cachePath(root, digest string) (string, error) {
+	return cachePathWithPlatform(root, digest, "")
+}
+
+// cachePathWithPlatform returns the path to the cache file for the given
+// digest and optional platform. When platform is non-empty the cache file is
+// stored as "layers-<platform-slug>.gob" alongside "layers.gob" so that
+// analyses pinned to different platforms of the same image never share a
+// cache entry. Both files live under the same digest directory and are
+// recognised by ListCache/PruneCache via the "layers*.gob" glob.
+func cachePathWithPlatform(root, digest, platform string) (string, error) {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, norm, "layers.gob"), nil
+	file := "layers.gob"
+	if platform != "" {
+		// Replace '/' with '-' so the slug is a valid file-name component on
+		// all supported OSes. "linux/amd64" → "layers-linux-amd64.gob".
+		// activePlatformDisplay() sanitises via ParsePlatform/FormatPlatform,
+		// but defence-in-depth here costs nothing.
+		slug, err := platformSlug(platform)
+		if err != nil {
+			return "", err
+		}
+		file = "layers-" + slug + ".gob"
+	}
+	return filepath.Join(root, norm, file), nil
 }
 
-// normalizeDigest strips the "sha256:" prefix when present and enforces the
+// platformSlug converts a platform string ("linux/amd64") to a filename
+// component ("linux-amd64") and validates it against known attack vectors:
+// path traversal sequences (".."), path separators, and Windows reserved
+// device names (NUL, CON, PRN, AUX, COM1-COM9, LPT1-LPT9). On Windows,
+// a path component that equals a reserved name (case-insensitive) refers
+// to the device rather than a file — NUL discards data, CON reads stdin.
+// The '-' separator used by the slug means each original segment maps to
+// a single slug segment, so we check each segment independently.
+func platformSlug(platform string) (string, error) {
+	slug := strings.ReplaceAll(platform, "/", "-")
+	if strings.Contains(slug, "..") || strings.ContainsAny(slug, `/\`) {
+		return "", fmt.Errorf("invalid platform slug %q", slug)
+	}
+	for _, seg := range strings.Split(slug, "-") {
+		upper := strings.ToUpper(seg)
+		switch upper {
+		case "CON", "PRN", "AUX", "NUL":
+			return "", fmt.Errorf("invalid platform slug %q: reserved device name", slug)
+		}
+		if len(upper) == 4 && (upper[:3] == "COM" || upper[:3] == "LPT") {
+			if upper[3] >= '1' && upper[3] <= '9' {
+				return "", fmt.Errorf("invalid platform slug %q: reserved device name", slug)
+			}
+		}
+	}
+	return slug, nil
+}
+
+
 // canonical form of a Docker/OCI content digest: exactly 64 lowercase
 // hexadecimal characters. Anything else is rejected.
 //
@@ -274,7 +325,11 @@ func normalizeDigest(digest string) (string, error) {
 //     The file is NOT removed in this branch — a transient EIO/EBUSY/perm
 //     failure should not evict an otherwise-valid cache.
 func loadCache(root, digest string) (layers []Layer, ok bool, err error) {
-	path, err := cachePath(root, digest)
+	return loadCacheWithPlatform(root, digest, "")
+}
+
+func loadCacheWithPlatform(root, digest, platform string) (layers []Layer, ok bool, err error) {
+	path, err := cachePathWithPlatform(root, digest, platform)
 	if err != nil {
 		return nil, false, err
 	}
@@ -371,6 +426,10 @@ func isTransientIOError(err error) bool {
 // fsync + atomic rename. Errors are returned but should be treated as
 // non-fatal by callers (the user already has the live result).
 func saveCache(root, digest string, imageRef string, layers []Layer, progress chan<- ProgressEvent) error {
+	return saveCacheWithPlatform(root, digest, "", imageRef, layers, progress)
+}
+
+func saveCacheWithPlatform(root, digest, platform, imageRef string, layers []Layer, progress chan<- ProgressEvent) error {
 	norm, err := normalizeDigest(digest)
 	if err != nil {
 		return err
@@ -418,7 +477,16 @@ func saveCache(root, digest string, imageRef string, layers []Layer, progress ch
 		return fmt.Errorf("closing temp cache file: %w", closeErr)
 	}
 
-	finalPath := filepath.Join(dir, "layers.gob")
+	file := "layers.gob"
+	if platform != "" {
+		slug, slugErr := platformSlug(platform)
+		if slugErr != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("invalid platform slug: %w", slugErr)
+		}
+		file = "layers-" + slug + ".gob"
+	}
+	finalPath := filepath.Join(dir, file)
 	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
@@ -495,28 +563,85 @@ func tempFilename(prefix string) (string, error) {
 // sweepOrphanTempFiles removes layers.gob.tmp-* files older than one hour
 // from dir. Best effort: errors are ignored. A SIGKILL during saveCache can
 // orphan a temp file; without this sweep, repeated crashes accumulate.
+//
+// Uses os.ReadDir rather than filepath.Glob to avoid ErrBadPattern when dir
+// contains bracket characters (e.g. a Windows username like "user[1]").
 func sweepOrphanTempFiles(dir string) {
-	matches, err := filepath.Glob(filepath.Join(dir, "layers.gob.tmp-*"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	cutoff := time.Now().Add(-1 * time.Hour)
-	for _, m := range matches {
-		info, statErr := os.Stat(m)
+	const prefix = "layers.gob.tmp-"
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, statErr := e.Info()
 		if statErr != nil {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			_ = os.Remove(m)
+			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
+}
+
+// gobFilesInDir returns the combined size, newest mtime, and oldest mtime of
+// all cache gob files in dir (exactly "layers.gob" and "layers-*.gob").
+// ok is false when no such file exists.
+//
+// Uses os.ReadDir rather than filepath.Glob to avoid ErrBadPattern when dir
+// contains bracket characters (e.g. a Windows username like "user[1]").
+//
+// newest is used as CachedAt in display (shows when any platform was last
+// cached). oldest is used by PruneCache's TTL check so that a stale
+// per-platform file is not shielded from eviction by a freshly-written
+// sibling: the directory's effective age is its oldest resident file.
+func gobFilesInDir(dir string) (size int64, newest, oldest time.Time, ok bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, time.Time{}, time.Time{}, false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !isCacheGobName(name) {
+			continue
+		}
+		info, statErr := e.Info()
+		if statErr != nil {
+			continue
+		}
+		ok = true
+		size += info.Size()
+		mt := info.ModTime()
+		if mt.After(newest) {
+			newest = mt
+		}
+		if oldest.IsZero() || mt.Before(oldest) {
+			oldest = mt
+		}
+	}
+	return size, newest, oldest, ok
+}
+
+// isCacheGobName reports whether name is one of the two file shapes the
+// cache writes: exactly "layers.gob", or "layers-" followed by a non-empty
+// slug and ".gob". The narrower match prevents stray files (e.g.
+// "layersuser.gob") from inflating size or skewing mtime calculations.
+func isCacheGobName(name string) bool {
+	if name == "layers.gob" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(name, "layers-")
+	return ok && strings.HasSuffix(rest, ".gob") && len(rest) > len(".gob")
 }
 
 // ListCache returns every valid digest dir under root with its size and
 // mtime. A missing root is not an error; it returns ([], nil, nil) — the
 // cache simply hasn't been populated yet. Foreign files at root, dirs
-// whose names fail digest validation, and dirs whose layers.gob is
-// missing are silently skipped (same rule as the auto-prune).
+// whose names fail digest validation, and dirs with no layers*.gob files
+// are silently skipped (same rule as the auto-prune).
 //
 // Warnings are returned as plain strings so the caller (cmd/cache.go)
 // can render them. ListCache itself never writes to stderr.
@@ -541,15 +666,14 @@ func ListCache(root string) ([]CacheEntry, []string, error) {
 			continue
 		}
 		entryDir := filepath.Join(root, d.Name())
-		gobPath := filepath.Join(entryDir, "layers.gob")
-		info, statErr := os.Stat(gobPath)
-		if statErr != nil {
+		size, newest, _, ok := gobFilesInDir(entryDir)
+		if !ok {
 			continue
 		}
 		out = append(out, CacheEntry{
 			Digest:   d.Name(),
-			Size:     info.Size(),
-			CachedAt: info.ModTime(),
+			Size:     size,
+			CachedAt: newest,
 			ImageRef: readMetaSidecar(entryDir),
 		})
 	}
@@ -594,16 +718,17 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		if _, err := normalizeDigest(d.Name()); err != nil {
 			continue
 		}
-		gobPath := filepath.Join(root, d.Name(), "layers.gob")
-		info, statErr := os.Stat(gobPath)
-		if statErr != nil {
+		entryPath := filepath.Join(root, d.Name())
+		size, newest, oldest, ok := gobFilesInDir(entryPath)
+		if !ok {
 			continue
 		}
 		records = append(records, pruneEntry{
-			name:  d.Name(),
-			path:  filepath.Join(root, d.Name()),
-			mtime: info.ModTime(),
-			size:  info.Size(),
+			name:   d.Name(),
+			path:   entryPath,
+			mtime:  newest,
+			oldest: oldest,
+			size:   size,
 		})
 	}
 
@@ -657,7 +782,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		survivors := records[:0]
 		t := now()
 		for _, r := range records {
-			if r.name != opts.Keep && t.Sub(r.mtime) > opts.TTL && tryRemove(r.path) {
+			if r.name != opts.Keep && t.Sub(r.oldest) > opts.TTL && tryRemove(r.path) {
 				res.Removed = append(res.Removed, toEntry(r))
 				continue
 			}
@@ -673,7 +798,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		}
 		if total > opts.MaxBytes {
 			sort.Slice(records, func(i, j int) bool {
-				return records[i].mtime.Before(records[j].mtime)
+				return records[i].oldest.Before(records[j].oldest)
 			})
 			survivors := records[:0]
 			for _, r := range records {
