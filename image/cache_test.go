@@ -1273,6 +1273,7 @@ func TestIsTransientIOError(t *testing.T) {
 
 	// A wrapped syscall.Errno is transient.
 	assert.True(t, isTransientIOError(fmt.Errorf("reading cache: %w", syscall.EIO)))
+	assert.True(t, isTransientIOError(&os.PathError{Op: "read", Path: "layers.gob", Err: syscall.EIO}))
 
 	// Plain EOF is NOT transient — it signals a truncated/corrupt file.
 	assert.False(t, isTransientIOError(io.EOF))

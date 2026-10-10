@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -73,37 +72,25 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 	}
 	defer f.Close()
 
-	if err := r.checkPlatform(f); err != nil {
+	metadata, err := readImageArchiveMetadata(f)
+	if err != nil {
+		return nil, &ErrInvalidArchive{Path: r.path, Cause: err}
+	}
+	if err := r.checkPlatform(f, metadata); err != nil {
 		return nil, err
 	}
 
-	// checkPlatform advances the file offset past the tar entries it scans.
-	// parseLayers reads its input from the current position into a fresh
-	// spool tempfile, so it would see EOF (and report "manifest.json not
-	// found") without this rewind. Rewinding is a no-op when the platform
-	// pin is nil, but always safe.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, &ErrArchiveInfra{Op: "seek archive", Cause: err}
-	}
-
-	// Warn when the archive contains multiple manifest entries. docker save
-	// with multiple image references or a multi-arch buildx export produces
-	// such archives; parseLayers uses the first entry (manifests[0]), so
-	// only the first image is analysed. Pinning --platform selects the
-	// right variant when the archive was produced with explicit per-platform
-	// saves; without it, the user should be told what happened.
-	if n, err := countManifests(f); err == nil && n > 1 {
+	if metadata.manifestCount > 1 {
 		emitCacheWarn(progress, fmt.Sprintf(
-			"archive contains %d manifest entries; analysing the first one — use --platform to select a specific variant", n,
+			"archive contains %d manifest entries; analysing the first image — export a single-image archive to choose another image", metadata.manifestCount,
 		))
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return nil, &ErrArchiveInfra{Op: "seek archive", Cause: err}
-		}
 	}
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
-	layers, err := parseLayers(ctx, f)
+	// The archive is already seekable. The layer reader rewinds it itself,
+	// independently of where metadata/config inspection left the file offset.
+	layers, err := parseLayersFromManifest(ctx, f, metadata.manifest, metadata.headers, metadata.rootJSON)
 	if err != nil {
 		// Infrastructure failures (temp file, disk full) keep their original
 		// shape so the user sees the real cause; only content-class errors
@@ -122,11 +109,11 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 // wrong --platform sees a clear "this archive is amd64, not arm64" message
 // instead of a confusing successful inspect of the wrong content. nil pin =
 // no check.
-func (r *ArchiveResolver) checkPlatform(f *os.File) error {
+func (r *ArchiveResolver) checkPlatform(f *os.File, metadata *imageArchiveMetadata) error {
 	if r.platform == nil {
 		return nil
 	}
-	got, err := readArchivePlatform(f)
+	got, err := readArchivePlatform(f, metadata)
 	if err != nil {
 		return &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
@@ -145,33 +132,9 @@ func (r *ArchiveResolver) checkPlatform(f *os.File) error {
 	}
 }
 
-func readArchivePlatform(f *os.File) (*ocispec.Platform, error) {
-	manifestData, rootJSON, _, err := scanResolveMetadata(f)
-	if err != nil {
-		return nil, err
-	}
-	var cfgPath string
-	if manifestData == nil {
-		// No Docker manifest.json — try OCI index fallback.
-		synthetic, err := ociIndexToDockerManifest(rootJSON, f)
-		if err != nil {
-			return nil, fmt.Errorf("manifest.json not found and OCI index fallback failed: %w", err)
-		}
-		if synthetic == nil {
-			return nil, errors.New("manifest.json not found")
-		}
-		cfgPath = synthetic.Config
-	} else {
-		var manifests []dockerManifest
-		if err := json.Unmarshal(manifestData, &manifests); err != nil {
-			return nil, fmt.Errorf("cannot parse manifest: %w", err)
-		}
-		if len(manifests) == 0 {
-			return nil, errors.New("empty manifest")
-		}
-		cfgPath = manifests[0].Config
-	}
-	cfgBytes, ok := rootJSON[cfgPath]
+func readArchivePlatform(f *os.File, metadata *imageArchiveMetadata) (*ocispec.Platform, error) {
+	cfgPath := metadata.manifest.Config
+	cfgBytes, ok := metadata.rootJSON[cfgPath]
 	if !ok {
 		// OCI layout: config lives under blobs/sha256/<digest>.
 		b, err := readEntryFromSpool(f, cfgPath)
@@ -205,25 +168,13 @@ func (r *ArchiveResolver) Inspect(ctx context.Context, imageRef string) (*ImageM
 	}
 	defer f.Close()
 
-	manifestData, _, headers, err := scanResolveMetadata(f)
+	metadata, err := readImageArchiveMetadata(f)
 	if err != nil {
 		return nil, &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
-	if manifestData == nil {
-		return nil, &ErrInvalidArchive{Path: r.path, Cause: errors.New("manifest.json not found")}
-	}
-
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return nil, &ErrInvalidArchive{Path: r.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
-	}
-	if len(manifests) == 0 {
-		return nil, &ErrInvalidArchive{Path: r.path, Cause: errors.New("empty manifest")}
-	}
-
 	var total int64
-	for _, layerPath := range manifests[0].Layers {
-		total += headers[layerPath]
+	for _, layerPath := range metadata.manifest.Layers {
+		total += metadata.headers[layerPath]
 	}
 	return &ImageMeta{Size: total}, nil
 }
@@ -247,23 +198,11 @@ func (r *ArchiveResolver) ImageID(ctx context.Context, imageRef string) (string,
 	}
 	defer f.Close()
 
-	manifestData, rootJSON, _, err := scanResolveMetadata(f)
+	metadata, err := readImageArchiveMetadata(f)
 	if err != nil {
 		return "", &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
-	if manifestData == nil {
-		return "", &ErrInvalidArchive{Path: r.path, Cause: errors.New("manifest.json not found")}
-	}
-
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return "", &ErrInvalidArchive{Path: r.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
-	}
-	if len(manifests) == 0 {
-		return "", &ErrInvalidArchive{Path: r.path, Cause: errors.New("empty manifest")}
-	}
-
-	cfg := manifests[0].Config
+	cfg := metadata.manifest.Config
 	// OCI layout: blobs/sha256/<hex>. Path *is* the content digest, no need
 	// to re-hash.
 	if rest, ok := strings.CutPrefix(cfg, "blobs/sha256/"); ok && rest != "" && !strings.Contains(rest, "/") {
@@ -273,9 +212,14 @@ func (r *ArchiveResolver) ImageID(ctx context.Context, imageRef string) (string,
 	// Legacy docker-save: read the config blob from the tar and hash its
 	// bytes. The blob is at the root of the outer tar and was captured by
 	// scanResolveMetadata in rootJSON.
-	cfgBytes, ok := rootJSON[cfg]
+	cfgBytes, ok := metadata.rootJSON[cfg]
 	if !ok {
-		return "", &ErrInvalidArchive{Path: r.path, Cause: fmt.Errorf("config blob %q referenced by manifest not found in archive", cfg)}
+		// Standalone OCI layouts can use algorithms other than sha256. Hash
+		// their config bytes to retain the cache's sha256 identity contract.
+		cfgBytes, err = readEntryFromSpool(f, cfg)
+		if err != nil {
+			return "", &ErrInvalidArchive{Path: r.path, Cause: fmt.Errorf("config blob %q referenced by manifest not found in archive: %w", cfg, err)}
+		}
 	}
 	sum := sha256.Sum256(cfgBytes)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
@@ -324,18 +268,11 @@ func (e *ArchiveExtractor) layerCount() (int, error) {
 	}
 	defer f.Close()
 
-	manifestData, err := readManifestFromSpool(f)
+	metadata, err := readImageArchiveMetadata(f)
 	if err != nil {
 		return 0, &ErrInvalidArchive{Path: e.path, Cause: err}
 	}
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return 0, &ErrInvalidArchive{Path: e.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
-	}
-	if len(manifests) == 0 {
-		return 0, &ErrInvalidArchive{Path: e.path, Cause: errors.New("empty manifest")}
-	}
-	return len(manifests[0].Layers), nil
+	return len(metadata.manifest.Layers), nil
 }
 
 // ExtractFromLayer mirrors DockerExtractor.ExtractFromLayer: walk back from
@@ -407,22 +344,13 @@ func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, 
 	}
 	cleanup := func() { _ = f.Close() }
 
-	manifestData, err := readManifestFromSpool(f)
+	metadata, err := readImageArchiveMetadata(f)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}
 	}
 
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		cleanup()
-		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: fmt.Errorf("cannot parse manifest: %w", err)}
-	}
-	if len(manifests) == 0 {
-		cleanup()
-		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: errors.New("empty manifest")}
-	}
-	layerPaths = manifests[0].Layers
+	layerPaths = metadata.manifest.Layers
 
 	keepCount := min(maxLayers, len(layerPaths))
 	keep := make(map[string]struct{}, keepCount)
@@ -430,17 +358,11 @@ func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, 
 		keep[p] = struct{}{}
 	}
 
-	idx, err := scanBlobIndex(f)
-	if err != nil {
-		cleanup()
-		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}
-	}
-
 	load = func(name string) ([]byte, error) {
 		if _, ok := keep[name]; !ok {
 			return nil, nil
 		}
-		size, present := idx[name]
+		size, present := metadata.headers[name]
 		if !present {
 			return nil, nil
 		}
@@ -454,19 +376,4 @@ func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, 
 		return data, nil
 	}
 	return layerPaths, load, cleanup, nil
-}
-
-// countManifests returns the number of entries in the archive's manifest.json
-// array. It re-reads the metadata from the current file offset. Returns (1, nil)
-// if the manifest cannot be read — the caller treats 1 as "nothing surprising".
-func countManifests(f *os.File) (int, error) {
-	manifestData, err := readManifestFromSpool(f)
-	if err != nil {
-		return 1, err
-	}
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		return 1, err
-	}
-	return len(manifests), nil
 }

@@ -170,6 +170,26 @@ func TestEnsureIIDFile_StopsAtDashDash(t *testing.T) {
 	if path == "" {
 		t.Fatal("path is empty")
 	}
+	want := []string{"-t", "x", "--iidfile", path, "--", "--iidfile=/tmp/ignored.iid"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("generated flag must precede -- and preserve the context: got %v, want %v", args, want)
+	}
+}
+
+func TestEnsureIIDFile_ContextAfterDashDash(t *testing.T) {
+	args := []string{"--", "."}
+	path, owns, err := ensureIIDFile(&args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !owns {
+		t.Fatal("expected an owned temporary iidfile")
+	}
+	defer os.Remove(path)
+	want := []string{"--iidfile", path, "--", "."}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
 }
 
 func TestReadIIDFile_TrimsWhitespace(t *testing.T) {

@@ -3,7 +3,6 @@ package image
 import (
 	"archive/tar"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -386,21 +385,12 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		return nil, nil, nil, fmt.Errorf("spooling image archive: %w", err)
 	}
 
-	manifestData, err := readManifestFromSpool(spool)
+	metadata, err := readImageArchiveMetadata(spool)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
 	}
-	var manifests []dockerManifest
-	if err := json.Unmarshal(manifestData, &manifests); err != nil {
-		cleanup()
-		return nil, nil, nil, fmt.Errorf("invalid image archive: cannot parse manifest: %w", err)
-	}
-	if len(manifests) == 0 {
-		cleanup()
-		return nil, nil, nil, fmt.Errorf("invalid image archive: empty manifest")
-	}
-	layerPaths = manifests[0].Layers
+	layerPaths = metadata.manifest.Layers
 
 	keepCount := min(maxLayers, len(layerPaths))
 	keep := make(map[string]struct{}, keepCount)
@@ -408,17 +398,11 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		keep[p] = struct{}{}
 	}
 
-	idx, err := scanBlobIndex(spool)
-	if err != nil {
-		cleanup()
-		return nil, nil, nil, err
-	}
-
 	load = func(name string) ([]byte, error) {
 		if _, ok := keep[name]; !ok {
 			return nil, nil
 		}
-		size, present := idx[name]
+		size, present := metadata.headers[name]
 		if !present {
 			return nil, nil
 		}
