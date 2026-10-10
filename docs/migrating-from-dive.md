@@ -195,7 +195,7 @@ scoop install layerx
 curl -LO https://github.com/deveshctl/layerx/releases/latest/download/layerx_linux_amd64.deb
 sudo dpkg -i layerx_linux_amd64.deb
 
-# From source (Go 1.26+)
+# From source (Go 1.27.2+)
 go install github.com/deveshctl/layerx@latest
 ```
 
