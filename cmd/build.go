@@ -316,6 +316,9 @@ func hasPodmanSocket() bool {
 
 func ensureIIDFile(args *[]string) (path string, ownsFile bool, err error) {
 	for i, a := range *args {
+		if a == "--" {
+			break
+		}
 		if a == "--iidfile" {
 			if i+1 >= len(*args) {
 				return "", false, fmt.Errorf("--iidfile requires a value")

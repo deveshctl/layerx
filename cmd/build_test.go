@@ -155,6 +155,23 @@ func TestEnsureIIDFile_AppendsTempWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestEnsureIIDFile_StopsAtDashDash(t *testing.T) {
+	// --iidfile after -- must be treated as a build-context argument, not a
+	// layerx flag. ensureIIDFile must stop scanning at -- (same as firstTagFromArgs).
+	args := []string{"-t", "x", "--", "--iidfile=/tmp/ignored.iid"}
+	path, owns, err := ensureIIDFile(&args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !owns {
+		t.Fatal("no explicit --iidfile before --, must own the temp file")
+	}
+	defer os.Remove(path)
+	if path == "" {
+		t.Fatal("path is empty")
+	}
+}
+
 func TestReadIIDFile_TrimsWhitespace(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "iid")
