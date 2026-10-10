@@ -69,7 +69,7 @@ jobs:
   layerx:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build image
         run: docker build -t myapp:${{ github.sha }} .
@@ -106,7 +106,7 @@ cache APT downloads, pin a version and cache the unpacked binary directly:
 ```yaml
       - name: Cache layerx
         id: cache-layerx
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /usr/local/bin/layerx
           key: layerx-${{ runner.os }}-v1.5.0
