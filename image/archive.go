@@ -86,6 +86,21 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 		return nil, &ErrArchiveInfra{Op: "seek archive", Cause: err}
 	}
 
+	// Warn when the archive contains multiple manifest entries. docker save
+	// with multiple image references or a multi-arch buildx export produces
+	// such archives; parseLayers uses the first entry (manifests[0]), so
+	// only the first image is analysed. Pinning --platform selects the
+	// right variant when the archive was produced with explicit per-platform
+	// saves; without it, the user should be told what happened.
+	if n, err := countManifests(f); err == nil && n > 1 {
+		emitCacheWarn(progress, fmt.Sprintf(
+			"archive contains %d manifest entries; analysing the first one — use --platform to select a specific variant", n,
+		))
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, &ErrArchiveInfra{Op: "seek archive", Cause: err}
+		}
+	}
+
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
 	layers, err := parseLayers(ctx, f)
@@ -429,4 +444,19 @@ func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, 
 		return data, nil
 	}
 	return layerPaths, load, cleanup, nil
+}
+
+// countManifests returns the number of entries in the archive's manifest.json
+// array. It re-reads the metadata from the current file offset. Returns (1, nil)
+// if the manifest cannot be read — the caller treats 1 as "nothing surprising".
+func countManifests(f *os.File) (int, error) {
+	manifestData, err := readManifestFromSpool(f)
+	if err != nil {
+		return 1, err
+	}
+	var manifests []dockerManifest
+	if err := json.Unmarshal(manifestData, &manifests); err != nil {
+		return 1, err
+	}
+	return len(manifests), nil
 }

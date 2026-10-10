@@ -470,3 +470,40 @@ func TestArchiveResolver_NoPlatformPin_AllowsAnyArchive(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, layers, 1)
 }
+
+func TestArchiveResolver_MultiManifest_EmitsWarning(t *testing.T) {
+	// An archive containing two manifest entries (e.g. docker save with
+	// multiple tags) should succeed but emit a PhaseCacheWarn warning so
+	// the user knows only the first image was analysed.
+	cfg := buildConfigWithPlatform(t, "linux", "amd64", "", []string{"RUN echo first"})
+	layer := buildSimpleLayerTar(t, map[string][]byte{"file": []byte("data")})
+	manifests := []dockerManifest{
+		{Config: "cfg1.json", Layers: []string{"l1/layer.tar"}},
+		{Config: "cfg2.json", Layers: []string{"l2/layer.tar"}},
+	}
+	manifestData, err := json.Marshal(manifests)
+	require.NoError(t, err)
+	path := writeArchive(t, map[string][]byte{
+		"manifest.json": manifestData,
+		"cfg1.json":     cfg,
+		"cfg2.json":     cfg,
+		"l1/layer.tar":  layer,
+		"l2/layer.tar":  layer,
+	})
+
+	progress := make(chan ProgressEvent, 10)
+	r := NewArchiveResolver(path)
+	layers, err := r.ResolveWithProgress(context.Background(), path, progress)
+	require.NoError(t, err)
+	require.NotEmpty(t, layers, "resolve must succeed")
+
+	close(progress)
+	var warnMsgs []string
+	for ev := range progress {
+		if ev.Phase == PhaseCacheWarn {
+			warnMsgs = append(warnMsgs, ev.Message)
+		}
+	}
+	require.NotEmpty(t, warnMsgs, "must emit a warning for multi-manifest archive")
+	assert.Contains(t, warnMsgs[0], "2 manifest entries")
+}
