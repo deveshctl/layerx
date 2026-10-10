@@ -563,35 +563,53 @@ func tempFilename(prefix string) (string, error) {
 // sweepOrphanTempFiles removes layers.gob.tmp-* files older than one hour
 // from dir. Best effort: errors are ignored. A SIGKILL during saveCache can
 // orphan a temp file; without this sweep, repeated crashes accumulate.
+//
+// Uses os.ReadDir rather than filepath.Glob to avoid ErrBadPattern when dir
+// contains bracket characters (e.g. a Windows username like "user[1]").
 func sweepOrphanTempFiles(dir string) {
-	matches, err := filepath.Glob(filepath.Join(dir, "layers.gob.tmp-*"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	cutoff := time.Now().Add(-1 * time.Hour)
-	for _, m := range matches {
-		info, statErr := os.Stat(m)
+	const prefix = "layers.gob.tmp-"
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, statErr := e.Info()
 		if statErr != nil {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			_ = os.Remove(m)
+			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 }
 
 // gobFilesInDir returns the combined size, newest mtime, and oldest mtime of
-// all layers*.gob files in dir. ok is false when no such file exists.
+// all cache gob files in dir (exactly "layers.gob" and "layers-*.gob").
+// ok is false when no such file exists.
+//
+// Uses os.ReadDir rather than filepath.Glob to avoid ErrBadPattern when dir
+// contains bracket characters (e.g. a Windows username like "user[1]").
 //
 // newest is used as CachedAt in display (shows when any platform was last
 // cached). oldest is used by PruneCache's TTL check so that a stale
 // per-platform file is not shielded from eviction by a freshly-written
 // sibling: the directory's effective age is its oldest resident file.
 func gobFilesInDir(dir string) (size int64, newest, oldest time.Time, ok bool) {
-	matches, _ := filepath.Glob(filepath.Join(dir, "layers*.gob"))
-	for _, m := range matches {
-		info, err := os.Stat(m)
-		if err != nil {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, time.Time{}, time.Time{}, false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !isCacheGobName(name) {
+			continue
+		}
+		info, statErr := e.Info()
+		if statErr != nil {
 			continue
 		}
 		ok = true
@@ -605,6 +623,18 @@ func gobFilesInDir(dir string) (size int64, newest, oldest time.Time, ok bool) {
 		}
 	}
 	return size, newest, oldest, ok
+}
+
+// isCacheGobName reports whether name is one of the two file shapes the
+// cache writes: exactly "layers.gob", or "layers-" followed by a non-empty
+// slug and ".gob". The narrower match prevents stray files (e.g.
+// "layersuser.gob") from inflating size or skewing mtime calculations.
+func isCacheGobName(name string) bool {
+	if name == "layers.gob" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(name, "layers-")
+	return ok && strings.HasSuffix(rest, ".gob") && len(rest) > len(".gob")
 }
 
 // ListCache returns every valid digest dir under root with its size and
@@ -768,7 +798,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		}
 		if total > opts.MaxBytes {
 			sort.Slice(records, func(i, j int) bool {
-				return records[i].mtime.Before(records[j].mtime)
+				return records[i].oldest.Before(records[j].oldest)
 			})
 			survivors := records[:0]
 			for _, r := range records {
