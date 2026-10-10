@@ -71,18 +71,31 @@ nfpms:
     license: MIT
     bindir: /usr/bin
 
-brews:
+# After the first Cask release, migrate Formula/layerx.rb in homebrew-tap
+# to the Cask so existing Homebrew installations receive future updates.
+homebrew_casks:
   - name: layerx
+    binaries:
+      - layerx
     repository:
       owner: deveshctl
       name: homebrew-tap
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/deveshctl/layerx
     description: Terminal-based Docker image layer inspector
-    license: MIT
-    test: |
-      system "#{bin}/layerx", "--version"
+    custom_block: |
+      on_macos do
+        depends_on macos: :ventura
+      end
+    hooks:
+      post:
+        # Release binaries are not Apple-signed/notarized. Limit removal of
+        # quarantine to the installed binary, as recommended by GoReleaser.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/layerx"]
+          end
 
 scoops:
   - name: layerx
