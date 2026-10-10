@@ -308,7 +308,7 @@ func TestParseLayers_MissingConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	tarBuf := buildTar(t, map[string][]byte{
-		"manifest.json":                     manifestData,
+		"manifest.json":                      manifestData,
 		"aaa000000000000000000000/layer.tar": make([]byte, 100),
 	})
 
@@ -359,10 +359,10 @@ func TestParseLayers_OCIFormat(t *testing.T) {
 	})
 
 	tarBuf := buildTar(t, map[string][]byte{
-		"manifest.json":                    manifestData,
-		"blobs/sha256/" + configDigest:     configData,
-		"blobs/sha256/" + layerDigest1:     make([]byte, 4096),
-		"blobs/sha256/" + layerDigest2:     make([]byte, 2048),
+		"manifest.json":                manifestData,
+		"blobs/sha256/" + configDigest: configData,
+		"blobs/sha256/" + layerDigest1: make([]byte, 4096),
+		"blobs/sha256/" + layerDigest2: make([]byte, 2048),
 	})
 
 	layers, err := parseLayers(context.Background(), tarBuf)
@@ -589,6 +589,10 @@ type fakeAPIClient struct {
 	imagePull    func(ctx context.Context, ref string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 	imageInspect func(ctx context.Context, ref string) (client.ImageInspectResult, error)
 	info         func(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error)
+}
+
+func (f *fakeAPIClient) ClientVersion() string {
+	return client.MaxAPIVersion
 }
 
 func (f *fakeAPIClient) ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error) {
