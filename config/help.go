@@ -13,14 +13,14 @@ func SectionHelp(section string) string {
 // sectionHelp maps config sections to concise examples. Keep excerpts short —
 // full reference lives in docs/configuration.md.
 var sectionHelp = map[string]string{
-	SectionGeneral: `.layerx.yaml — configuration file (read from the working directory):
+	SectionGeneral: `.layerx.yaml — configuration (current directory, parents, then user config):
 
   rules:           CI efficiency thresholds (layerx ci, CI=true)
   path-rules:      path-scoped CI rules (block, deny-waste, max-layer-count)
   version:         schema version (currently 1)
   theme:           TUI colour theme (see below)
 
-See docs/configuration.md for the full reference.
+Reference: https://github.com/deveshctl/layerx/blob/main/docs/configuration.md
 Run "layerx init --flavour generic" to write a starter file.`,
 	SectionTheme: `theme — TUI colour theme selection:
 
@@ -50,16 +50,13 @@ Run "layerx init --flavour generic" for a starter file.`,
       - "**/*.log"
     max-layer-count: 5
 
-See docs/configuration.md for flat vs list form.`,
+Reference: https://github.com/deveshctl/layerx/blob/main/docs/configuration.md`,
 	SectionVersion: `version — schema version for .layerx.yaml (currently only 1 is supported):
 
   version: 1
 
 Omit the field to use schema version 1.`,
-	SectionKeybindings: `keybindings — reserved for a future TUI override feature (M12):
+	SectionKeybindings: `keybindings — custom shortcuts are not supported yet.
 
-  keybindings:
-    quit: q
-
-The key is accepted today but not yet wired; remove it if you do not need it.`,
+This section is accepted but ignored. Press ? in the viewer for shortcuts.`,
 }

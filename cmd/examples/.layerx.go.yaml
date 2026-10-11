@@ -1,6 +1,5 @@
 # layerx Go starter config
-# Tighter thresholds because Go images are typically FROM scratch or
-# distroless and have very little legitimate slack.
+# Uses stricter efficiency thresholds. Adjust them for your image.
 version: 1
 
 # TUI colour theme.

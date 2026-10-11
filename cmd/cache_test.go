@@ -181,8 +181,8 @@ func TestCachePrune_FlagsMutuallyExclusive(t *testing.T) {
 	rootCmd.SetErr(&buf)
 	err := rootCmd.Execute()
 	require.Error(t, err)
-	// cobra's MarkFlagsMutuallyExclusive emits this exact phrasing.
-	assert.Contains(t, err.Error(), "none of the others can be")
+	assert.Contains(t, err.Error(), "use either --all or --older-than, not both")
+	assert.NotContains(t, buf.String(), "Usage:")
 }
 
 func TestCacheList_EndToEnd(t *testing.T) {
@@ -234,8 +234,8 @@ func TestCachePrune_AllDryRun_DoesNotTouchDisk(t *testing.T) {
 	// Bare prune is purely a dry run; the hint must point at the commands
 	// that actually remove entries so users don't think prune ran.
 	assert.Contains(t, out, "layerx cache prune --all")
-	assert.Contains(t, out, "--older-than DURATION")
-	assert.Contains(t, out, "--dry-run  preview")
+	assert.Contains(t, out, "--older-than 7d")
+	assert.Contains(t, out, "--dry-run # preview")
 
 	// Disk untouched.
 	for _, d := range []string{digestA, digestB} {
@@ -264,7 +264,7 @@ func TestCachePrune_ExplicitDryRun_NoHint(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "Would remove")
 	assert.NotContains(t, out, "Re-run with --all")
-	assert.NotContains(t, out, "--older-than DURATION")
+	assert.NotContains(t, out, "--older-than 7d")
 }
 
 // freezeRelativeTime overrides cmd's nowFn for the test and restores it

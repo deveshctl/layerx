@@ -31,7 +31,10 @@ func friendlyCLIError(err error) string {
 		return fmt.Sprintf("image %q not found", e.Ref)
 	}
 	if e, ok := errors.AsType[*image.ErrPullFailed](err); ok {
-		return fmt.Sprintf("failed to pull image %q: %v", e.Ref, e.Cause)
+		if e.Cause != nil {
+			return fmt.Sprintf("failed to pull image %q: %v", e.Ref, e.Cause)
+		}
+		return fmt.Sprintf("failed to pull image %q; check the image name and registry access", e.Ref)
 	}
 	if e, ok := errors.AsType[*image.ErrArchiveNotFound](err); ok {
 		return fmt.Sprintf("archive %q not found", e.Path)

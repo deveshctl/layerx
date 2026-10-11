@@ -49,7 +49,7 @@ func TestInit_DefaultGeneric_NonTTY(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "generic", flavour)
 	assert.Contains(t, stderr.String(), "generic")
-	assert.Contains(t, stderr.String(), "not a terminal")
+	assert.Contains(t, stderr.String(), "generic template")
 }
 
 // TestInit_RefusesOverwrite: an existing .layerx.yaml is not overwritten

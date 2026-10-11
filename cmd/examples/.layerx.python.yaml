@@ -1,5 +1,5 @@
 # layerx Python starter config
-# __pycache__ is the single most common Python image waste source.
+# Checks Python bytecode and package download caches. Review for your image.
 version: 1
 
 # TUI colour theme.

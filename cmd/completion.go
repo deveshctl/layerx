@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,29 +17,34 @@ func init() {
 
 var completionCmd = &cobra.Command{
 	Use:   "completion <shell>",
-	Short: "Generate shell completion script for bash, zsh, fish, or powershell",
-	Long: `Generate an autocompletion script for the specified shell.
+	Short: "Generate a shell completion script",
+	Long: `Generate tab completion for commands and flags. Image completion on the
+inspect command queries Docker by default, or Podman with --engine podman.
 
-The script enables tab completion for subcommands, flags, and image
-references (queried from the active container engine) in your current shell session.`,
-	Example: `  # Bash (current session)
+The examples load completion for the current session. Bash requires
+bash-completion; Zsh requires completion to be initialized with compinit.
+To load completion on startup, add the matching command to your shell profile.`,
+	Example: `  # Bash
   source <(layerx completion bash)
 
-  # Bash (system-wide install)
-  layerx completion bash | sudo tee /etc/bash_completion.d/layerx
-
   # Zsh
-  layerx completion zsh > "${fpath[1]}/_layerx"
+  autoload -Uz compinit && compinit
+  source <(layerx completion zsh)
 
   # Fish
   layerx completion fish | source
-  layerx completion fish > ~/.config/fish/completions/layerx.fish
 
   # PowerShell
   layerx completion powershell | Out-String | Invoke-Expression`,
 	DisableFlagsInUseLine: true,
 	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
-	Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+	SilenceUsage:          true,
+	Args: func(_ *cobra.Command, args []string) error {
+		if len(args) != 1 || (args[0] != "bash" && args[0] != "zsh" && args[0] != "fish" && args[0] != "powershell") {
+			return fmt.Errorf("choose a shell: bash, zsh, fish, or powershell\nExample: layerx completion bash")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		switch args[0] {
 		case "bash":

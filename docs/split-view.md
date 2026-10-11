@@ -11,7 +11,7 @@ For the rest of the interactive controls, see the [TUI keybindings](../README.md
 Press **`A`** (that's **Shift + a** — a capital A) while browsing an image. The file tree splits into two stacked panes:
 
 ```
-┌─ Layer Δ ──────────────────────────┐
+┌─ Layer changes ────────────────────┐
 │  what THIS layer changed           │   ← top: just the diff
 │  (added / modified / removed)      │
 ├─ ▾ Cumulative ─────────────────────┤
@@ -30,7 +30,7 @@ That's the whole feature. If you only remember one thing: **top is the change, b
 
 Say you're inspecting `nginx:latest` and you've selected the layer that runs `apt-get install nginx`.
 
-- The **top pane (Layer Δ)** shows only what that one command touched — the `nginx` binary, the config files under `/etc/nginx`, the handful of libraries it pulled in. Nothing else. If a file wasn't added, modified, or removed by this layer, it isn't here.
+- The **top pane (Layer changes)** shows only what that one command touched — the `nginx` binary, the config files under `/etc/nginx`, the handful of libraries it pulled in. Nothing else. If a file wasn't added, modified, or removed by this layer, it isn't here.
 - The **bottom pane (Cumulative)** shows the *entire* filesystem as it exists right after that layer runs — the base image's `/bin`, `/lib`, `/usr`, plus everything the earlier layers added, plus this layer's changes folded in. It's what you'd see if you `docker run` this image and stopped it at this layer.
 
 Select the next layer down and both panes move together: the top shows *that* layer's changes, the bottom shows the filesystem grown by one more layer.
@@ -56,7 +56,7 @@ Everything else works as normal inside whichever tree has focus — `Enter` open
 
 This is the part that trips people up, so it's worth being precise.
 
-| | Top pane — **Layer Δ** | Bottom pane — **Cumulative** |
+| | Top pane — **Layer changes** | Bottom pane — **Cumulative** |
 |---|---|---|
 | Shows | Only the files this layer added, modified, or removed | The full merged filesystem up to and including this layer |
 | Answers | "What did this build step do?" | "What does the image look like at this point?" |

@@ -44,10 +44,10 @@ func TestRenderFileTree_NoFilterRetainsBelowIndicator(t *testing.T) {
 func TestRenderFileTree_TitleSingleLayerMode(t *testing.T) {
 	files := fakeFiles(3)
 	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
-	if !strings.Contains(out, "Current Layer Contents") {
-		t.Fatalf("expected title to contain 'Current Layer Contents' when aggregated=false; got:\n%s", out)
+	if !strings.Contains(out, "Layer files") {
+		t.Fatalf("expected title to contain 'Layer files' when aggregated=false; got:\n%s", out)
 	}
-	if strings.Contains(out, "Aggregated Layer Contents") {
+	if strings.Contains(out, "Cumulative files") {
 		t.Fatalf("aggregated title leaked into single-layer mode")
 	}
 }
@@ -55,8 +55,8 @@ func TestRenderFileTree_TitleSingleLayerMode(t *testing.T) {
 func TestRenderFileTree_TitleAggregatedMode(t *testing.T) {
 	files := fakeFiles(3)
 	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, true, nil, 0)
-	if !strings.Contains(out, "Aggregated Layer Contents") {
-		t.Fatalf("expected title to contain 'Aggregated Layer Contents' when aggregated=true; got:\n%s", out)
+	if !strings.Contains(out, "Cumulative files") {
+		t.Fatalf("expected title to contain 'Cumulative files' when aggregated=true; got:\n%s", out)
 	}
 }
 
@@ -76,8 +76,8 @@ func TestRenderSplitFileTree_TitleShowsBothPanes(t *testing.T) {
 		botCollapsed: nil,
 		treeMode:     true,
 	})
-	if !strings.Contains(out, "Layer Δ") {
-		t.Fatalf("split title must include 'Layer Δ' for the top pane; got:\n%s", out)
+	if !strings.Contains(out, "Layer changes") {
+		t.Fatalf("split title must include 'Layer changes' for the top pane; got:\n%s", out)
 	}
 	if !strings.Contains(out, "Cumulative") {
 		t.Fatalf("split title must include 'Cumulative' for the bottom pane; got:\n%s", out)
@@ -103,13 +103,13 @@ func TestRenderSplitFileTree_DividerCarriesCumulativeLabel(t *testing.T) {
 	}
 }
 
-// In single-pane mode the file tree must not render the split's "Layer Δ"
+// In single-pane mode the file tree must not render the split's "Layer changes"
 // label — that title is reserved for the split layout.
 func TestRenderFileTree_SinglePaneOmitsSplitTitle(t *testing.T) {
 	files := fakeFiles(3)
 	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
-	if strings.Contains(out, "Layer Δ") {
-		t.Fatalf("single-pane file tree must not advertise the split title 'Layer Δ'; got:\n%s", out)
+	if strings.Contains(out, "Layer changes") {
+		t.Fatalf("single-pane file tree must not advertise the split title 'Layer changes'; got:\n%s", out)
 	}
 }
 

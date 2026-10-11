@@ -71,7 +71,7 @@ func (r BlockPathRule) Evaluate(ctx EvalContext) []RuleResult {
 					Passed:    false,
 					Actual:    node.Path,
 					Threshold: pat,
-					Detail:    fmt.Sprintf("layer %d (%s)", layer.Index, layer.ID),
+					Detail:    fmt.Sprintf("layer %d (%s)", layer.Index+1, layer.ID),
 				})
 				return
 			}

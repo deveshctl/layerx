@@ -24,91 +24,59 @@ func noCacheRequested() bool {
 
 var rootCmd = &cobra.Command{
 	Use:   "layerx [flags] IMAGE_OR_ARCHIVE",
-	Short: "Inspect container image layers (Docker, Podman, OCI archives)",
-	Long: `LayerX Image Inspector opens a container image's layers, filesystem
-changes, and wasted bytes.
+	Short: "Inspect container image layers and files",
+	Long: `Browse image layers, filesystem changes, and wasted space interactively.
 
-Common usage:
-  layerx IMAGE_OR_ARCHIVE    browse layers interactively in a TUI
-  layerx ci IMAGE_OR_ARCHIVE gate a build on efficiency thresholds
-  layerx compare A B        diff two images for regressions
-  layerx build [ARGS...]    build via the active engine, then inspect the result
+IMAGE_OR_ARCHIVE is a Docker or Podman image reference, a saved-image tar
+archive, or an OCI layout tarball. Archives need no running engine.
 
-IMAGE_OR_ARCHIVE accepts a container image reference (e.g. "nginx:latest") or
-a path to a local archive produced by "docker save" / "podman save" or an
-OCI-layout tarball. The two are auto-detected: an existing regular file is
-read directly without contacting any runtime; anything else is resolved via
-the active container engine (Docker or Podman). Archive mode needs no
-daemon, no network, and no running containers.
+Use --json to export analysis instead of opening the interactive viewer.
+With CI=true, inspection runs CI checks using config or default thresholds.
+Use "layerx ci" to set thresholds on the command line.
 
-Use --json to skip the TUI and export to a file. Set CI=true to make the
-bare form behave as "layerx ci" with config-file (or default) thresholds;
-threshold flags (--lowest-efficiency, --highest-wasted-bytes,
---highest-user-wasted-percent) are not accepted on this path — use
-"layerx ci --lowest-efficiency 0.95 IMAGE" to pass thresholds directly.
+Configuration: --config overrides automatic lookup in the current directory,
+parent directories, then the user configuration directory. Run "layerx init"
+to create .layerx.yaml.
 
-Theme: pass --theme to select a TUI colour scheme (default: tokyo-night).
-Valid values: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine,
-dracula, oxocarbon, cyberdream. Persists across runs when set via theme: in
-.layerx.yaml; --theme overrides the config-file value for a single run.
+Engines use the active Docker context or Podman connection. Use --engine to
+choose one and --platform OS/ARCH to select an image variant. Without
+--platform, the engine's default platform is used.
 
-Cache: results are cached per image digest. Use --no-cache to bypass for
-a single run; "layerx cache list" inspects entries and "layerx cache prune"
-evicts them (see "layerx cache --help" for full details).
-Engines: layerx honours the active Docker context ("docker context use ...")
-and the active Podman connection ("podman system connection default ...")
-so it talks to the same daemon your engine's own CLI would. DOCKER_HOST /
-CONTAINER_HOST still override. Pass --engine to force one engine.
-Platforms: pass --platform OS/ARCH (e.g. linux/arm64) to inspect a specific
-variant of a multi-platform image; layerx pulls and exports only that
-variant. Without --platform, the daemon's default platform is used.`,
-	Example: `  # Inspect an image interactively (Docker or Podman auto-detected)
-  layerx nginx:latest
+Themes: tokyo-night (default), catppuccin-mocha, kanagawa, gruvbox-dark,
+rose-pine, dracula, oxocarbon, cyberdream.
 
-  # Inspect a local archive produced by "docker save" or "podman save"
-  # (no daemon required)
+Documentation: https://github.com/deveshctl/layerx#readme`,
+	Example: `  layerx nginx:stable
   layerx ./build/app.tar
-
-  # Inspect an OCI layout tarball
-  layerx /tmp/myimage-oci.tar
-
-  # Force a fresh analysis, ignoring any cached result
-  layerx --no-cache nginx:latest
-
-  # Inspect a specific platform variant of a multi-platform image
-  layerx --platform linux/arm64 nginx:latest
-  layerx --platform linux/amd64 alpine:3
-
-  # Export analysis as JSON (skips the TUI; works with archives too)
-  layerx --json out.json ./build/app.tar
-
-  # Run efficiency checks (also triggered by CI=true)
-  layerx ci nginx:latest
-
-  # Use a different colour theme
-  layerx --theme dracula nginx:latest
-
-  # Use Podman instead of Docker (Linux: socket auto-detected)
+  layerx --platform linux/arm64 nginx:stable
+  layerx --json analysis.json ./build/app.tar
   layerx --engine podman alpine:3`,
-	Args: cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 1 {
+			return nil
+		}
+		cmd.SilenceUsage = true
+		return fmt.Errorf("expected 1 image or archive, got %d\nUsage: layerx [flags] IMAGE_OR_ARCHIVE\nExample: layerx nginx:stable\nRun layerx --help for options", len(args))
+	},
 	RunE: runInspect,
-	// SilenceUsage is intentionally left at its zero value (false) here —
-	// runInspect flips it to true on entry. This keeps the usage block
-	// visible for arg-validation failures (bare `layerx` with no image
-	// argument) where the help text IS the right response, while still
-	// silencing the 60-line dump for runtime errors (config parse, daemon
-	// down, image not found) once we've reached RunE.
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
-	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "bypass the analysis cache for this run; the run still writes the cache on success")
-	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "", "path to .layerx.yaml config file (default: walk up from CWD, then $XDG_CONFIG_HOME/layerx/config.yaml)")
-	rootCmd.Flags().StringVar(&flagTheme, "theme", "", "colour theme for the TUI (default: tokyo-night; valid: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream). Overrides theme: in .layerx.yaml.")
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		cmd.SilenceUsage = true
+		if cmd.SilenceErrors || rootCmd.SilenceErrors {
+			return presentCLIError(cmd.ErrOrStderr(), err)
+		}
+		return err
+	})
+	rootCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to `FILE` as JSON instead of opening the viewer")
+	rootCmd.PersistentFlags().BoolVar(&flagNoCacheFl, "no-cache", false, "run a fresh analysis and update the cache")
+	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "", "read configuration from `FILE` instead of automatic lookup")
+	rootCmd.Flags().StringVar(&flagTheme, "theme", "", "viewer colour theme (default: tokyo-night; see above for choices)")
 	rootCmd.PersistentFlags().Var(&engineValue{v: &engineFlag}, "engine",
-		`container engine to use: "docker", "podman", or "auto". Each engine honours its own active context/connection ("docker context use", "podman system connection default"); DOCKER_HOST / CONTAINER_HOST env vars still override`)
+		`container engine: docker, podman, or auto`)
 	rootCmd.PersistentFlags().StringVar(&platformFlag, "platform", "",
-		`target platform for multi-platform images (e.g. "linux/amd64", "linux/arm64", "linux/arm64/v8")`)
+		`image platform: OS/ARCH[/VARIANT] (e.g. linux/arm64)`)
 	_ = rootCmd.RegisterFlagCompletionFunc("platform", completePlatform)
 	_ = rootCmd.RegisterFlagCompletionFunc("theme", completeTheme)
 }
@@ -200,12 +168,7 @@ func ExecuteContext(ctx context.Context) error {
 }
 
 func runInspect(cmd *cobra.Command, args []string) error {
-	// Args validation has passed by the time RunE runs — from here on, any
-	// error is a runtime failure (bad config, daemon down, image not found)
-	// where cobra's default usage dump only buries the actual message. The
-	// rootCmd declaration deliberately leaves SilenceUsage at false so
-	// missing-argument errors still print usage; flip it now that we're
-	// past that gate.
+	// Runtime errors need a message, not the help page.
 	cmd.SilenceUsage = true
 
 	imageRef := args[0]

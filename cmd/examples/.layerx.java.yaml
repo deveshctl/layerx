@@ -1,6 +1,5 @@
 # layerx Java starter config
-# Targets the multi-stage-build mistake of copying target/ into the
-# runtime image instead of just the fat JAR.
+# Checks build caches and redundant build outputs. Review for your image.
 version: 1
 
 # TUI colour theme.
@@ -27,4 +26,4 @@ path-rules:
 
   deny-waste:
     - "**/*.jar.original"          # spring-boot rebuild artifact
-    - "**/target/**"               # Maven build output leaking into runtime
+    - "**/target/**"               # fail if earlier build outputs waste space

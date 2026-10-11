@@ -21,17 +21,18 @@ func TestOverlayHelp_WideTerminal_UsesHorizontalLayout(t *testing.T) {
 	m.showHelp = true
 	out := m.overlayHelp()
 	assert.Contains(t, out, "Layers")
-	assert.Contains(t, out, "File Tree")
-	assert.Contains(t, out, "Change = files in the image")
+	assert.Contains(t, m.helpContent(), "File Tree")
+	assert.Contains(t, m.helpContent(), "Change = files in the image")
 	// Both section titles appear on one screen without requiring only vertical stack order.
-	assert.True(t, strings.Index(out, "Navigation") < strings.Index(out, "Wasted Files"))
+	assert.True(t, strings.Index(m.helpContent(), "Navigation") < strings.Index(m.helpContent(), "Wasted Files"))
 }
 
 func TestOverlayHelp_NarrowTerminal_StillHasLayersSection(t *testing.T) {
 	m := setupModel()
 	m.width = 80
 	out := m.overlayHelp()
-	assert.Contains(t, out, "Cycle size: Change")
+	assert.Contains(t, m.helpContent(), "Cycle size: Change")
+	assert.Contains(t, out, "scroll")
 }
 
 func TestSizeModePanelSuffix(t *testing.T) {

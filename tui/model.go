@@ -242,6 +242,7 @@ type model struct {
 	statusIsError bool
 	statusGen     uint64
 	showHelp      bool
+	helpOffset    int
 	filterActive  bool
 	filterQuery   string
 	diffOnly      bool
@@ -604,8 +605,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.scheduleStatusClear(2 * time.Second)
 
 	case tea.KeyPressMsg:
+		// Help is a modal view: its navigation must not move the image cursor
+		// or clear a search behind it.
+		if m.showHelp {
+			switch {
+			case msg.Code == tea.KeyEscape || key.Matches(msg, m.keys.Help):
+				m.showHelp = false
+			case key.Matches(msg, m.keys.Down):
+				m.helpOffset++
+			case key.Matches(msg, m.keys.Up):
+				m.helpOffset--
+			case key.Matches(msg, m.keys.PageDown):
+				m.helpOffset += m.helpVisibleLines()
+			case key.Matches(msg, m.keys.PageUp):
+				m.helpOffset -= m.helpVisibleLines()
+			case key.Matches(msg, m.keys.Top):
+				m.helpOffset = 0
+			case key.Matches(msg, m.keys.Bottom):
+				m.helpOffset = m.helpMaxOffset()
+			case key.Matches(msg, m.keys.Quit):
+				m.quitting = true
+				m.cancelInflight()
+				return m, tea.Quit
+			}
+			m.helpOffset = max(0, min(m.helpOffset, m.helpMaxOffset()))
+			return m, nil
+		}
 		// Esc has precedence: viewer search → viewer → waste → filter
-		// (active) → filter (confirmed) → help. In stateReady Esc is
+		// (active) → filter (confirmed). In stateReady Esc is
 		// dismiss-only — falling through to tea.Quit caused mash-Esc on a
 		// closed viewer to silently quit the app, which Gate C in M08
 		// flagged as a regression. Esc still exits the loading and error
@@ -665,10 +692,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.aggOffset = 0
 				return m, nil
 			}
-			if m.showHelp {
-				m.showHelp = false
-				return m, nil
-			}
 			// In stateReady, Esc has nothing left to dismiss — swallow it.
 			// Quit is reserved for q / ctrl+c. In stateLoading and
 			// stateError the documented UX is "Press q or Esc to exit",
@@ -702,12 +725,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if key.Matches(msg, m.keys.Help) && m.state == stateReady {
-			m.showHelp = !m.showHelp
-			return m, nil
-		}
-
-		// When help is shown, swallow all other keys.
-		if m.showHelp {
+			m.showHelp = true
+			m.helpOffset = 0
 			return m, nil
 		}
 
@@ -2018,18 +2037,25 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"S", "size"},
 			{"d", "diff"},
 			{"s", "sort"},
-			{"c", "copy cmd"},
+			{"c", "copy command"},
 			{"w", "wasted"},
 			{"A", "split"},
 			{"?", "help"},
 			{"q", "quit"},
 		}
 	} else {
-		enterDesc := "view"
+		enterDesc := ""
 		activeCursor := m.treeCursorFor(m.activeTreeFocus())
-		if !compact && m.useTreeCollapse() &&
-			activeCursor < len(treeFiles) && treeFiles[activeCursor].IsDir {
-			enterDesc = "toggle"
+		canView := activeCursor < len(treeFiles) && !treeFiles[activeCursor].IsDir && treeFiles[activeCursor].DiffType != image.Removed
+		if canView {
+			enterDesc = "view"
+		} else if activeCursor < len(treeFiles) && treeFiles[activeCursor].IsDir {
+			if m.useTreeCollapse() {
+				enterDesc = "collapse"
+				if m.collapsedFor(m.activeTreeFocus())[treeFiles[activeCursor].Path] {
+					enterDesc = "expand"
+				}
+			}
 		}
 		hints = []hint{
 			{"Tab", "switch"},
@@ -2039,11 +2065,17 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"s", "sort"},
 			{"w", "wasted"},
 			{"A", "split"},
-			{"Enter", enterDesc},
-			{"x", "save"},
-			{"y", "copy path"},
-			{"?", "help"},
 		}
+		if enterDesc != "" {
+			hints = append(hints, hint{"Enter", enterDesc})
+		}
+		if canView {
+			hints = append(hints, hint{"x", "save"})
+		}
+		if activeCursor < len(treeFiles) {
+			hints = append(hints, hint{"y", "copy path"})
+		}
+		hints = append(hints, hint{"?", "help"})
 	}
 
 	var hintStr string
@@ -2120,6 +2152,10 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 }
 
 func (m model) renderViewerStatusBar() string {
+	escapeHint := "close"
+	if m.viewSearchActive || m.viewSearchQuery != "" {
+		escapeHint = "clear search"
+	}
 	keyStyle := m.styles.statusKey
 	descStyle := m.styles.statusDim
 	sepStyle := m.styles.headerSep
@@ -2135,7 +2171,7 @@ func (m model) renderViewerStatusBar() string {
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("Y") + " " + descStyle.Render("copy") + " " +
 		sepStyle.Render("│") + " " +
-		keyStyle.Render("Esc") + " " + descStyle.Render("close") + " " +
+		keyStyle.Render("Esc") + " " + descStyle.Render(escapeHint) + " " +
 		sepStyle.Render("│") + " " +
 		keyStyle.Render("q") + " " + descStyle.Render("quit")
 
@@ -2438,7 +2474,7 @@ func friendlyError(err error) string {
 			if daemonErr.Host != "" {
 				return fmt.Sprintf("Docker daemon at %s is not reachable. Please check the daemon and try again.", daemonErr.Host) + archiveHint
 			}
-			return "Docker is not running. Please start Docker and try again." + archiveHint
+			return "Docker daemon is not reachable. Check that Docker is running." + archiveHint
 		case "podman":
 			if daemonErr.Host != "" {
 				return fmt.Sprintf("Podman connection at %s is not reachable. Please check the connection and try again.", daemonErr.Host) + archiveHint
@@ -2452,9 +2488,15 @@ func friendlyError(err error) string {
 		}
 	}
 	if pullErr, ok := errors.AsType[*image.ErrPullFailed](err); ok {
-		return fmt.Sprintf("Failed to pull image %q. Check the image name and your network.", pullErr.Ref)
+		if pullErr.Cause != nil {
+			return fmt.Sprintf("Failed to pull image %q: %v", pullErr.Ref, pullErr.Cause)
+		}
+		return fmt.Sprintf("Failed to pull image %q. Check the image name and registry access.", pullErr.Ref)
 	}
 	if notFoundErr, ok := errors.AsType[*image.ErrImageNotFound](err); ok {
+		if notFoundErr.Cause != nil {
+			return fmt.Sprintf("Image %q not found: %v", notFoundErr.Ref, notFoundErr.Cause)
+		}
 		return fmt.Sprintf("Image %q not found.", notFoundErr.Ref)
 	}
 	if archErr, ok := errors.AsType[*image.ErrArchiveNotFound](err); ok {

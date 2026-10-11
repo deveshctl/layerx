@@ -32,9 +32,9 @@ func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, of
 		showHeader:   true,
 	})
 
-	title := "Current Layer Contents"
+	title := "Layer files"
 	if aggregated {
-		title = "Aggregated Layer Contents"
+		title = "Cumulative files"
 	}
 	if len(files) > 0 {
 		title = fmt.Sprintf("%s %d/%d", title, cursor+1, len(files))
@@ -280,14 +280,14 @@ func renderSplitDivider(st themeStyles, botFocused bool, contentWidth int, botFi
 	return rendered + lineStyle.Render(strings.Repeat("─", rest))
 }
 
-// buildSplitTitle assembles "Layer Δ N/M  ·  Cumulative" with the focused
+// buildSplitTitle assembles "Layer changes N/M  ·  Cumulative" with the focused
 // half emphasised. The bottom-pane match counter is duplicated in the
 // divider for visibility, but the title's purpose is to advertise the
 // split and let the user see at a glance which view has focus.
 func buildSplitTitle(in splitTreeInput) string {
-	topPart := "Layer Δ"
+	topPart := "Layer changes"
 	if len(in.topFiles) > 0 {
-		topPart = fmt.Sprintf("Layer Δ %d/%d", in.topCursor+1, len(in.topFiles))
+		topPart = fmt.Sprintf("Layer changes %d/%d", in.topCursor+1, len(in.topFiles))
 	} else if in.filterQuery != "" {
 		topPart += " 0/0"
 	}
@@ -414,7 +414,7 @@ func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected boo
 	var originSuffix string
 	showOrigin := !f.IsDir && f.DiffType != image.Added && f.IntroducedInLayer != currentLayer
 	if showOrigin {
-		originSuffix = fmt.Sprintf(" (L%d)", f.IntroducedInLayer)
+		originSuffix = fmt.Sprintf(" (L%d)", f.IntroducedInLayer+1)
 	}
 
 	fullName := treePrefix + displayName

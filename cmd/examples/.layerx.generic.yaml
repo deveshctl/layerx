@@ -1,6 +1,6 @@
 # layerx generic starter config
 # Catches version-control metadata and editor scratch files in any image.
-# No language-specific assumptions — safe baseline for any team.
+# Review these patterns for your image before using them in CI.
 version: 1
 
 # TUI colour theme.
@@ -20,11 +20,11 @@ rules:
 
 path-rules:
   block:
-    - "**/.git/**"           # git metadata never belongs in a runtime image
+    - "**/.git/**"           # version-control metadata
     - "**/.svn/**"
     - "**/.hg/**"
     - "/tmp/**"              # build-time temp files
     - "/var/tmp/**"
-    - "**/.DS_Store"         # macOS finder droppings
-    - "**/Thumbs.db"         # Windows explorer droppings
+    - "**/.DS_Store"         # macOS Finder metadata
+    - "**/Thumbs.db"         # Windows Explorer metadata
     - "**/*.swp"             # vim swap files
