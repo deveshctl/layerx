@@ -65,14 +65,11 @@ func renderCommandBar(st themeStyles, cmd string, width int) string {
 	maxLines := 3
 	wrappedLines := wrapCommandLines(cmd, width-2, maxLines)
 
-	// Determine the count of non-empty wrapped lines so we don't emit
-	// trailing newlines for unfilled rows. wrapCommandLines preserves a
-	// fixed-length return for caller-test stability; the fixup happens
-	// here at render time.
+	// Keep blank rows inside the command; omit only unused trailing rows.
 	filled := 0
-	for _, wl := range wrappedLines {
+	for i, wl := range wrappedLines {
 		if wl != "" {
-			filled++
+			filled = i + 1
 		}
 	}
 
@@ -107,32 +104,15 @@ func highlightInstruction(st themeStyles, line string) string {
 }
 
 func wrapCommandLines(cmd string, width int, maxLines int) []string {
-	lines := make([]string, maxLines)
-	runes := []rune(cmd)
-
-	for i := range maxLines {
-		if len(runes) == 0 {
-			break
-		}
-		if len(runes) <= width {
-			lines[i] = string(runes)
-			break
-		}
-		if i == maxLines-1 {
-			lines[i] = string(runes[:width-1]) + "…"
-			break
-		}
-		breakAt := width
-		for j := width - 1; j >= width/2; j-- {
-			if runes[j] == ' ' {
-				breakAt = j
-				break
-			}
-		}
-		lines[i] = string(runes[:breakAt])
-		runes = []rune(strings.TrimLeft(string(runes[breakAt:]), " "))
+	lines := make([]string, max(maxLines, 0))
+	if width <= 0 || maxLines <= 0 || cmd == "" {
+		return lines
 	}
-
+	wrapped := strings.Split(ansi.Wrap(cmd, width, ""), "\n")
+	copy(lines, wrapped)
+	if len(wrapped) > maxLines {
+		lines[maxLines-1] = ansi.Truncate(lines[maxLines-1]+"…", width, "…")
+	}
 	return lines
 }
 

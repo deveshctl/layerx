@@ -15,22 +15,22 @@ import (
 func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
 
-	body, hasAbove, hasBelow := renderTreeBody(treePaneInput{
-		theme:        t,
-		styles:       st,
-		files:        files,
-		cursor:       cursor,
-		offset:       offset,
-		contentWidth: contentWidth,
-		bodyHeight:   height,
+	in := treePaneInput{
+		theme:         t,
+		styles:        st,
+		files:         files,
+		cursor:        cursor,
+		offset:        offset,
+		contentWidth:  contentWidth,
+		bodyHeight:    height,
 		showFilterBar: filterActive || filterQuery != "",
-		filterActive: filterActive,
-		filterQuery:  filterQuery,
-		treeMode:     treeMode,
-		collapsed:    collapsed,
-		currentLayer: currentLayer,
-		showHeader:   true,
-	})
+		filterActive:  filterActive,
+		filterQuery:   filterQuery,
+		treeMode:      treeMode,
+		collapsed:     collapsed,
+		currentLayer:  currentLayer,
+		showHeader:    true,
+	}
 
 	title := "Layer files"
 	if aggregated {
@@ -42,7 +42,12 @@ func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, of
 		title = title + " 0/0"
 	}
 
-	return renderPanel(t, body, title, focused, contentWidth, height, hasAbove, hasBelow)
+	return renderTreePanel(in, title, focused)
+}
+
+func renderTreePanel(in treePaneInput, title string, focused bool) string {
+	body, above, below := renderTreeBody(in)
+	return renderPanel(in.theme, body, title, focused, in.contentWidth, in.bodyHeight, above, below)
 }
 
 type treePaneInput struct {
@@ -71,28 +76,15 @@ type treePaneInput struct {
 }
 
 func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
-	contentHeight := in.bodyHeight
-	if in.showFilterBar {
-		contentHeight--
-	}
-	if in.showHeader {
-		contentHeight--
-	}
-	if contentHeight < 0 {
-		contentHeight = 0
-	}
+	headerRows, contentHeight := treePaneRows(in.bodyHeight, in.showHeader, in.showFilterBar)
 
 	var sb strings.Builder
 
-	if in.showHeader {
+	if headerRows > 0 {
 		sb.WriteString(renderTreeHeader(in.styles, in.contentWidth))
 		sb.WriteString("\n")
 		sb.WriteString(renderDivider(in.theme, in.contentWidth))
 		sb.WriteString("\n")
-		contentHeight--
-		if contentHeight < 0 {
-			contentHeight = 0
-		}
 	}
 
 	if len(in.files) == 0 {
@@ -163,17 +155,17 @@ type splitTreeInput struct {
 	treeMode      bool
 
 	// Top sub-pane: per-layer Δ from StackedTrees.
-	topFiles    []*image.FileNode
-	topCursor   int
-	topOffset   int
-	topFocused  bool
+	topFiles     []*image.FileNode
+	topCursor    int
+	topOffset    int
+	topFocused   bool
 	topCollapsed map[string]bool
 
 	// Bottom sub-pane: cumulative provenance from AggregatedTrees.
-	botFiles    []*image.FileNode
-	botCursor   int
-	botOffset   int
-	botFocused  bool
+	botFiles     []*image.FileNode
+	botCursor    int
+	botOffset    int
+	botFocused   bool
 	botCollapsed map[string]bool
 
 	// Filter is shared across panes (same query applies to both); but the
@@ -197,10 +189,13 @@ type splitTreeInput struct {
 // pixel-perfect.
 func renderSplitFileTree(in splitTreeInput) string {
 	contentWidth := in.width - 2
+	if !splitTreeFits(in.height, in.filterActive || in.filterQuery != "") {
+		return renderCompactSplitTree(in)
+	}
 	// in.height is the number of content rows the outer panel exposes
 	// (renderPanel adds the two border rows on top of it). Match the
 	// signature of renderFileTree, which is passed the same value.
-	totalContent := max(in.height, 4)
+	totalContent := in.height
 
 	topRows, botRows := splitPanelRows(totalContent)
 
@@ -252,6 +247,24 @@ func renderSplitFileTree(in splitTreeInput) string {
 	return renderPanel(in.theme, body, title, focused, contentWidth, in.height, hasAbove, hasBelow)
 }
 
+func renderCompactSplitTree(in splitTreeInput) string {
+	pane := treePaneInput{
+		theme: in.theme, styles: in.styles, files: in.topFiles,
+		cursor: in.topCursor, offset: in.topOffset, collapsed: in.topCollapsed,
+		contentWidth: in.width - 2, bodyHeight: in.height,
+		showHeader: true, showFilterBar: in.filterActive || in.filterQuery != "",
+		filterActive: in.filterActive, filterQuery: in.filterQuery,
+		treeMode: in.treeMode, currentLayer: in.currentLayer,
+	}
+	label := "Layer changes"
+	if in.botFocused {
+		pane.files, pane.cursor, pane.offset, pane.collapsed = in.botFiles, in.botCursor, in.botOffset, in.botCollapsed
+		label = "Cumulative"
+	}
+	title := fmt.Sprintf("%s %d/%d · compact", label, min(pane.cursor+1, len(pane.files)), len(pane.files))
+	return renderTreePanel(pane, title, in.topFocused || in.botFocused)
+}
+
 // renderSplitDivider draws the horizontal separator between the two
 // sub-panes. The bottom pane's section label sits in the divider with a
 // match-count and a focus-weight background when that pane has focus.
@@ -274,7 +287,7 @@ func renderSplitDivider(st themeStyles, botFocused bool, contentWidth int, botFi
 		lineStyle = st.separator
 	}
 
-	rendered := labelStyle.Render(label)
+	rendered := labelStyle.Render(ansi.Truncate(label, max(contentWidth, 0), "…"))
 	labelW := lipgloss.Width(rendered)
 	rest := max(contentWidth-labelW, 0)
 	return rendered + lineStyle.Render(strings.Repeat("─", rest))
@@ -340,21 +353,11 @@ func renderTreeHeader(st themeStyles, maxWidth int) string {
 
 func renderFilterBar(st themeStyles, active bool, query string, matchCount int, maxWidth int) string {
 	if active {
-		prefix := st.accent.Render("/ ")
-		cursor := query + "█"
-		return prefix + cursor
+		return renderQueryBar(st, query, true, "", "", maxWidth)
 	}
-	prefix := st.accent.Render("/ ")
-	queryStr := st.selected.Render(query)
 	matches := st.statusDimRaw.Render(fmt.Sprintf("  (%d matches)", matchCount))
 	hint := st.unchanged.Render("  [⌫ clear]")
-
-	line := prefix + queryStr + matches + hint
-	lineWidth := lipgloss.Width(line)
-	if lineWidth > maxWidth {
-		line = prefix + queryStr + matches
-	}
-	return line
+	return renderQueryBar(st, query, false, matches, hint, maxWidth)
 }
 
 func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {

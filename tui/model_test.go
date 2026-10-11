@@ -2567,7 +2567,7 @@ func setupModelTallTree(fileCount int) model {
 
 	m := NewModel(Config{ImageRef: "test:latest"})
 	m.width = 120
-	// height 20 → treeVisibleHeightFor(focusTree) = 20 - 8 - 1 = 11 rows.
+	// height 20 → treeVisibleHeightFor(focusTree) = 20 - 8 - 2 = 10 rows.
 	m.height = 20
 	m.state = stateReady
 	m.analysis = &image.Analysis{

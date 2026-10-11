@@ -12,25 +12,25 @@ import (
 )
 
 type viewerParams struct {
-	content      *image.FileContent
+	content *image.FileContent
 	// lines is the plain-text split of content.Data, computed once on file open
 	// and cached on the model. The renderer reads it instead of re-splitting the
 	// body every frame. nil is tolerated (falls back to a single empty line).
-	lines        []string
-	offset       int
-	hOffset      int
-	cursorCol    int
-	width        int
-	height       int
-	loading      bool
-	spinnerFrame int
-	originLayer  int
-	originCmd    string
-	currentLayer int
-	searchQuery  string
+	lines         []string
+	offset        int
+	hOffset       int
+	cursorCol     int
+	width         int
+	height        int
+	loading       bool
+	spinnerFrame  int
+	originLayer   int
+	originCmd     string
+	currentLayer  int
+	searchQuery   string
 	searchMatches [][2]int
-	searchCursor int
-	searchActive bool
+	searchCursor  int
+	searchActive  bool
 	// highlightedLines is the cached chroma output for content.Data, or nil if
 	// highlighting hasn't been computed yet or is unavailable. When non-nil and
 	// no search is active, it is used directly to skip per-frame chroma work.
@@ -287,32 +287,14 @@ func renderViewerLine(st themeStyles, line string, lineIdx int, query string, ma
 }
 
 func renderViewerSearchBar(p viewerParams, query string, active bool, matchCount, cursor, maxWidth int) string {
-	prefix := p.styles.accent.Render("/ ")
-	if active {
-		cursorChar := p.styles.selected.Render("█")
-		queryStr := p.styles.selected.Render(query)
-		line := prefix + queryStr + cursorChar
-		if matchCount > 0 {
-			counter := p.styles.statusDimRaw.Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
-			line += counter
-		} else if query != "" {
-			line += p.styles.statusDimRaw.Render("  (no matches)")
-		}
-		return line
-	}
-	queryStr := p.styles.selected.Render(query)
 	var counter string
 	if matchCount > 0 {
 		counter = p.styles.statusDimRaw.Render(fmt.Sprintf("  (%d/%d)", cursor+1, matchCount))
-	} else {
+	} else if query != "" || !active {
 		counter = p.styles.statusDimRaw.Render("  (no matches)")
 	}
 	hint := p.styles.unchanged.Render("  [Esc clear]")
-	line := prefix + queryStr + counter + hint
-	if lipgloss.Width(line) > maxWidth {
-		line = prefix + queryStr + counter
-	}
-	return line
+	return renderQueryBar(p.styles, query, active, counter, hint, maxWidth)
 }
 
 func fileViewLineCount(content *image.FileContent) int {
