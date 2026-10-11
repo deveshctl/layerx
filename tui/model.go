@@ -243,6 +243,7 @@ type model struct {
 	statusGen     uint64
 	showHelp      bool
 	helpOffset    int
+	errorOffset   int
 	filterActive  bool
 	filterQuery   string
 	diffOnly      bool
@@ -430,6 +431,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateReady {
 			m.clampCursors()
 		}
+		if m.state == stateError {
+			m.errorOffset = min(m.errorOffset, m.errorMaxOffset())
+		}
 		return m, nil
 
 	case spinnerTickMsg:
@@ -474,6 +478,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = stateError
 			m.errMsg = friendlyError(msg.err)
+			m.errorOffset = 0
 			return m, nil
 		}
 		m.state = stateReady
@@ -716,6 +721,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.state == stateError {
+			switch {
+			case key.Matches(msg, m.keys.Down):
+				m.errorOffset++
+			case key.Matches(msg, m.keys.Up):
+				m.errorOffset--
+			case key.Matches(msg, m.keys.PageDown):
+				m.errorOffset += m.errorVisibleLines()
+			case key.Matches(msg, m.keys.PageUp):
+				m.errorOffset -= m.errorVisibleLines()
+			case key.Matches(msg, m.keys.Top):
+				m.errorOffset = 0
+			case key.Matches(msg, m.keys.Bottom):
+				m.errorOffset = m.errorMaxOffset()
+			}
+			m.errorOffset = max(0, min(m.errorOffset, m.errorMaxOffset()))
+			return m, nil
+		}
+
 		if m.filterActive {
 			return m.handleFilterInput(msg)
 		}
@@ -809,6 +833,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case focusTreeAgg:
 				m.focus = focusLayers
 			}
+			m.clampCursors()
 			return m, nil
 
 		case key.Matches(msg, m.keys.SizeColumn):
@@ -1643,31 +1668,17 @@ func (m *model) layerVisibleHeight() int {
 // the column-header and filter-bar overhead subtracted from each.
 func (m *model) treeVisibleHeightFor(f focus) int {
 	totalContent := m.height - 8 // chrome rows excluded; matches viewReady
-	if !m.aggregated {
-		// Single pane: one column header, plus filter bar when present.
-		h := totalContent - 1
-		if m.filterQuery != "" || m.filterActive {
-			h--
+	showFilter := m.filterQuery != "" || m.filterActive
+	if m.aggregated && splitTreeFits(totalContent, showFilter) {
+		top, bottom := splitPanelRows(totalContent)
+		totalContent = top
+		if f == focusTreeAgg {
+			totalContent = bottom
 		}
-		return h
+		showFilter = showFilter && m.focus == f
 	}
-	// Split: top pane gets ceil(half), bottom gets floor(half), minus a
-	// 1-row horizontal divider between them. Each half pays its own
-	// column-header (1 row); the filter bar belongs only to the focused
-	// half so the un-focused half keeps an extra row of content.
-	topHalf, bottomHalf := splitPanelRows(totalContent)
-	if f == focusTreeAgg {
-		h := bottomHalf - 1 // column header
-		if (m.filterQuery != "" || m.filterActive) && m.focus == focusTreeAgg {
-			h--
-		}
-		return h
-	}
-	h := topHalf - 1
-	if (m.filterQuery != "" || m.filterActive) && m.focus != focusTreeAgg {
-		h--
-	}
-	return h
+	_, rows := treePaneRows(totalContent, true, showFilter)
+	return rows
 }
 
 // splitPanelRows divides total content rows between top and bottom
@@ -1879,19 +1890,38 @@ func (m model) renderRightPanel(width, height int) string {
 }
 
 func (m model) viewError() tea.View {
-	// Bound the message width so a long error (e.g. a daemon-down line with
-	// its archive-mode hint) wraps instead of overflowing a narrow terminal.
-	wrapWidth := 60
-	if m.width > 0 && m.width-4 < wrapWidth {
-		wrapWidth = m.width - 4
+	lines := m.errorLines()
+	height := min(m.errorVisibleLines(), len(lines))
+	offset := min(m.errorOffset, max(len(lines)-height, 0))
+	errStyle := lipgloss.NewStyle().Foreground(m.theme.Removed).Bold(true)
+	msg := errStyle.Render(strings.Join(lines[offset:offset+height], "\n"))
+	hint := "Press q or Esc to exit."
+	if len(lines) > height {
+		hint = "↑/↓ scroll · PgUp/PgDn page · q/Esc exit"
 	}
-	if wrapWidth < 1 {
-		wrapWidth = 1
+	if m.height > 2 {
+		msg += "\n\n"
+	} else if height > 0 {
+		msg += "\n"
 	}
-	errStyle := lipgloss.NewStyle().Foreground(m.theme.Removed).Bold(true).Width(wrapWidth)
-	msg := errStyle.Render("Error: "+m.errMsg) + "\n\n" + m.styles.statusDimRaw.Render("Press q or Esc to exit.")
+	msg += m.styles.statusDimRaw.Render(ansi.Truncate(hint, max(m.width, 0), ""))
 	content := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 	return finalizeView(tea.NewView(content), m.viewBg())
+}
+
+func (m model) errorLines() []string {
+	return strings.Split(ansi.Wrap("Error: "+m.errMsg, max(min(60, m.width-4), 1), ""), "\n")
+}
+
+func (m model) errorVisibleLines() int {
+	if m.height < 3 {
+		return max(m.height-1, 0)
+	}
+	return m.height - 3 // two spacing rows and a persistent exit/scroll hint
+}
+
+func (m model) errorMaxOffset() int {
+	return max(len(m.errorLines())-m.errorVisibleLines(), 0)
 }
 
 func (m model) viewReady() tea.View {
@@ -1998,39 +2028,38 @@ func (m model) renderHeader() string {
 	glyph := m.styles.accentBg.Render("◆")
 	brand := m.styles.accentBg.Bold(true).Render(" layerx")
 	sep := m.styles.headerSep.Render(" │ ")
-	imageName := m.styles.bgOnly.Render(m.renderedImageRef)
-	left := glyph + brand + sep + imageName
+	prefix := glyph + brand + sep
+	platform := ""
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant
 	// is on screen — easy to misread an arm64 layout as amd64.
 	if m.platform != "" {
-		left += sep + m.styles.headerDimBg.Render(m.platform)
+		platform = sep + m.styles.headerDimBg.Render(m.platform)
 	}
 
 	totalSize := image.FormatBytes(m.analysis.TotalSize)
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
 	right := m.styles.headerDimBg.Render(layerCount + " · " + totalSize)
-
-	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-1, 1)
-
-	return m.styles.bgOnly.Render(" " + left + strings.Repeat(" ", gap) + right)
+	imageWidth := m.width - lipgloss.Width(prefix+platform+right) - 2
+	if imageWidth < 12 {
+		// The selected platform is more useful than totals on a narrow header.
+		right = ""
+		imageWidth = m.width - lipgloss.Width(prefix+platform) - 2
+	}
+	imageName := ansi.Truncate(m.renderedImageRef, max(imageWidth, 0), "…")
+	left := " " + prefix + imageName + platform
+	gap := max(m.width-lipgloss.Width(left+right), 0)
+	return m.styles.bgOnly.Render(ansi.Truncate(left+strings.Repeat(" ", gap)+right, max(m.width, 0), "…"))
 }
 
 func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	if m.viewState != viewNone {
 		return m.renderViewerStatusBar()
 	}
-	keyStyle := m.styles.statusKey
-	descStyle := m.styles.statusDim
-	sepStyle := m.styles.headerSep
-
-	type hint struct{ key, desc string }
-	var hints []hint
-
-	compact := m.width < 90
+	var hints []statusHint
 
 	if m.focus == focusLayers {
-		hints = []hint{
+		hints = []statusHint{
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
 			{"g/G", "top/bottom"},
@@ -2057,7 +2086,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 				}
 			}
 		}
-		hints = []hint{
+		hints = []statusHint{
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
 			{"/", "filter"},
@@ -2067,30 +2096,15 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"A", "split"},
 		}
 		if enterDesc != "" {
-			hints = append(hints, hint{"Enter", enterDesc})
+			hints = append(hints, statusHint{"Enter", enterDesc})
 		}
 		if canView {
-			hints = append(hints, hint{"x", "save"})
+			hints = append(hints, statusHint{"x", "save"})
 		}
 		if activeCursor < len(treeFiles) {
-			hints = append(hints, hint{"y", "copy path"})
+			hints = append(hints, statusHint{"y", "copy path"})
 		}
-		hints = append(hints, hint{"?", "help"})
-	}
-
-	var hintStr string
-	if compact {
-		parts := make([]string, len(hints))
-		for i, h := range hints {
-			parts[i] = keyStyle.Render(h.key)
-		}
-		hintStr = " " + strings.Join(parts, " ")
-	} else {
-		var parts []string
-		for _, h := range hints {
-			parts = append(parts, keyStyle.Render(h.key)+" "+descStyle.Render(h.desc))
-		}
-		hintStr = " " + strings.Join(parts, " "+sepStyle.Render("│")+" ")
+		hints = append(hints, statusHint{"?", "help"})
 	}
 
 	layers := m.layers()
@@ -2105,11 +2119,12 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		right = m.styles.addedBg.Render("Copied!") + " "
 	} else {
 		badges := ""
+		waste := ""
 		if m.efficiency != nil {
 			pct := int(m.efficiency.Score * 100)
 			effStr := fmt.Sprintf("Eff: %d%%", pct)
 			if m.efficiency.WastedBytes > 0 {
-				effStr += " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
+				waste = " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
 			}
 			badges += m.styles.accentBg.Render("["+effStr+"]") + " "
 		}
@@ -2117,7 +2132,11 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			badges += m.styles.modifiedBg.Render("[diff]") + " "
 		}
 		if m.aggregated {
-			badges += m.styles.accentBg.Render("[split]") + " "
+			label := "[split]"
+			if !splitTreeFits(m.height-8, m.filterActive || m.filterQuery != "") {
+				label = "[compact]"
+			}
+			badges += m.styles.accentBg.Render(label) + " "
 		}
 		switch m.sortMode {
 		case sortDesc:
@@ -2142,13 +2161,10 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 				sizeLabel = "stored " + size + " · change " + image.FormatSignedBytes(layers[m.layerCursor].NetDelta)
 			}
 		}
-		rightDim := m.styles.statusDim.Render("/" + layerTotal + " · " + sizeLabel)
-		right = badges + rightHighlight + rightDim + " "
+		rightDim := m.styles.statusDim.Render("/" + layerTotal + " ")
+		right = rightHighlight + rightDim + badges + m.styles.statusDim.Render(sizeLabel+waste) + " "
 	}
-
-	gap := max(m.width-lipgloss.Width(hintStr)-lipgloss.Width(right), 0)
-
-	return m.styles.bgOnly.Render(hintStr + strings.Repeat(" ", gap) + right)
+	return renderStatusLine(m.styles, hints, right, m.width)
 }
 
 func (m model) renderViewerStatusBar() string {
@@ -2156,24 +2172,10 @@ func (m model) renderViewerStatusBar() string {
 	if m.viewSearchActive || m.viewSearchQuery != "" {
 		escapeHint = "clear search"
 	}
-	keyStyle := m.styles.statusKey
-	descStyle := m.styles.statusDim
-	sepStyle := m.styles.headerSep
-
-	hints := " " +
-		keyStyle.Render("j/k") + " " + descStyle.Render("up/down") + " " +
-		sepStyle.Render("│") + " " +
-		keyStyle.Render("h/l") + " " + descStyle.Render("left/right") + " " +
-		sepStyle.Render("│") + " " +
-		keyStyle.Render("/") + " " + descStyle.Render("search") + " " +
-		sepStyle.Render("│") + " " +
-		keyStyle.Render("n/N") + " " + descStyle.Render("next/prev") + " " +
-		sepStyle.Render("│") + " " +
-		keyStyle.Render("Y") + " " + descStyle.Render("copy") + " " +
-		sepStyle.Render("│") + " " +
-		keyStyle.Render("Esc") + " " + descStyle.Render(escapeHint) + " " +
-		sepStyle.Render("│") + " " +
-		keyStyle.Render("q") + " " + descStyle.Render("quit")
+	hints := []statusHint{
+		{"j/k", "up/down"}, {"h/l", "left/right"}, {"/", "search"},
+		{"n/N", "next/prev"}, {"Y", "copy"}, {"Esc", escapeHint}, {"q", "quit"},
+	}
 
 	var right string
 	if m.copyConfirm {
@@ -2191,9 +2193,7 @@ func (m model) renderViewerStatusBar() string {
 		right = m.styles.statusDim.Render(fmt.Sprintf("Line %d/%d (%d%%) ", line, total, pct))
 	}
 
-	gap := max(m.width-lipgloss.Width(hints)-lipgloss.Width(right), 0)
-
-	return m.styles.bgOnly.Render(hints + strings.Repeat(" ", gap) + right)
+	return renderStatusLine(m.styles, hints, right, m.width)
 }
 
 func (m model) fetchFileContent(ctx context.Context, path string, requestID uint64) tea.Cmd {
