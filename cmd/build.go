@@ -25,6 +25,8 @@ func (e *ErrBuildFailed) Error() string {
 
 var runBuildCommand = func(c *exec.Cmd) error { return c.Run() }
 
+var runBuildTUI = tui.Run
+
 var lookPath = exec.LookPath
 
 var buildCmd = &cobra.Command{
@@ -54,7 +56,8 @@ layerx asks the engine to write the image ID to a temporary file via
 --iidfile. If you pass --iidfile yourself, your value is used and respected.
 
 On a successful build, layerx hands the image ID off to the TUI exactly as
-"layerx IMAGE" would. On a failed build, layerx exits with the engine's
+"layerx IMAGE" would. With --json, it writes the analysis to the requested
+file instead of opening the TUI. On a failed build, layerx exits with the engine's
 exit code and does not launch the TUI.
 
 Flag ordering: layerx flags (--engine, --no-cache, --json) must appear
@@ -65,6 +68,9 @@ verbatim to the engine and layerx never sees them:
   layerx build --engine podman -t myimage .   # wrong: --engine forwarded to engine`,
 	Example: `  # Build the current directory and inspect the result
   layerx build -t myimage .
+
+  # Build and export analysis without opening the interactive viewer
+  layerx --json analysis.json build -t myimage .
 
   # Multiple tags — layerx inspects the image ID, which all tags share
   layerx build -t myimage:latest -t myimage:1.2.3 .
@@ -147,6 +153,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		imageRef = id
 	}
 
+	if flagJSON != "" {
+		if _, err := loadConfig(cmd); err != nil {
+			return err
+		}
+		return runJSONExport(cmd.Context(), imageRef, flagJSON, noCacheRequested())
+	}
+
 	resolver, err := selectResolver(imageRef)
 	if err != nil {
 		return err
@@ -161,7 +174,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return tui.Run(tui.Config{
+	return runBuildTUI(tui.Config{
 		ImageRef:      imageRef,
 		Resolver:      resolver,
 		NoCache:       noCacheRequested(),

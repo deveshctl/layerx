@@ -79,7 +79,10 @@ func runJSONExport(ctx context.Context, imageRef, outputPath string, noCache boo
 		return presentCLIError(os.Stderr, err)
 	}
 
-	return runJSONExportFromAnalysis(analysis, outputPath)
+	if err := runJSONExportFromAnalysis(analysis, outputPath); err != nil {
+		return presentCLIError(os.Stderr, err)
+	}
+	return nil
 }
 
 // runJSONExportFromAnalysis writes the analysis to outputPath without
