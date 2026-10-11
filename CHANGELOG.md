@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.3] - 2026-10-11
+
 ### Changed
 - Go toolchain bumped to 1.27.2.
 - Docker client library (`moby/moby/client`) updated to v0.6.2, Docker API types to v1.56.1.
