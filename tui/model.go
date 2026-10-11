@@ -922,6 +922,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Filter):
 			if m.isTreeFocused() {
 				m.filterActive = true
+				m.clampCursors()
 				return m, nil
 			}
 			return m, nil
@@ -1029,6 +1030,7 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.Code {
 	case tea.KeyEnter:
 		m.filterActive = false
+		m.clampCursors()
 		return m, nil
 	case tea.KeyBackspace:
 		if len(m.filterQuery) > 0 {
@@ -1040,6 +1042,7 @@ func (m model) handleFilterInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.aggOffset = 0
 		} else {
 			m.filterActive = false
+			m.clampCursors()
 		}
 		return m, nil
 	default:

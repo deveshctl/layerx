@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clearer TUI labels, consistent layer numbering, and action hints that match the current view. Keyboard help now scrolls to fit smaller terminals.
 
 ### Fixed
-- TUI selections stay visible when scrolling or resizing. Headers, footers, search input, and Unicode commands fit the terminal; short split views show the active pane, and long errors can be scrolled without hiding the exit hint.
+- TUI selections stay visible when scrolling, resizing, or opening and closing filters. Headers, footers, search input, and Unicode commands fit the terminal; multiline commands retain their blank lines, short split views show the active pane, and long errors can be scrolled without hiding the exit hint.
 - Invalid CI options and build inspection failures now show an error; unknown cache commands no longer succeed silently. Image pull errors retain the registry's explanation.
 - File viewing and extraction now use the same platform as image analysis, preventing wrong-architecture contents or export failures when inspecting multi-platform images. Compatibility with older engines and exact image IDs is preserved.
 

@@ -173,6 +173,59 @@ func TestCommandWrappingHonoursDisplayWidth(t *testing.T) {
 	}
 }
 
+func TestCommandBarPreservesInternalBlankLines(t *testing.T) {
+	m := setupModel()
+	t.Cleanup(m.fetchCancel)
+	for _, tc := range []struct{ name, command, want string }{
+		{"single line", "RUN echo first", "▶ RUN echo first"},
+		{"blank middle", "RUN echo first\n\necho FINALSTEP", "▶ RUN echo first\n  \n  echo FINALSTEP"},
+		{"blank first", "\nRUN echo FINALSTEP", "▶ \n  RUN echo FINALSTEP"},
+		{"truncated after blanks", "RUN echo first\n\n\necho FINALSTEP", "▶ RUN echo first\n  \n  …"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := renderCommandBar(m.styles, tc.command, 80)
+			assert.Equal(t, tc.want, ansi.Strip(out))
+			assert.LessOrEqual(t, lipgloss.Height(out), 3)
+			assert.LessOrEqual(t, lipgloss.Width(out), 80)
+		})
+	}
+}
+
+func TestFilterTransitionsKeepSelectionVisible(t *testing.T) {
+	for _, pane := range []struct {
+		name  string
+		split bool
+		focus focus
+	}{{"single", false, focusTree}, {"split top", true, focusTree}, {"split bottom", true, focusTreeAgg}} {
+		for _, height := range []int{11, 15, 16, 17, 24, 40} {
+			for _, exitKey := range []rune{tea.KeyEnter, tea.KeyBackspace} {
+				t.Run(fmt.Sprintf("%s/height=%d/exit=%d", pane.name, height, exitKey), func(t *testing.T) {
+					m := setupModelTallTree(100)
+					t.Cleanup(m.fetchCancel)
+					m.analysis.AggregatedTrees = image.BuildAggregatedTrees(m.analysis.Layers)
+					m.aggregated, m.focus = pane.split, pane.focus
+					m = send(m, tea.WindowSizeMsg{Width: 80, Height: 40})
+					m = send(m, keyPress('G'))
+					visible := func() {
+						assert.Equal(t, 99, m.treeCursorFor(pane.focus))
+						assert.Contains(t, ansi.Strip(m.renderRightPanel(51, m.height-8)), "file099")
+					}
+					visible()
+					m = send(m, keyPress('/'))
+					assert.True(t, m.filterActive)
+					visible()
+					m = send(m, tea.WindowSizeMsg{Width: 80, Height: height})
+					visible()
+					m = send(m, keyPressSpecial(exitKey))
+					assert.False(t, m.filterActive)
+					assert.Empty(t, m.filterQuery)
+					visible()
+				})
+			}
+		}
+	}
+}
+
 func TestLongErrorFitsAndCanBeScrolledToEnd(t *testing.T) {
 	for _, size := range [][2]int{{50, 11}, {60, 15}, {80, 24}} {
 		m := setupModel()

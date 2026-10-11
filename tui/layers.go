@@ -65,14 +65,11 @@ func renderCommandBar(st themeStyles, cmd string, width int) string {
 	maxLines := 3
 	wrappedLines := wrapCommandLines(cmd, width-2, maxLines)
 
-	// Determine the count of non-empty wrapped lines so we don't emit
-	// trailing newlines for unfilled rows. wrapCommandLines preserves a
-	// fixed-length return for caller-test stability; the fixup happens
-	// here at render time.
+	// Keep blank rows inside the command; omit only unused trailing rows.
 	filled := 0
-	for _, wl := range wrappedLines {
+	for i, wl := range wrappedLines {
 		if wl != "" {
-			filled++
+			filled = i + 1
 		}
 	}
 
