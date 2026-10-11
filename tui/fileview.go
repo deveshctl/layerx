@@ -60,7 +60,7 @@ func renderFileView(p viewerParams) string {
 		if lipgloss.Width(cmd) > 40 {
 			cmd = ansi.Truncate(cmd, 40, "…")
 		}
-		title = fmt.Sprintf("%s  ← L%d: %s", p.content.Path, p.originLayer, cmd)
+		title = fmt.Sprintf("%s  ← L%d: %s", p.content.Path, p.originLayer+1, cmd)
 	}
 
 	if p.content.Binary {

@@ -141,17 +141,7 @@ func resetPersistentFlags(t *testing.T) {
 	})
 }
 
-// Stream split (from cobra/command.go ~line 1160-1170):
-//   - The "Error: ..." line is written via PrintErrln → ErrOrStderr (stderr)
-//   - The Usage block is written via Println          → OutOrStderr (stdout)
-//
-// In a real terminal both default to os.Stderr so the user sees them
-// together, but in a test the streams must be captured separately or one
-// half of the output goes missing.
-//
-// Pinning both halves of the contract:
-//   - TestRootCmd_NoArgs_ShowsUsage              — bare `layerx` → usage visible
-//   - TestRootCmd_BadConfig_NoUsageDump (below)  — RunE error    → usage silenced
+// Missing input gets a short hint on stderr; stdout stays empty.
 func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 	resetRootCmdFlags(t)
 
@@ -167,14 +157,11 @@ func TestRootCmd_NoArgs_ShowsUsage(t *testing.T) {
 	stdOut := stdout.String()
 	assert.Contains(t, errOut, "Error:",
 		"cobra must print the one-line error to stderr so the user sees what failed")
-	assert.Contains(t, errOut, "accepts 1 arg",
+	assert.Contains(t, errOut, "expected 1 image or archive",
 		"the arg-count error must reach the user")
-	// Cobra writes the Usage block via cmd.Println → OutOrStdout. Pin the
-	// stream split strictly so a regression that re-routes Usage to stderr
-	// (or drops it entirely) cannot pass under a merged-buffer check.
-	assert.Contains(t, stdOut, "Usage:",
-		"usage block must accompany an arg-validation error — that IS the help the user needs")
-	assert.Contains(t, stdOut, "layerx [flags] IMAGE_OR_ARCHIVE",
+	assert.Empty(t, stdOut,
+		"missing input must not dump the full help page to stdout")
+	assert.Contains(t, errOut, "layerx [flags] IMAGE_OR_ARCHIVE",
 		"the usage line must include the rootCmd Use string")
 }
 

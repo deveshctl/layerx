@@ -266,10 +266,10 @@ func TestCompareArgs_NoArgs_PrintsUsageHint(t *testing.T) {
 	assert.True(t, errors.As(err, &sentinel), "must return ErrCompareUsage sentinel")
 
 	out := stderr.String()
-	assert.Contains(t, out, "compare two images")
+	assert.Contains(t, out, "expected 2 images or archives")
 	assert.Contains(t, out, "OLD_IMAGE NEW_IMAGE")
 	assert.Contains(t, out, "Examples:")
-	assert.Contains(t, out, "myapp:1.4.0 myapp:1.5.0")
+	assert.Contains(t, out, "app:1.4.0 app:1.5.0")
 	assert.Contains(t, out, "--help")
 }
 
@@ -283,7 +283,7 @@ func TestCompareArgs_OneArg_PrintsCountHint(t *testing.T) {
 	require.Error(t, err)
 	var sentinel *ErrCompareUsage
 	assert.True(t, errors.As(err, &sentinel))
-	assert.Contains(t, stderr.String(), "needs exactly 2 image arguments, got 1")
+	assert.Contains(t, stderr.String(), "expected 2 images or archives, got 1")
 }
 
 func TestCompareArgs_TwoArgs_PassesThrough(t *testing.T) {

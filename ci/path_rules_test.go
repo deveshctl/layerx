@@ -70,7 +70,7 @@ func TestBlockPathRule_Match(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Passed)
 	assert.Equal(t, "block", results[0].Name)
-	assert.Contains(t, results[0].Detail, "layer 0")
+	assert.Contains(t, results[0].Detail, "layer 1")
 	assert.Equal(t, "/tmp/foo", results[0].Actual)
 }
 
@@ -102,7 +102,7 @@ func TestBlockPathRule_WhiteoutBypass(t *testing.T) {
 	results := r.Evaluate(ctx)
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Passed)
-	assert.Contains(t, results[0].Detail, "layer 0", "must report the layer that wrote the secret, not the whiteout layer")
+	assert.Contains(t, results[0].Detail, "layer 1", "must report the layer that wrote the secret, not the whiteout layer")
 }
 
 // .wh..wh..opq is the opaque-whiteout marker. It must not appear in

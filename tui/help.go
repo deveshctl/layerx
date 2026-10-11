@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // User-facing names for layer size column modes (internal names stay sizeCol*).
@@ -41,9 +42,9 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"j / k", "Move cursor down / up"},
 				{"g / G", "Jump to first / last item"},
-				{"^d / ^u", "Half page down / up"},
-				{"^f / ^b", "Page down / up (PgDn / PgUp)"},
-				{"Tab", "Switch panel (layers ↔ tree)"},
+				{"Ctrl+D/U", "Half page down / up"},
+				{"Ctrl+F/B", "Page down / up (PgDn / PgUp)"},
+				{"Tab", "Cycle layers and file panels"},
 			},
 		},
 		{
@@ -51,20 +52,20 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"S", "Cycle size: Change → Stored → both"},
 				{"c", "Copy Dockerfile command"},
-				{"A", "Toggle split aggregated view"},
+				{"A", "Toggle changes + cumulative files"},
 			},
 		},
 		{
 			title: "File Tree",
 			entries: []helpEntry{
-				{"/", "Search files (substring filter)"},
+				{"/", "Filter file paths"},
 				{"Enter", "View file / expand or collapse folder"},
-				{"Backspace", "Clear active filter"},
+				{"Backspace", "Clear confirmed filter"},
 				{"d", "Show only changed files"},
 				{"s", "Sort by size (↓ → ↑ → off)"},
 				{"x", "Save file to current directory"},
 				{"y", "Copy file path to clipboard"},
-				{"Esc", "Clear filter / close viewer"},
+				{"Esc", "Clear filter"},
 			},
 		},
 		{
@@ -76,14 +77,14 @@ func defaultHelpSections() []helpSection {
 				{"/", "Search in file"},
 				{"n / N", "Next / previous match"},
 				{"Y", "Copy file content to clipboard"},
-				{"Esc", "Return to file tree"},
+				{"Esc", "Clear search, then close viewer"},
 			},
 		},
 		{
 			title: "Wasted Files",
 			entries: []helpEntry{
 				{"w", "Open wasted-files overlay"},
-				{"Enter", "Jump to introducing layer + path"},
+				{"Enter", "Jump to original layer and path"},
 				{"a", "Expand top 20 to up to 500"},
 				{"y", "Copy highlighted path"},
 				{"Esc", "Close overlay"},
@@ -187,7 +188,7 @@ const (
 	helpColumnGap           = 2
 )
 
-func (m model) overlayHelp() string {
+func (m model) helpContent() string {
 	st := newHelpStyles(m.theme)
 	sections := defaultHelpSections()
 
@@ -198,7 +199,7 @@ func (m model) overlayHelp() string {
 	body.WriteString("\n\n")
 
 	cols := helpLayoutColumns(sections)
-	if m.width >= helpMultiColumnMinWidth && len(cols) >= 2 {
+	if m.width >= helpMultiColumnMinWidth && len(cols) >= 2 && helpColumnsWidth(cols, st) <= m.width-6 {
 		colBodies := make([]string, len(cols))
 		maxH := 0
 		for i, group := range cols {
@@ -220,28 +221,45 @@ func (m model) overlayHelp() string {
 	}
 
 	body.WriteString("\n\n")
-	body.WriteString(" ")
-	body.WriteString(st.note.Render(
-		"Change = files in the image grew or shrank at this step. " +
-			"Stored = bytes Docker keeps for this layer. " +
-			"Layer 0 Change is the size after the first layer.",
-	))
+	body.WriteString(st.note.Render("Change = files in the image grew or shrank at this step.\n" +
+		"Stored = bytes kept in this layer. Layer 1 is the first layer."))
 	body.WriteString("\n")
-	body.WriteString(" ")
-	body.WriteString(st.dim.Render("(Sort, filter, and diff-only flatten the file tree.)"))
-	body.WriteString("\n\n")
-	body.WriteString(" ")
-	body.WriteString(st.dim.Render("Press ? or Esc to close"))
-	body.WriteString("\n")
+	body.WriteString(st.dim.Render("Sort, filter, and changes-only mode flatten the file tree."))
+	return ansi.Wrap(body.String(), max(m.width-6, 1), "")
+}
 
-	content := body.String()
-	boxWidth := max(lipgloss.Width(content)+4, 56)
-	if maxBox := m.width - 4; maxBox > 0 && boxWidth > maxBox {
-		boxWidth = maxBox
+func helpColumnsWidth(cols [][]helpSection, st helpStyles) int {
+	width := max(len(cols)-1, 0) * helpColumnGap
+	for _, col := range cols {
+		width += lipgloss.Width(renderHelpColumn(col, st))
 	}
-	boxHeight := lipgloss.Height(content) + 2
+	return width
+}
 
-	popup := renderPanel(m.theme, content, "Help", true, boxWidth, boxHeight, false, false)
+const helpScrollHint = "↑/↓ scroll · PgUp/PgDn page · ?/Esc close"
+
+func (m model) helpVisibleLines() int {
+	footerHeight := lipgloss.Height(ansi.Wrap(helpScrollHint, max(m.width-6, 1), ""))
+	return max(m.height-4-footerHeight, 1)
+}
+
+func (m model) helpMaxOffset() int {
+	return max(lipgloss.Height(m.helpContent())-m.helpVisibleLines(), 0)
+}
+
+func (m model) overlayHelp() string {
+	lines := strings.Split(m.helpContent(), "\n")
+	height := min(m.helpVisibleLines(), len(lines))
+	offset := min(m.helpOffset, max(len(lines)-height, 0))
+	content := strings.Join(lines[offset:offset+height], "\n")
+	footer := "? / Esc close"
+	if len(lines) > height {
+		footer = helpScrollHint
+	}
+	content += "\n\n" + newHelpStyles(m.theme).dim.Render(ansi.Wrap(footer, max(m.width-6, 1), ""))
+	// Reserve the border and footer before sizing the scrollable body.
+	popup := renderPanel(m.theme, content, "Help", true, max(m.width-6, 1),
+		min(lipgloss.Height(content), max(m.height-2, 1)), offset > 0, offset+height < len(lines))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 }
 

@@ -64,49 +64,24 @@ var (
 
 var compareCmd = &cobra.Command{
 	Use:   "compare [flags] OLD_IMAGE NEW_IMAGE",
-	Short: "Compare two images and surface size/efficiency deltas (exit 1 on regression)",
-	Long: `Compare two images and report size, efficiency, layer, file, and waste
-deltas in a deterministic, CI-friendly text report.
-
-Both arguments accept the same inputs as "layerx" itself: a container image
-reference (Docker or Podman — e.g. "nginx:1.25") or a path to a local image
-archive produced by "docker save" / "podman save" or an OCI-layout tarball.
-The two sides may mix freely (an archive on the old side, a registry ref on
-the new side, etc.).
-
-Output ends with a single machine-parseable verdict line:
-  verdict: ok
-  verdict: regression reason=<comma-separated reasons>
-  verdict: noop digest=<sha256...>
-  verdict: noop reason=path-equal       (archive paths matched without a digest)
-
-Progress messages (image pulls, exports) are written to stderr so the
-report on stdout stays grep-clean for CI gating. Pipe "2>/dev/null" to
-silence them.
+	Short: "Compare image size, efficiency, and file changes",
+	Long: `Compare OLD_IMAGE with NEW_IMAGE. Each input can be a Docker or Podman
+image reference, a saved-image tar archive, or an OCI layout tarball.
 
 Exit codes:
-  0  no regression detected (or noop)
-  1  regression detected (efficiency dropped, wasted bytes increased, or both)
-  2  operational error (resolver failure, daemon down, archive missing, etc.)
+  0  no regression, or identical inputs
+  1  efficiency decreased or wasted bytes increased
+  2  operational error (invalid input, configuration, or engine connection)
 
-See "layerx --help" for details on --engine and --no-cache.`,
-	Example: `  # Compare a release tag against the previous one
-  layerx compare myapp:1.4.0 myapp:1.5.0
+Reports go to stdout; progress and errors go to stderr. The last report line
+starts with "verdict:" and contains ok, regression, or noop. In CI, run the
+command directly so its exit code determines whether the step passes.
 
-  # Compare the previous build artifact against the freshly-built archive
-  layerx compare ./build/prev.tar ./build/new.tar
-
-  # Show every diff entry (no top-N truncation)
-  layerx compare --mode full myapp:old myapp:new
-
-  # Force a fresh analysis of both sides, ignoring any cached results
-  layerx compare --no-cache myapp:prev myapp:next
-
-  # CI gate: fails non-zero on regression
-  layerx compare myapp:prev myapp:next || echo "image regressed"
-
-  # Script-friendly: extract the machine-parseable verdict line
-  layerx compare myapp:prev myapp:next | grep '^verdict:'  # ok | regression | noop`,
+Use --mode full for all entries, or --mode summary for totals and verdict.`,
+	Example: `  layerx compare app:1.4.0 app:1.5.0
+  layerx compare ./build/previous.tar ./build/current.tar
+  layerx compare --mode full app:1.4.0 app:1.5.0
+  layerx compare --mode summary nginx:1.26 nginx:stable`,
 	Args:          compareArgs,
 	RunE:          runCompareCmd,
 	SilenceErrors: true,
@@ -115,39 +90,24 @@ See "layerx --help" for details on --engine and --no-cache.`,
 
 func init() {
 	compareCmd.Flags().StringVar(&flagCompareMode, "mode", compareModeCompact,
-		"output mode: compact (top-N tables, default), full (every entry), summary (header + verdict only)")
+		"report detail: compact, full, or summary")
 	compareCmd.Flags().IntVar(&flagCompareTop, "top", compareTopDefault,
-		"in compact mode, show this many rows per section before truncating; ignored otherwise")
+		"rows per section in compact mode (1-1000)")
 
 	rootCmd.AddCommand(compareCmd)
 }
 
-// compareArgs is a custom cobra args validator: on zero or wrong count it
-// prints a short usage hint to stderr (synopsis + 3 examples) and returns the
-// ErrCompareUsage sentinel so main.go exits 2 without cobra adding its own
-// "Error: accepts 2 arg(s)" line. Two-arg invocations pass through.
+// compareArgs prints a short input hint and avoids a duplicate Cobra error.
 func compareArgs(cmd *cobra.Command, args []string) error {
 	if len(args) == 2 {
 		return nil
 	}
 	w := cmd.ErrOrStderr()
-	if len(args) == 0 {
-		fmt.Fprintln(w, "layerx compare: compare two images and report size/efficiency deltas")
-	} else {
-		fmt.Fprintf(w, "layerx compare: needs exactly 2 image arguments, got %d\n", len(args))
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  layerx compare [flags] OLD_IMAGE NEW_IMAGE")
-	fmt.Fprintln(w)
+	fmt.Fprintf(w, "layerx compare: expected 2 images or archives, got %d\n", len(args))
+	fmt.Fprintln(w, "Usage: layerx compare [flags] OLD_IMAGE NEW_IMAGE")
 	fmt.Fprintln(w, "Examples:")
-	fmt.Fprintln(w, "  layerx compare myapp:1.4.0 myapp:1.5.0")
-	fmt.Fprintln(w, "  layerx compare ./build/prev.tar ./build/new.tar")
-	fmt.Fprintln(w, "  layerx compare --mode full nginx:1.25 nginx:1.26")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Each argument may be a container image reference (Docker or Podman) or a path")
-	fmt.Fprintln(w, "to a tar archive produced by `docker save` / `podman save` (or an OCI-layout tarball).")
-	fmt.Fprintln(w, "Run `layerx compare --help` for the full reference.")
+	fmt.Fprintln(w, "  layerx compare app:1.4.0 app:1.5.0")
+	fmt.Fprintln(w, "Run layerx compare --help for options.")
 	return &ErrCompareUsage{}
 }
 
@@ -300,9 +260,9 @@ func drainProgress(w io.Writer, side, ref string, ch <-chan image.ProgressEvent)
 // interval and clock are injected so tests don't sleep.
 func drainProgressWithClock(w io.Writer, side, ref string, ch <-chan image.ProgressEvent, coalesce time.Duration, now func() time.Time) {
 	var (
-		lastPhase     = image.PhaseUnknown
-		lastPullEmit  time.Time
-		announced     bool
+		lastPhase    = image.PhaseUnknown
+		lastPullEmit time.Time
+		announced    bool
 	)
 	for ev := range ch {
 		if !announced {

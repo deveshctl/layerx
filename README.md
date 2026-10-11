@@ -252,14 +252,14 @@ source <(layerx completion bash)
 
 | Key         | Action                                                       |
 |-------------|--------------------------------------------------------------|
-| `Tab`       | Switch panel (layers ↔ file tree)                            |
+| `Tab`       | Cycle panels (layers, file tree, cumulative files in split view) |
 | `j` / `k`   | Move up / down                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
 | `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
 | `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
 | `h` / `l`   | Scroll left / right (file viewer, long lines)                |
 | `Enter`     | Open file viewer; expand or collapse a folder                |
-| `Esc`       | Dismiss (close search → close viewer → close waste → clear filter → close help). Quits only on the loading and error screens. |
+| `Esc`       | Close help, clear search/filter, or close the viewer. Quits only on loading and error screens. |
 | `/`         | Filter file tree (tree) / search in viewer (viewer)          |
 | `n` / `N`   | Next / previous search match (viewer)                        |
 | `y`         | Copy file path to clipboard                                  |
@@ -271,14 +271,14 @@ source <(layerx completion bash)
 | `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
 | `x`         | Extract focused file to disk                                 |
 | `A`         | Toggle split view (layer changes over cumulative filesystem)  |
-| `?`         | Toggle help overlay                                          |
+| `?`         | Toggle scrollable help (↑/↓ or PgUp/PgDn)                     |
 | `q`         | Quit                                                         |
 
 ### Split view (`A`)
 
 Press `A` to split the file tree into two stacked panes:
 
-- **Top — Layer Δ.** Only what the selected layer changed: files it added, modified, or removed.
+- **Top — Layer changes.** Only what the selected layer changed: files it added, modified, or removed.
 - **Bottom — Cumulative.** The full filesystem as it exists after that layer is applied, with every earlier layer merged in.
 
 Both halves track the layer you have selected. `Tab` moves focus to the layers pane; move up and down there and both panes update to the new layer together. `Tab` again cycles focus through the two tree panes so you can scroll and open files in either.

@@ -41,55 +41,32 @@ var (
 
 var ciCmd = &cobra.Command{
 	Use:   "ci [flags] IMAGE_OR_ARCHIVE",
-	Short: "Run efficiency checks for CI pipelines",
-	Long: `Evaluate image efficiency against configurable thresholds.
-
-Accepts either a container image reference (Docker or Podman) or a path to a
-local image archive (docker save / podman save / OCI-layout tarball). Archive
-mode requires no daemon — useful in CI runners that already produced the
-artifact and want to avoid loading it into an engine just to inspect it.
-
-Exits 0 when all rules pass, 1 when any rule fails. Output is plain text
-suitable for CI logs.
+	Short: "Check image efficiency and configured path rules",
+	Long: `Check an image or saved-image archive against efficiency thresholds and
+configured path rules. Archives need no running engine.
 
 Exit codes:
-  0  all rules passed
-  1  one or more rules failed
-  2  internal error (Docker daemon down, archive not found, malformed config, etc.)
+  0  all checks passed
+  1  one or more checks failed
+  2  operational error (invalid input, configuration, or engine connection)
 
-Thresholds can be set via flags or a .layerx.yaml file in the working
-directory. Flags take precedence over config values. A missing config
-file is silently ignored and built-in defaults apply.
+Threshold flags override configuration. Automatic lookup checks .layerx.yaml
+in the current directory and parents, then the user configuration directory.
+If no configuration is found, built-in thresholds apply. Use "layerx init"
+to create a starter file.
 
-Example .layerx.yaml:
-  rules:
-    lowest-efficiency: 0.9           # minimum efficiency score (0.0-1.0)
-    highest-wasted-bytes: 0          # max wasted bytes (0 = disabled)
-    highest-user-wasted-percent: 0.1 # max waste as fraction of total (0.0-1.0)
+Built-in thresholds: 90% minimum efficiency, 10% maximum waste, no byte limit.
 
-Cache:
-  Analysis results are cached on disk and reused across runs. Pass
-  --no-cache to force a fresh analysis (useful for pipelines that must
-  re-parse the image after a rebuild within the same digest).
+Fractions range from 0 to 1: 0.95 means 95% efficiency; 0.1 allows 10% waste.
+Waste is measured against live plus wasted file bytes, not compressed image
+size. Set a threshold to 0 to disable that check.
 
-See "layerx --help" for details on --engine, --json, and --no-cache.`,
-	Example: `  # Run with default thresholds (lowest-efficiency: 0.9, highest-user-wasted-percent: 0.1)
-  layerx ci nginx:latest
-
-  # Inspect a local archive in CI (no daemon required)
+Reports go to stdout; progress and errors go to stderr. --json exports the
+image analysis, not the check results. --no-cache runs a fresh analysis.`,
+	Example: `  layerx ci nginx:stable
   layerx ci ./build/app.tar
-
-  # Override a single threshold
-  layerx ci --lowest-efficiency 0.95 nginx:latest
-
-  # Combine multiple rules
-  layerx ci \
-    --lowest-efficiency 0.9 \
-    --highest-wasted-bytes 10485760 \
-    nginx:latest
-
-  # Force a fresh analysis, ignoring any cached result
-  layerx ci --no-cache nginx:latest`,
+  layerx ci --lowest-efficiency 0.95 app:local
+  layerx ci --highest-wasted-bytes 10485760 app:local`,
 	Args:          ciArgs,
 	RunE:          runCICmd,
 	SilenceErrors: true,
@@ -97,51 +74,33 @@ See "layerx --help" for details on --engine, --json, and --no-cache.`,
 }
 
 func init() {
-	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum acceptable efficiency score, 0.0-1.0 (0 disables the rule; config default: 0.9)")
-	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum allowed wasted bytes (0 disables the rule)")
-	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum wasted bytes as fraction of total size, 0.0-1.0 (0 disables the rule; config default: 0.1)")
+	ciCmd.Flags().Float64Var(&flagLowestEfficiency, "lowest-efficiency", -1, "minimum efficiency, 0-1 (0 disables)")
+	ciCmd.Flags().Int64Var(&flagHighestWastedBytes, "highest-wasted-bytes", -1, "maximum wasted file bytes (0 disables)")
+	ciCmd.Flags().Float64Var(&flagHighestUserWastedPercent, "highest-user-wasted-percent", -1, "maximum waste fraction, 0-1 (0.1 = 10%; 0 disables)")
 
 	// Override the rendered default so `--help` doesn't show "-1" — the
 	// underlying default is "unset, fall back to config or built-in", not
 	// the negative sentinel value buildRules uses to detect Changed().
-	ciCmd.Flags().Lookup("lowest-efficiency").DefValue = "from config (built-in 0.9)"
-	ciCmd.Flags().Lookup("highest-wasted-bytes").DefValue = "from config (built-in disabled)"
-	ciCmd.Flags().Lookup("highest-user-wasted-percent").DefValue = "from config (built-in 0.1)"
+	ciCmd.Flags().Lookup("lowest-efficiency").DefValue = "from config"
+	ciCmd.Flags().Lookup("highest-wasted-bytes").DefValue = "from config"
+	ciCmd.Flags().Lookup("highest-user-wasted-percent").DefValue = "from config"
 
-	ciCmd.Flags().StringVar(&flagJSON, "json", "", "write analysis to PATH as JSON (skips TUI; composes with the ci subcommand)")
+	ciCmd.Flags().StringVar(&flagJSON, "json", "", "write image analysis to `FILE` as JSON (excludes check results)")
 
 	rootCmd.AddCommand(ciCmd)
 }
 
-// ciArgs is a custom cobra args validator: on zero or wrong count it prints a
-// short usage hint to stderr (synopsis + 3 examples) and returns the
-// ErrCIUsage sentinel so main.go exits 2 without cobra adding its own
-// "Error: accepts 1 arg(s)" line. ciCmd has SilenceErrors=true and
-// SilenceUsage=true, so without this validator a bare `layerx ci` produced
-// only cobra's terse "accepts 1 arg(s), received 0" with no actionable help.
-// Mirrors compareArgs in cmd/compare.go.
+// ciArgs prints a short input hint and avoids a duplicate Cobra error.
 func ciArgs(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		return nil
 	}
 	w := cmd.ErrOrStderr()
-	if len(args) == 0 {
-		fmt.Fprintln(w, "layerx ci: run efficiency checks for CI pipelines")
-	} else {
-		fmt.Fprintf(w, "layerx ci: needs exactly 1 image argument, got %d\n", len(args))
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  layerx ci [flags] IMAGE_OR_ARCHIVE")
-	fmt.Fprintln(w)
+	fmt.Fprintf(w, "layerx ci: expected 1 image or archive, got %d\n", len(args))
+	fmt.Fprintln(w, "Usage: layerx ci [flags] IMAGE_OR_ARCHIVE")
 	fmt.Fprintln(w, "Examples:")
-	fmt.Fprintln(w, "  layerx ci nginx:latest")
-	fmt.Fprintln(w, "  layerx ci ./build/app.tar")
-	fmt.Fprintln(w, "  layerx ci --lowest-efficiency 0.95 nginx:latest")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "The argument may be a container image reference (Docker or Podman) or a path")
-	fmt.Fprintln(w, "to a tar archive produced by `docker save` / `podman save` (or an OCI-layout tarball).")
-	fmt.Fprintln(w, "Run `layerx ci --help` for the full reference.")
+	fmt.Fprintln(w, "  layerx ci nginx:stable")
+	fmt.Fprintln(w, "Run layerx ci --help for options.")
 	return &ErrCIUsage{}
 }
 
@@ -149,7 +108,7 @@ func runCICmd(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
 
 	if err := validateCLIThresholdFlags(cmd); err != nil {
-		return err
+		return presentCLIError(cmd.ErrOrStderr(), err)
 	}
 
 	cfg, err := loadConfig(cmd)

@@ -720,7 +720,7 @@ func TestFriendlyErrorDaemonNotRunning_DockerEngine(t *testing.T) {
 		Cause:  errors.New("connection refused"),
 	}
 	msg := friendlyError(err)
-	assert.Contains(t, msg, "Docker is not running")
+	assert.Contains(t, msg, "Docker daemon is not reachable")
 	// Every daemon-down path points at the archive fallback so a user
 	// without a running engine is not dead-ended in the TUI.
 	assert.Contains(t, msg, "archive")
@@ -2028,7 +2028,7 @@ func TestStatusBarEnterHintFileShowsView(t *testing.T) {
 	assert.NotContains(t, bar, "toggle")
 }
 
-func TestStatusBarEnterHintDirShowsToggleNotView(t *testing.T) {
+func TestStatusBarEnterHintDirShowsCollapseNotView(t *testing.T) {
 	m := setupModel()
 	m.focus = focusTree
 	files := m.displayTree()
@@ -2042,7 +2042,7 @@ func TestStatusBarEnterHintDirShowsToggleNotView(t *testing.T) {
 	}
 	assert.True(t, found, "expected at least one directory in fixture tree")
 	bar := m.renderStatusBar(files)
-	assert.Contains(t, bar, "toggle")
+	assert.Contains(t, bar, "collapse")
 	// "view" must not appear as a hint description; the trailing-space anchor
 	// avoids false matches on words like "viewport" if any other hint text
 	// grows that way later.
@@ -2799,7 +2799,7 @@ func TestInspectMsgErrorSurfacesDuringLoading(t *testing.T) {
 	require.Equal(t, stateLoading, m.state)
 	m = send(m, inspectMsg{err: &image.ErrDaemonNotRunning{Engine: "docker", Cause: errors.New("connection refused")}})
 	assert.Contains(t, m.statusMsg, "Inspect failed:")
-	assert.Contains(t, m.statusMsg, "Docker is not running")
+	assert.Contains(t, m.statusMsg, "Docker daemon is not reachable")
 }
 
 func TestInspectMsgCanceledDoesNotSurface(t *testing.T) {

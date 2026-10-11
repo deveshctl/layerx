@@ -57,19 +57,19 @@ func defaultKeys() keyMap {
 		),
 		HalfPageDown: key.NewBinding(
 			key.WithKeys("ctrl+d"),
-			key.WithHelp("^d", "half page down"),
+			key.WithHelp("Ctrl+D", "half page down"),
 		),
 		HalfPageUp: key.NewBinding(
 			key.WithKeys("ctrl+u"),
-			key.WithHelp("^u", "half page up"),
+			key.WithHelp("Ctrl+U", "half page up"),
 		),
 		PageDown: key.NewBinding(
 			key.WithKeys("ctrl+f", "pgdown"),
-			key.WithHelp("^f/PgDn", "page down"),
+			key.WithHelp("Ctrl+F/PgDn", "page down"),
 		),
 		PageUp: key.NewBinding(
 			key.WithKeys("ctrl+b", "pgup"),
-			key.WithHelp("^b/PgUp", "page up"),
+			key.WithHelp("Ctrl+B/PgUp", "page up"),
 		),
 		Left: key.NewBinding(
 			key.WithKeys("h", "left"),
@@ -85,7 +85,7 @@ func defaultKeys() keyMap {
 		),
 		Copy: key.NewBinding(
 			key.WithKeys("c"),
-			key.WithHelp("c", "copy cmd"),
+			key.WithHelp("c", "copy command"),
 		),
 		CopyPath: key.NewBinding(
 			key.WithKeys("y"),
@@ -113,7 +113,7 @@ func defaultKeys() keyMap {
 		),
 		Aggregate: key.NewBinding(
 			key.WithKeys("A"),
-			key.WithHelp("A", "split: layer Δ + cumulative"),
+			key.WithHelp("A", "split view"),
 		),
 		ExtractFile: key.NewBinding(
 			key.WithKeys("x"),

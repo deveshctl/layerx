@@ -31,55 +31,22 @@ var lookPath = exec.LookPath
 
 var buildCmd = &cobra.Command{
 	Use:   "build [BUILD_ARGS...]",
-	Short: "Build an image and open it in the layerx TUI",
-	Long: `Run the active container engine's build command and, on success, open
-the resulting image in the layerx TUI.
+	Short: "Build an image, then inspect it or export analysis",
+	Long: `Run docker build or podman build, then inspect the result. Engine progress
+appears in the terminal. A failed build keeps the engine's exit code.
 
-This is a thin wrapper. Every argument after "build" is forwarded verbatim
-to "docker build" or "podman build" — including -t, --build-arg, --platform,
---target, --file, the build-context path, and BuildKit flags. The engine
-streams its own progress output (BuildKit, classic builder, or buildah)
-directly to your terminal; layerx does not interpret it.
+LayerX handles --engine, --config, and --json before or after "build".
+Other arguments, including --platform, go to the engine. --no-cache disables
+both build and analysis caches. Set theme in .layerx.yaml for build inspection;
+--theme is not handled by this command. Arguments after -- go to the engine.
 
-The engine is selected the same way as the rest of layerx: --engine
-docker|podman|auto (default auto). Auto-detection probes the same sockets
-"layerx" itself uses to pick docker or podman.
-
---platform on "layerx build" is passed straight through to the engine and
-governs what the engine builds; layerx then inspects exactly that built
-image. The top-level "layerx --platform" flag, by contrast, selects a
-variant of an existing multi-platform image to inspect. Use the engine's
-own --platform here; the layerx-level flag is unused on the build path.
-
-To recover the built image's identifier without parsing terminal output,
-layerx asks the engine to write the image ID to a temporary file via
---iidfile. If you pass --iidfile yourself, your value is used and respected.
-
-On a successful build, layerx hands the image ID off to the TUI exactly as
-"layerx IMAGE" would. With --json, it writes the analysis to the requested
-file instead of opening the TUI. On a failed build, layerx exits with the engine's
-exit code and does not launch the TUI.
-
-Flag ordering: layerx flags (--engine, --no-cache, --json) must appear
-BEFORE "build" in the invocation — arguments after "build" are forwarded
-verbatim to the engine and layerx never sees them:
-
-  layerx --engine podman build -t myimage .   # correct
-  layerx build --engine podman -t myimage .   # wrong: --engine forwarded to engine`,
-	Example: `  # Build the current directory and inspect the result
-  layerx build -t myimage .
-
-  # Build and export analysis without opening the interactive viewer
-  layerx --json analysis.json build -t myimage .
-
-  # Multiple tags — layerx inspects the image ID, which all tags share
-  layerx build -t myimage:latest -t myimage:1.2.3 .
-
-  # Forward arbitrary build flags
-  layerx build --build-arg VERSION=1.2.3 --platform linux/amd64 -t myimage .
-
-  # Force the podman CLI even if docker is also installed
-  layerx --engine podman build -t myimage .`,
+With -t or --tag, LayerX inspects the first tag. Without a tag, it uses the
+image ID from --iidfile, creating a temporary ID file if none was supplied.
+Use --json to export analysis instead of opening the interactive viewer.`,
+	Example: `  layerx build -t app:local .
+  layerx build --json analysis.json -t app:local .
+  layerx build --platform linux/arm64 -t app:local .
+  layerx build --engine podman -t app:local .`,
 	DisableFlagParsing: true,
 	Args:               cobra.ArbitraryArgs,
 	SilenceUsage:       true,
@@ -140,7 +107,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return &ErrBuildFailed{ExitCode: exitErr.ExitCode()}
 		}
-		return fmt.Errorf("failed to invoke %s build: %w", binary, err)
+		return presentCLIError(cmd.ErrOrStderr(), fmt.Errorf("failed to invoke %s build: %w", binary, err))
 	}
 
 	imageRef := firstTag
@@ -162,7 +129,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 
 	resolver, err := selectResolver(imageRef)
 	if err != nil {
-		return err
+		return presentCLIError(cmd.ErrOrStderr(), err)
 	}
 
 	cfg, err := loadConfig(cmd)
@@ -171,16 +138,16 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 	theme, err := resolveTheme(cfg.Theme, flagTheme)
 	if err != nil {
-		return err
+		return presentCLIError(cmd.ErrOrStderr(), err)
 	}
 
-	return runBuildTUI(tui.Config{
+	return presentCLIError(cmd.ErrOrStderr(), runBuildTUI(tui.Config{
 		ImageRef:      imageRef,
 		Resolver:      resolver,
 		NoCache:       noCacheRequested(),
 		Theme:         theme,
 		TransparentBg: cfg.TransparentBackground,
-	})
+	}))
 }
 
 // firstTagFromArgs returns the first -t / --tag value in args, or "" if none.

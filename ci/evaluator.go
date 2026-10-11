@@ -60,11 +60,11 @@ func (r *Report) ExitCode() int {
 //
 // Output shape (Pass case):
 //
-//	PASS: Image efficiency check passed (score: 95%)
+//	PASS: All checks passed (score: 95%)
 //
 // Output shape (Fail case):
 //
-//	FAIL: Image efficiency check failed
+//	FAIL: Image checks failed
 //
 //	Global Rules:
 //	  efficiency:    85.0% (threshold: 90.0%)  FAIL
@@ -79,11 +79,11 @@ func (r *Report) ExitCode() int {
 //	Exit code: 1
 func (r *Report) Print(w io.Writer) {
 	if r.Passed {
-		fmt.Fprintf(w, "  PASS: Image efficiency check passed (score: %.0f%%)\n", r.Score*100)
+		fmt.Fprintf(w, "  PASS: All checks passed (score: %.0f%%)\n", r.Score*100)
 		return
 	}
 
-	fmt.Fprintf(w, "  FAIL: Image efficiency check failed\n\n")
+	fmt.Fprintf(w, "  FAIL: Image checks failed\n\n")
 
 	globals, paths := splitResults(r.Results)
 	if len(globals) > 0 {

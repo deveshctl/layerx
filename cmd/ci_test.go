@@ -160,7 +160,7 @@ path-rules:
 	report.Print(&buf)
 	out := buf.String()
 	assert.Contains(t, out, "/tmp/secret")
-	assert.Contains(t, out, "layer 0")
+	assert.Contains(t, out, "layer 1")
 	assert.Contains(t, out, "Path Rules:")
 }
 
@@ -257,12 +257,12 @@ func TestCICmd_NoArgs_ShowsUsage(t *testing.T) {
 		{
 			name:        "zero_args",
 			args:        []string{"ci"},
-			wantSynopsis: "layerx ci: run efficiency checks",
+			wantSynopsis: "expected 1 image or archive, got 0",
 		},
 		{
 			name:        "too_many_args",
 			args:        []string{"ci", "a", "b"},
-			wantSynopsis: "needs exactly 1 image argument, got 2",
+			wantSynopsis: "expected 1 image or archive, got 2",
 		},
 	}
 	for _, tc := range cases {
@@ -291,7 +291,7 @@ func TestCICmd_NoArgs_ShowsUsage(t *testing.T) {
 				"a Usage: header must accompany the hint")
 			assert.Contains(t, errOut, "layerx ci [flags] IMAGE_OR_ARCHIVE",
 				"the synopsis line must reflect ciCmd.Use")
-			assert.Contains(t, errOut, "layerx ci nginx:latest",
+			assert.Contains(t, errOut, "layerx ci nginx:stable",
 				"at least one concrete example must reach the user")
 			// ciCmd has SilenceErrors=true, so cobra's own "Error: ..."
 			// prefix must NOT appear — ciArgs is the only output source.

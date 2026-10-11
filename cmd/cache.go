@@ -23,11 +23,9 @@ var cacheCmd = &cobra.Command{
 	Short: "Manage the layerx analysis cache",
 	Long: `Manage the layerx analysis cache.
 
-The cache stores parsed layer data per image digest under a per-user
-directory. layerx self-prunes the cache by age (default 30 days) and
-total size (default 1 GiB) at the end of every successful analyze; use
-"layerx cache list" to inspect it and "layerx cache prune" to evict
-entries explicitly.
+Analysis is cached by image digest. After a successful analysis, LayerX
+removes old entries to keep the cache within 30 days and 1 GiB by default.
+Use "layerx cache list" to see entries or "layerx cache prune" to remove them.
 
 Cache directory:
   By default, layerx writes the cache under your platform's user cache
@@ -35,29 +33,32 @@ Cache directory:
   macOS, %LOCALAPPDATA%\layerx on Windows). Override with the
   LAYERX_CACHE_DIR environment variable.
 
-  Auto-prune limits are configurable via LAYERX_CACHE_TTL_DAYS and
-  LAYERX_CACHE_MAX_BYTES; set either to 0 to disable that limit.`,
+  Set LAYERX_CACHE_TTL_DAYS and LAYERX_CACHE_MAX_BYTES to change the limits.
+  Set either to 0 to disable that limit.`,
+	Args: func(_ *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return fmt.Errorf("unknown cache command %q; use list or prune", args[0])
+		}
+		return nil
+	},
+	RunE:         func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+	SilenceUsage: true,
 }
 
 var cacheListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List cached image digests with size and timestamp",
-	Long: `List cached image digests with size and timestamp.
+	Short: "List cached images, sizes, and write times",
+	Long: `List cached images, sizes, and write times.
 
-Reports the original image reference, size on disk, and the cached-at
-time of every entry under the layerx cache directory, plus a totals
-footer. Rows are ordered newest-first so a freshly-cached entry is at
-the top of the table. The cached-at time is the file's modification
-time, which is fixed when the cache entry is written; layerx does not
-bump it on cache hits. The IMAGE column shows whatever reference was
-passed to layerx when the entry was first written; entries from older
-versions of layerx that pre-date this metadata appear as "<unknown>".
+Show image references, digests, disk sizes, and cache write times, newest
+first. Reading an entry does not update its time. Older entries may show
+"<unknown>" for the image reference.
 
 Cache directory: $LAYERX_CACHE_DIR overrides the default location.`,
-	Example: `  # See what's in the cache
-  layerx cache list`,
-	Args: cobra.NoArgs,
-	RunE: runCacheList,
+	Example:      `  layerx cache list`,
+	Args:         cobra.NoArgs,
+	RunE:         runCacheList,
+	SilenceUsage: true,
 }
 
 var (
@@ -71,38 +72,35 @@ var cachePruneCmd = &cobra.Command{
 	Short: "Remove cached entries by age or in full",
 	Long: `Remove cached entries by age or in full.
 
-By default (no flags), prune is a DRY RUN — it prints what would be
-removed and exits without touching disk. Use --older-than DURATION or
---all to actually remove entries.
+With no flags, preview all removals without deleting anything. Use --all
+or --older-than to remove entries; add --dry-run to preview either operation.
 
-Duration syntax accepts an integer followed by a unit:
-  s   seconds
-  m   minutes
-  h   hours
-  d   days
-  w   weeks
-Examples: 30d, 12h, 2w, 90m. "mo" and "y" are not accepted.
+Durations use a positive integer and one unit: s (seconds), m (minutes),
+h (hours), d (days), or w (weeks). Examples: 7d, 12h, 2w.
 
 Cache directory: $LAYERX_CACHE_DIR overrides the default location.`,
-	Example: `  # Show what would be evicted by a 7-day policy (no removal)
+	Example: `  layerx cache prune
   layerx cache prune --older-than 7d --dry-run
-
-  # Actually evict entries older than 7 days
   layerx cache prune --older-than 7d
-
-  # Empty the cache
   layerx cache prune --all`,
-	Args: cobra.NoArgs,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	PreRunE: func(cmd *cobra.Command, _ []string) error {
+		if cmd.Flags().Changed("all") && cmd.Flags().Changed("older-than") {
+			return fmt.Errorf("use either --all or --older-than, not both")
+		}
+		return nil
+	},
 	RunE: runCachePrune,
 }
 
 func init() {
 	cachePruneCmd.Flags().StringVar(&flagCacheOlderThan, "older-than", "",
-		"remove entries older than DURATION (e.g. 7d, 12h, 2w)")
+		"remove entries older than `DURATION` (e.g. 7d, 12h, 2w)")
 	cachePruneCmd.Flags().BoolVar(&flagCacheAll, "all", false,
 		"remove every entry under the cache directory")
 	cachePruneCmd.Flags().BoolVar(&flagCacheDryRun, "dry-run", false,
-		"preview removals without deleting (implicit when no other flag is given)")
+		"preview removals without deleting")
 	cachePruneCmd.MarkFlagsMutuallyExclusive("older-than", "all")
 
 	cacheCmd.AddCommand(cacheListCmd)
@@ -160,9 +158,9 @@ func runCachePrune(cmd *cobra.Command, _ []string) error {
 	// the commands that would, so users don't think the dry-run did the job.
 	if bareDryRun && len(res.Removed) > 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "\nThis was a dry run. To remove entries, use:")
-		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --all                      remove all entries")
-		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --older-than DURATION      remove entries older than e.g. 7d, 12h, 2w")
-		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --older-than 7d --dry-run  preview what --older-than would remove")
+		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --all                     # remove all entries")
+		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --older-than 7d           # remove entries older than 7 days")
+		fmt.Fprintln(cmd.OutOrStdout(), "  layerx cache prune --older-than 7d --dry-run # preview removals")
 	}
 
 	// Exit 1 only when the prune accomplished nothing AND a partial

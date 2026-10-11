@@ -21,12 +21,12 @@ rules:
 path-rules:
   block:
     - "**/.git/**"
-    - "**/.npm/_cacache/**"      # npm cache, never needed at runtime
+    - "**/.npm/_cacache/**"      # npm download cache
     - "**/.yarn/cache/**"
     - "**/.pnpm-store/**"
     - "/root/.npm/**"
     - "/tmp/**"
 
   deny-waste:
-    - "**/node_modules/**"        # reinstalled across layers = wasted
-    - "**/*.map"                  # source maps in production rarely needed
+    - "**/node_modules/**"        # fail if earlier copies waste space
+    - "**/*.map"                  # fail if earlier source maps waste space

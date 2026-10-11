@@ -20,7 +20,8 @@ CI mode evaluates two families of rules against the image:
 - **Path rules** — `block`, `deny-waste`, `max-layer-count`. Each fires per
   matching path and reports which layer introduced the violation.
 
-Rules come from `.layerx.yaml` (in the working directory) and can be
+Rules come from `.layerx.yaml` (current directory or parents, then the user
+configuration directory) and can be
 overridden inline with CLI flags for the three global thresholds. If
 `.layerx.yaml` is missing, built-in defaults apply.
 
@@ -260,9 +261,9 @@ A few ground rules:
 
 | Code | Meaning |
 |---|---|
-| `0` | All rules passed. Report ends with `PASS: Image efficiency check passed (score: NN%)`. |
-| `1` | One or more rules failed. Report ends with `FAIL: Image efficiency check failed` and a per-rule breakdown. |
-| `2` | Internal / operational error: Docker daemon unreachable, image not found, archive missing or malformed, invalid CLI flags, malformed `.layerx.yaml`, every rule disabled. |
+| `0` | All rules passed. Report ends with `PASS: All checks passed (score: NN%)`. |
+| `1` | One or more rules failed. Report starts with `FAIL: Image checks failed`, followed by a per-rule breakdown. |
+| `2` | Operational error: Docker daemon unreachable, image not found, archive missing or malformed, invalid CLI flags, malformed `.layerx.yaml`, every rule disabled. |
 
 The exit code is the contract — your pipeline only needs to look at it.
 The rest of the output is human-readable detail.

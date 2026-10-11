@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Shorter command help, practical examples, and clearer configuration guidance. Build instructions now match flag handling, and compare examples preserve CI failures.
+- Clearer TUI labels, consistent layer numbering, and action hints that match the current view. Keyboard help now scrolls to fit smaller terminals.
+
 ### Fixed
+- Invalid CI options and build inspection failures now show an error; unknown cache commands no longer succeed silently. Image pull errors retain the registry's explanation.
 - File viewing and extraction now use the same platform as image analysis, preventing wrong-architecture contents or export failures when inspecting multi-platform images. Compatibility with older engines and exact image IDs is preserved.
 
 ## [v1.6.3] - 2026-10-11

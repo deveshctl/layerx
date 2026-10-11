@@ -3,8 +3,9 @@
 # Configuration Reference
 
 `.layerx.yaml` configures CI thresholds, path-scoped rules for `layerx ci`,
-and the TUI colour theme. It is read from the current working directory by
-default (or the path passed to `--config`).
+and the TUI colour theme. LayerX searches the current directory and parents
+for `.layerx.yaml`, then the user configuration directory for
+`layerx/config.yaml`. Use `--config FILE` to choose a file explicitly.
 
 ---
 
@@ -15,9 +16,10 @@ default (or the path passed to `--config`).
 - **When it is created.** Run `layerx init` once per repository. That writes
   a starter `.layerx.yaml` matched to your stack (`node`, `python`, `java`,
   `go`, or `generic`).
-- **Where it should live.** In the directory you run `layerx` from — usually
-  the repository root. `layerx` reads `./.layerx.yaml`. There is no global
-  config search path and no XDG fallback.
+- **Where it should live.** Usually the repository root. LayerX uses the
+  nearest `.layerx.yaml` in the current directory or its parents, then falls
+  back to `layerx/config.yaml` in the operating system's user configuration
+  directory. `--config FILE` overrides this search.
 - **YAML library.** Decoded with `goccy/go-yaml` in **strict mode**: any
   unknown top-level key fails with a parse error. Empty files (or files
   containing only comments and whitespace) silently fall back to built-in

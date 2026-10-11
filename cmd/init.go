@@ -23,22 +23,14 @@ var (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Write a starter .layerx.yaml configuration",
-	Long: `Write a starter .layerx.yaml configuration to the current directory.
+	Short: "Create a starter .layerx.yaml configuration",
+	Long: `Create .layerx.yaml in the current directory. Choose a generic, Node,
+Python, Java, or Go template, then adjust its rules for your image.
 
-Picks a configuration flavoured for your stack: Node, Python, Java, Go, or
-generic. The starter file enables sensible path rules for that ecosystem
-(e.g. block /root/.npm for Node, deny-waste **/*.pyc for Python). Edit
-afterward to taste.
-
-Refuses to overwrite an existing .layerx.yaml unless --force is set.`,
-	Example: `  # Interactive flavour prompt (TTY) or generic (non-TTY)
-  layerx init
-
-  # Write the Node config without prompting
+Without --flavour, prompts in an interactive terminal and otherwise uses
+the generic template. Existing files are kept unless --force is set.`,
+	Example: `  layerx init
   layerx init --flavour node
-
-  # Overwrite an existing .layerx.yaml with the generic config
   layerx init --flavour generic --force`,
 	Args:         cobra.NoArgs,
 	RunE:         runInitCmd,
@@ -47,9 +39,9 @@ Refuses to overwrite an existing .layerx.yaml unless --force is set.`,
 
 func init() {
 	initCmd.Flags().StringVar(&flagInitFlavour, "flavour", "",
-		fmt.Sprintf("starter config flavour (%s)", flavourList()))
+		fmt.Sprintf("configuration template (%s)", flavourList()))
 	initCmd.Flags().StringVar(&flagInitFlavour, "flavor", "",
-		fmt.Sprintf("starter config flavour (%s)", flavourList()))
+		fmt.Sprintf("configuration template (%s)", flavourList()))
 	_ = initCmd.Flags().MarkHidden("flavor")
 	initCmd.Flags().BoolVar(&flagInitForce, "force", false,
 		"overwrite an existing .layerx.yaml")
@@ -64,13 +56,13 @@ func runInitCmd(cmd *cobra.Command, _ []string) error {
 
 	data, ok := StarterConfig(flavour)
 	if !ok {
-		return fmt.Errorf("unknown flavour %q (want %s)", flavour, flavourList())
+		return fmt.Errorf("unknown template %q (choose %s)", flavour, flavourList())
 	}
 
 	if err := writeStarterConfig(initConfigPath, data, flagInitForce); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (flavour: %s). Edit it to customise thresholds.\n", initConfigPath, flavour)
+	fmt.Fprintf(cmd.OutOrStdout(), "Created %s (template: %s). Review its rules before running CI.\n", initConfigPath, flavour)
 	return nil
 }
 
@@ -80,13 +72,13 @@ func runInitCmd(cmd *cobra.Command, _ []string) error {
 func resolveFlavour(flag string, in io.Reader, errw io.Writer) (string, error) {
 	if flag != "" {
 		if !isValidFlavour(flag) {
-			return "", fmt.Errorf("unknown flavour %q (want %s)", flag, flavourList())
+			return "", fmt.Errorf("unknown template %q (choose %s)", flag, flavourList())
 		}
 		return flag, nil
 	}
 
 	if !isTerminal(in) {
-		fmt.Fprintln(errw, "stdin is not a terminal; defaulting to flavour 'generic'. Use --flavour to override.")
+		fmt.Fprintln(errw, "Using the generic template. Set --flavour to choose another.")
 		return "generic", nil
 	}
 
@@ -104,7 +96,7 @@ func isTerminal(r io.Reader) bool {
 }
 
 func promptFlavour(in io.Reader, errw io.Writer) (string, error) {
-	fmt.Fprintln(errw, "Pick a starter config flavour:")
+	fmt.Fprintln(errw, "Choose a configuration template:")
 	for i, f := range validFlavours {
 		fmt.Fprintf(errw, "  %d) %s\n", i+1, f)
 	}
