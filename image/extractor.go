@@ -125,7 +125,8 @@ func processContent(path string, data []byte, totalSize int64) *FileContent {
 }
 
 type DockerExtractor struct {
-	cli client.APIClient
+	cli      client.APIClient
+	saveOpts func(context.Context, string) []client.ImageSaveOption
 }
 
 func NewDockerExtractor(cli client.APIClient) *DockerExtractor {
@@ -358,7 +359,11 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		return nil, nil, nil, fmt.Errorf("loadLayerSource: maxLayers must be > 0, got %d", maxLayers)
 	}
 
-	rc, err := e.cli.ImageSave(ctx, []string{imageRef})
+	var opts []client.ImageSaveOption
+	if e.saveOpts != nil {
+		opts = e.saveOpts(ctx, imageRef)
+	}
+	rc, err := e.cli.ImageSave(ctx, []string{imageRef}, opts...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
