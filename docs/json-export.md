@@ -35,6 +35,9 @@ Use it for:
 # Standalone JSON export. Skips the TUI; writes the file atomically.
 layerx --json analysis.json nginx:latest
 
+# Build an image and export its analysis without opening the TUI.
+layerx --json analysis.json build -t myapp .
+
 # Combined with a CI run — same analysis powers both the gate and the JSON.
 layerx ci --json out/analysis.json myapp:latest
 
