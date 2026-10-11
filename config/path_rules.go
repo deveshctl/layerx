@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
@@ -123,6 +124,14 @@ func normalizeList(node ast.Node) ([]PathRuleSpec, error) {
 		typ := PathRuleType(entry.Type)
 		switch typ {
 		case PathRuleBlock, PathRuleDenyWaste:
+			if len(entry.Paths) == 0 {
+				return nil, fmt.Errorf("path-rules[id=%s]: paths must contain at least one non-blank glob pattern", entry.ID)
+			}
+			for _, p := range entry.Paths {
+				if strings.TrimSpace(p) == "" {
+					return nil, fmt.Errorf("path-rules[id=%s]: paths must not contain blank glob patterns", entry.ID)
+				}
+			}
 			if err := validateGlobs(entry.ID, entry.Paths); err != nil {
 				return nil, err
 			}
