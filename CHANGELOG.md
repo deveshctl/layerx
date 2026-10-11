@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- File viewing and extraction now use the same platform as image analysis, preventing wrong-architecture contents or export failures when inspecting multi-platform images. Compatibility with older engines and exact image IDs is preserved.
+
 ## [v1.6.3] - 2026-10-11
 
 ### Changed

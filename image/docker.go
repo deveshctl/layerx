@@ -202,7 +202,7 @@ func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
 }
 
 func (r *DockerResolver) NewExtractor() Extractor {
-	return NewDockerExtractor(r.cli)
+	return &DockerExtractor{cli: r.cli, saveOpts: r.imageSaveOpts}
 }
 
 func (r *DockerResolver) Resolve(ctx context.Context, imageRef string) ([]Layer, error) {
@@ -216,13 +216,7 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseExporting})
 
-	var saveOpts []client.ImageSaveOption
-	// Bare image IDs refer to an exact local image, which may intentionally
-	// be non-native. Do not replace that choice with the daemon's platform.
-	if r.platform != nil || !isImageDigestRef(imageRef) {
-		saveOpts = r.saveOpts(ctx)
-	}
-	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, saveOpts...)
+	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, r.imageSaveOpts(ctx, imageRef)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
@@ -231,6 +225,16 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
 	return parseLayers(ctx, rc)
+}
+
+// imageSaveOpts keeps analysis and layer extraction on the same platform.
+func (r *DockerResolver) imageSaveOpts(ctx context.Context, imageRef string) []client.ImageSaveOption {
+	// Bare image IDs refer to an exact local image, which may intentionally
+	// be non-native. Do not replace that choice with the daemon's platform.
+	if r.platform == nil && isImageDigestRef(imageRef) {
+		return nil
+	}
+	return r.saveOpts(ctx)
 }
 
 // saveOpts builds the per-call ImageSaveOption slice, scoping the export
