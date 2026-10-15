@@ -12,6 +12,8 @@ import (
 	"github.com/deveshctl/layerx/image"
 )
 
+const minTreeNameWidth = 16
+
 func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
 	contentWidth := width - 2
 
@@ -46,6 +48,7 @@ func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, of
 }
 
 func renderTreePanel(in treePaneInput, title string, focused bool) string {
+	in.focused = focused
 	body, above, below := renderTreeBody(in)
 	return renderPanel(in.theme, body, title, focused, in.contentWidth, in.bodyHeight, above, below)
 }
@@ -59,6 +62,7 @@ type treePaneInput struct {
 	contentWidth  int
 	bodyHeight    int
 	showFilterBar bool
+	focused       bool
 	filterActive  bool
 	filterQuery   string
 	treeMode      bool
@@ -76,6 +80,9 @@ type treePaneInput struct {
 }
 
 func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
+	if !in.focused {
+		in.styles.selectedTreeBg = in.styles.inactiveSelection
+	}
 	headerRows, contentHeight := treePaneRows(in.bodyHeight, in.showHeader, in.showFilterBar)
 
 	var sb strings.Builder
@@ -207,6 +214,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 		offset:        in.topOffset,
 		contentWidth:  contentWidth,
 		bodyHeight:    topRows,
+		focused:       in.topFocused,
 		showFilterBar: (in.filterActive || in.filterQuery != "") && in.topFocused,
 		filterActive:  in.filterActive,
 		filterQuery:   in.filterQuery,
@@ -225,6 +233,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 		offset:        in.botOffset,
 		contentWidth:  contentWidth,
 		bodyHeight:    botRows,
+		focused:       in.botFocused,
 		showFilterBar: (in.filterActive || in.filterQuery != "") && in.botFocused,
 		filterActive:  in.filterActive,
 		filterQuery:   in.filterQuery,
@@ -256,7 +265,7 @@ func renderCompactSplitTree(in splitTreeInput) string {
 		filterActive: in.filterActive, filterQuery: in.filterQuery,
 		treeMode: in.treeMode, currentLayer: in.currentLayer,
 	}
-	label := "Layer changes"
+	label := "Layer files"
 	if in.botFocused {
 		pane.files, pane.cursor, pane.offset, pane.collapsed = in.botFiles, in.botCursor, in.botOffset, in.botCollapsed
 		label = "Cumulative"
@@ -268,14 +277,18 @@ func renderCompactSplitTree(in splitTreeInput) string {
 // renderSplitDivider draws the horizontal separator between the two
 // sub-panes. The bottom pane's section label sits in the divider with a
 // match-count and a focus-weight background when that pane has focus.
-// This places the "▾ Cumulative" affordance on a row that would otherwise
+// This places the cumulative label on a row that would otherwise
 // be wasted whitespace.
 func renderSplitDivider(st themeStyles, botFocused bool, contentWidth int, botFiles []*image.FileNode, botCursor int) string {
-	label := " ▾ Cumulative "
+	marker := "  "
+	if botFocused {
+		marker = "▸ "
+	}
+	label := " " + marker + "Cumulative "
 	if botFocused && len(botFiles) > 0 {
-		label = fmt.Sprintf(" ▾ Cumulative %d/%d ", botCursor+1, len(botFiles))
+		label += fmt.Sprintf("%d/%d ", botCursor+1, len(botFiles))
 	} else if len(botFiles) > 0 {
-		label = fmt.Sprintf(" ▾ Cumulative · %d items ", len(botFiles))
+		label += fmt.Sprintf("· %d items ", len(botFiles))
 	}
 
 	var labelStyle, lineStyle lipgloss.Style
@@ -293,14 +306,14 @@ func renderSplitDivider(st themeStyles, botFocused bool, contentWidth int, botFi
 	return rendered + lineStyle.Render(strings.Repeat("─", rest))
 }
 
-// buildSplitTitle assembles "Layer changes N/M  ·  Cumulative" with the focused
+// buildSplitTitle assembles "Layer files N/M  ·  Cumulative" with the focused
 // half emphasised. The bottom-pane match counter is duplicated in the
 // divider for visibility, but the title's purpose is to advertise the
 // split and let the user see at a glance which view has focus.
 func buildSplitTitle(in splitTreeInput) string {
-	topPart := "Layer changes"
+	topPart := "Layer files"
 	if len(in.topFiles) > 0 {
-		topPart = fmt.Sprintf("Layer changes %d/%d", in.topCursor+1, len(in.topFiles))
+		topPart = fmt.Sprintf("Layer files %d/%d", in.topCursor+1, len(in.topFiles))
 	} else if in.filterQuery != "" {
 		topPart += " 0/0"
 	}
@@ -310,11 +323,8 @@ func buildSplitTitle(in splitTreeInput) string {
 	} else if in.filterQuery != "" {
 		botPart += " 0/0"
 	}
-	if in.topFocused {
-		return topPart + "  ·  " + botPart
-	}
 	if in.botFocused {
-		return topPart + "  ·  " + botPart
+		return botPart + "  ·  " + topPart
 	}
 	return topPart + "  ·  " + botPart
 }
@@ -325,7 +335,7 @@ func renderTreeHeader(st themeStyles, maxWidth int) string {
 	const sizeCol = 8
 	const colGap = 2
 	const diffGlyphCol = 2
-	const minNameSpace = 8
+	const minNameSpace = minTreeNameWidth
 
 	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
 	sizeMeta := diffGlyphCol + sizeCol + colGap
@@ -372,7 +382,7 @@ func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected boo
 	const colGap = 2
 	const diffGlyphCol = 2
 
-	const minNameSpace = 8
+	const minNameSpace = minTreeNameWidth
 	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
 	sizeMeta := diffGlyphCol + sizeCol + colGap
 	showPerms := maxWidth >= fullMeta+minNameSpace
@@ -428,8 +438,25 @@ func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected boo
 		showOrigin = false
 	}
 	wasTruncated := lipgloss.Width(fullName) > availableForName
-	if wasTruncated {
-		fullName = ansi.Truncate(fullName, availableForName, "…")
+	if flat {
+		fullName = truncateMid(displayName, availableForName)
+	} else {
+		glyph := ""
+		if f.IsDir {
+			glyph = displayName[:len("▾ ")]
+			displayName = displayName[len(glyph):]
+		}
+		nameBudget := max(availableForName-lipgloss.Width(glyph), 0)
+		// Indentation yields to the filename before the filename is shortened.
+		indentBudget := max(nameBudget-lipgloss.Width(displayName), 0)
+		treePrefix = ansi.Truncate(treePrefix, indentBudget, "… ")
+		nameBudget = max(nameBudget-lipgloss.Width(treePrefix), 0)
+		if f.IsDir {
+			displayName = truncateMid(strings.TrimSuffix(displayName, "/"), max(nameBudget-1, 0)) + "/"
+		} else {
+			displayName = truncateMid(displayName, nameBudget)
+		}
+		fullName = treePrefix + glyph + displayName
 	}
 
 	nameWidth := lipgloss.Width(fullName) + lipgloss.Width(originSuffix)

@@ -79,15 +79,15 @@ func CatppuccinMocha() Theme {
 		Separator: lipgloss.Color("#313244"),
 		Command:   lipgloss.Color("#A6ADC8"),
 		StatusKey: lipgloss.Color("#89B4FA"),
-		StatusDim: lipgloss.Color("#6C7086"),
+		StatusDim: lipgloss.Color("#7F849C"),
 		StatusBg:  lipgloss.Color("#181825"),
 		HeaderDim: lipgloss.Color("#9399B2"),
 		HeaderSep: lipgloss.Color("#313244"),
 		FileName:  lipgloss.Color("#BAC2DE"),
 
-		MetaDim:   lipgloss.Color("#6C7086"),
+		MetaDim:   lipgloss.Color("#7F849C"),
 		TreeDim:   lipgloss.Color("#45475A"),
-		ScrollDim: lipgloss.Color("#6C7086"),
+		ScrollDim: lipgloss.Color("#7F849C"),
 
 		SearchHighlightBg: lipgloss.Color("#585B70"),
 		SearchCurrentBg:   lipgloss.Color("#F9E2AF"),
@@ -121,15 +121,15 @@ func Kanagawa() Theme {
 		Separator: lipgloss.Color("#1F1F28"),
 		Command:   lipgloss.Color("#938AA9"), // spring violet
 		StatusKey: lipgloss.Color("#7E9CD8"),
-		StatusDim: lipgloss.Color("#54546D"), // wave grey
+		StatusDim: lipgloss.Color("#727169"), // fuji grey
 		StatusBg:  lipgloss.Color("#12121A"), // darker than MainBg
 		HeaderDim: lipgloss.Color("#717C7C"), // autumn grey
 		HeaderSep: lipgloss.Color("#1F1F28"),
 		FileName:  lipgloss.Color("#DCD7BA"),
 
-		MetaDim:   lipgloss.Color("#54546D"),
+		MetaDim:   lipgloss.Color("#727169"),
 		TreeDim:   lipgloss.Color("#2A2A37"),
-		ScrollDim: lipgloss.Color("#54546D"),
+		ScrollDim: lipgloss.Color("#727169"),
 
 		SearchHighlightBg: lipgloss.Color("#2D4F67"),
 		SearchCurrentBg:   lipgloss.Color("#DCA561"), // carp yellow
@@ -162,15 +162,15 @@ func GruvboxDark() Theme {
 		Separator: lipgloss.Color("#282828"),
 		Command:   lipgloss.Color("#D5C4A1"),
 		StatusKey: lipgloss.Color("#83A598"),
-		StatusDim: lipgloss.Color("#665C54"),
+		StatusDim: lipgloss.Color("#928374"),
 		StatusBg:  lipgloss.Color("#1C1C1C"),
 		HeaderDim: lipgloss.Color("#928374"),
 		HeaderSep: lipgloss.Color("#282828"),
 		FileName:  lipgloss.Color("#EBDBB2"),
 
-		MetaDim:   lipgloss.Color("#665C54"),
+		MetaDim:   lipgloss.Color("#928374"),
 		TreeDim:   lipgloss.Color("#3C3836"),
-		ScrollDim: lipgloss.Color("#665C54"),
+		ScrollDim: lipgloss.Color("#928374"),
 
 		SearchHighlightBg: lipgloss.Color("#504945"),
 		SearchCurrentBg:   lipgloss.Color("#FABD2F"),
@@ -203,15 +203,15 @@ func RosePine() Theme {
 		Separator: lipgloss.Color("#1F1D2E"),
 		Command:   lipgloss.Color("#908CAA"), // muted
 		StatusKey: lipgloss.Color("#C4A7E7"),
-		StatusDim: lipgloss.Color("#6E6A86"),
+		StatusDim: lipgloss.Color("#908CAA"),
 		StatusBg:  lipgloss.Color("#16131E"),
 		HeaderDim: lipgloss.Color("#817C9C"),
 		HeaderSep: lipgloss.Color("#1F1D2E"),
 		FileName:  lipgloss.Color("#E0DEF4"),
 
-		MetaDim:   lipgloss.Color("#6E6A86"),
+		MetaDim:   lipgloss.Color("#908CAA"),
 		TreeDim:   lipgloss.Color("#26233A"),
-		ScrollDim: lipgloss.Color("#6E6A86"),
+		ScrollDim: lipgloss.Color("#908CAA"),
 
 		SearchHighlightBg: lipgloss.Color("#403D52"),
 		SearchCurrentBg:   lipgloss.Color("#F6C177"),
@@ -285,15 +285,15 @@ func Oxocarbon() Theme {
 		Separator: lipgloss.Color("#1E1E1E"),
 		Command:   lipgloss.Color("#3DDBD9"), // teal/cyan
 		StatusKey: lipgloss.Color("#78A9FF"),
-		StatusDim: lipgloss.Color("#525252"),
+		StatusDim: lipgloss.Color("#6F6F6F"),
 		StatusBg:  lipgloss.Color("#161616"),
 		HeaderDim: lipgloss.Color("#6F6F6F"),
 		HeaderSep: lipgloss.Color("#1E1E1E"),
 		FileName:  lipgloss.Color("#F2F4F8"),
 
-		MetaDim:   lipgloss.Color("#525252"),
+		MetaDim:   lipgloss.Color("#6F6F6F"),
 		TreeDim:   lipgloss.Color("#393939"),
-		ScrollDim: lipgloss.Color("#525252"),
+		ScrollDim: lipgloss.Color("#6F6F6F"),
 
 		SearchHighlightBg: lipgloss.Color("#353535"),
 		SearchCurrentBg:   lipgloss.Color("#FFD700"),
@@ -326,15 +326,15 @@ func Cyberdream() Theme {
 		Separator: lipgloss.Color("#16161F"),
 		Command:   lipgloss.Color("#BD00FF"), // neon purple
 		StatusKey: lipgloss.Color("#00BFFF"),
-		StatusDim: lipgloss.Color("#3D3D5C"),
+		StatusDim: lipgloss.Color("#7B7B9D"),
 		StatusBg:  lipgloss.Color("#0D0D14"),
-		HeaderDim: lipgloss.Color("#4A4A6A"),
+		HeaderDim: lipgloss.Color("#7B7B9D"),
 		HeaderSep: lipgloss.Color("#16161F"),
 		FileName:  lipgloss.Color("#E0E0FF"),
 
-		MetaDim:   lipgloss.Color("#3D3D5C"),
+		MetaDim:   lipgloss.Color("#7B7B9D"),
 		TreeDim:   lipgloss.Color("#2A2A3D"),
-		ScrollDim: lipgloss.Color("#3D3D5C"),
+		ScrollDim: lipgloss.Color("#7B7B9D"),
 
 		SearchHighlightBg: lipgloss.Color("#2A2A3D"),
 		SearchCurrentBg:   lipgloss.Color("#FFD700"),
@@ -374,9 +374,9 @@ func TokyoNight() Theme {
 		HeaderSep: lipgloss.Color("#1F2335"),
 		FileName:  lipgloss.Color("#C0CAF5"),
 
-		MetaDim:   lipgloss.Color("#565F89"),
+		MetaDim:   lipgloss.Color("#737AA2"),
 		TreeDim:   lipgloss.Color("#3B4261"),
-		ScrollDim: lipgloss.Color("#565F89"),
+		ScrollDim: lipgloss.Color("#737AA2"),
 
 		SearchHighlightBg: lipgloss.Color("#3D4C7A"),
 		SearchCurrentBg:   lipgloss.Color("#E0AF68"),

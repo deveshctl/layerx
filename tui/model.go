@@ -1989,6 +1989,8 @@ func (m model) viewReady() tea.View {
 		cmd = layers[m.layerCursor].Command
 	}
 	commandBar := renderCommandBar(m.styles, cmd, m.width)
+	// Keep the three reserved command rows even when the command is short.
+	commandBar += strings.Repeat("\n", max(3-lipgloss.Height(commandBar), 0))
 
 	sep := m.styles.separator.Render(strings.Repeat("─", m.width))
 	status := m.renderStatusBar(treeFiles)

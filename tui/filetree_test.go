@@ -76,8 +76,8 @@ func TestRenderSplitFileTree_TitleShowsBothPanes(t *testing.T) {
 		botCollapsed: nil,
 		treeMode:     true,
 	})
-	if !strings.Contains(out, "Layer changes") {
-		t.Fatalf("split title must include 'Layer changes' for the top pane; got:\n%s", out)
+	if !strings.Contains(out, "Layer files") {
+		t.Fatalf("split title must include 'Layer files' for the top pane; got:\n%s", out)
 	}
 	if !strings.Contains(out, "Cumulative") {
 		t.Fatalf("split title must include 'Cumulative' for the bottom pane; got:\n%s", out)
@@ -103,13 +103,12 @@ func TestRenderSplitFileTree_DividerCarriesCumulativeLabel(t *testing.T) {
 	}
 }
 
-// In single-pane mode the file tree must not render the split's "Layer changes"
-// label — that title is reserved for the split layout.
+// Single-pane mode must not advertise a cumulative pane.
 func TestRenderFileTree_SinglePaneOmitsSplitTitle(t *testing.T) {
 	files := fakeFiles(3)
 	out := renderFileTree(CatppuccinMocha(), themeStyles{}, files, 0, 0, 60, 10, true, false, "", false, false, nil, 0)
-	if strings.Contains(out, "Layer changes") {
-		t.Fatalf("single-pane file tree must not advertise the split title 'Layer changes'; got:\n%s", out)
+	if strings.Contains(out, "Cumulative") {
+		t.Fatalf("single-pane file tree must not advertise 'Cumulative'; got:\n%s", out)
 	}
 }
 

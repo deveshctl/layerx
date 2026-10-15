@@ -54,13 +54,21 @@ func renderFileView(p viewerParams) string {
 		return renderPanel(p.theme, "", "File Viewer", true, contentWidth, p.height, false, false)
 	}
 
-	title := p.content.Path
+	titleWidth := max(contentWidth-5, 0) // border spacing and active-pane marker
+	origin := ""
 	if p.originLayer != p.currentLayer && p.originCmd != "" {
-		cmd := p.originCmd
-		if lipgloss.Width(cmd) > 40 {
-			cmd = ansi.Truncate(cmd, 40, "…")
+		origin = fmt.Sprintf("  ← L%d:", p.originLayer+1)
+		if titleWidth-lipgloss.Width(origin) < minTreeNameWidth {
+			origin = ""
 		}
-		title = fmt.Sprintf("%s  ← L%d: %s", p.content.Path, p.originLayer+1, cmd)
+	}
+	title := truncateMid(p.content.Path, max(titleWidth-lipgloss.Width(origin), 0)) + origin
+	if origin != "" {
+		cmdWidth := min(40, titleWidth-lipgloss.Width(title)-1)
+		if cmdWidth > 0 {
+			cmd := strings.Join(strings.Fields(p.originCmd), " ")
+			title += " " + ansi.Truncate(cmd, cmdWidth, "…")
+		}
 	}
 
 	if p.content.Binary {

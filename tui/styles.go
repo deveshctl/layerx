@@ -30,6 +30,9 @@ func renderPanel(t Theme, content, title string, focused bool, contentWidth, hei
 
 	borderFg := styleWithFg(borderColor)
 
+	if focused {
+		title = "▸ " + title
+	}
 	maxTitle := max(contentWidth-3, 0)
 	if ansi.StringWidth(title) > maxTitle {
 		title = ansi.Truncate(title, maxTitle, "…")
@@ -141,6 +144,8 @@ type themeStyles struct {
 	// selectedTreeBg is Selected+SelectedBg, used for the selected row in the
 	// file tree and layer list.
 	selectedTreeBg lipgloss.Style
+	// inactiveSelection retains context without competing with the active pane.
+	inactiveSelection lipgloss.Style
 	// searchMatchStyle is SearchCurrentBg+StatusBg+Bold, used for the match
 	// counter in the viewer status bar.
 	searchMatchStyle lipgloss.Style
@@ -153,35 +158,36 @@ type themeStyles struct {
 
 func newThemeStyles(t Theme) themeStyles {
 	return themeStyles{
-		metaDim:          lipgloss.NewStyle().Foreground(t.MetaDim),
-		headerDim:        lipgloss.NewStyle().Foreground(t.HeaderDim),
-		treeDim:          lipgloss.NewStyle().Foreground(t.TreeDim),
-		unchanged:        lipgloss.NewStyle().Foreground(t.Unchanged),
-		added:            lipgloss.NewStyle().Foreground(t.Added),
-		modified:         lipgloss.NewStyle().Foreground(t.Modified),
-		removed:          lipgloss.NewStyle().Foreground(t.Removed),
-		accent:           lipgloss.NewStyle().Foreground(t.Accent),
-		fileName:         lipgloss.NewStyle().Foreground(t.FileName),
-		statusKey:        lipgloss.NewStyle().Foreground(t.StatusKey).Background(t.StatusBg).Bold(true),
-		statusDim:        lipgloss.NewStyle().Foreground(t.StatusDim).Background(t.StatusBg),
-		headerSep:        lipgloss.NewStyle().Foreground(t.HeaderSep).Background(t.StatusBg),
-		headerDimBg:      lipgloss.NewStyle().Foreground(t.HeaderDim).Background(t.StatusBg),
-		accentBg:         lipgloss.NewStyle().Foreground(t.Accent).Background(t.StatusBg),
-		modifiedBg:       lipgloss.NewStyle().Foreground(t.Modified).Background(t.StatusBg),
-		addedBg:          lipgloss.NewStyle().Foreground(t.Added).Background(t.StatusBg).Bold(true),
-		bgOnly:           lipgloss.NewStyle().Background(t.StatusBg),
-		command:          lipgloss.NewStyle().Foreground(t.Command),
-		separator:        lipgloss.NewStyle().Foreground(t.Separator),
-		selected:         lipgloss.NewStyle().Foreground(t.Selected),
-		statusDimRaw:     lipgloss.NewStyle().Foreground(t.StatusDim),
+		metaDim:             lipgloss.NewStyle().Foreground(t.MetaDim),
+		headerDim:           lipgloss.NewStyle().Foreground(t.HeaderDim),
+		treeDim:             lipgloss.NewStyle().Foreground(t.TreeDim),
+		unchanged:           lipgloss.NewStyle().Foreground(t.Unchanged),
+		added:               lipgloss.NewStyle().Foreground(t.Added),
+		modified:            lipgloss.NewStyle().Foreground(t.Modified),
+		removed:             lipgloss.NewStyle().Foreground(t.Removed),
+		accent:              lipgloss.NewStyle().Foreground(t.Accent),
+		fileName:            lipgloss.NewStyle().Foreground(t.FileName),
+		statusKey:           lipgloss.NewStyle().Foreground(t.StatusKey).Background(t.StatusBg).Bold(true),
+		statusDim:           lipgloss.NewStyle().Foreground(t.StatusDim).Background(t.StatusBg),
+		headerSep:           lipgloss.NewStyle().Foreground(t.HeaderSep).Background(t.StatusBg),
+		headerDimBg:         lipgloss.NewStyle().Foreground(t.HeaderDim).Background(t.StatusBg),
+		accentBg:            lipgloss.NewStyle().Foreground(t.Accent).Background(t.StatusBg),
+		modifiedBg:          lipgloss.NewStyle().Foreground(t.Modified).Background(t.StatusBg),
+		addedBg:             lipgloss.NewStyle().Foreground(t.Added).Background(t.StatusBg).Bold(true),
+		bgOnly:              lipgloss.NewStyle().Background(t.StatusBg),
+		command:             lipgloss.NewStyle().Foreground(t.Command),
+		separator:           lipgloss.NewStyle().Foreground(t.Separator),
+		selected:            lipgloss.NewStyle().Foreground(t.Selected),
+		statusDimRaw:        lipgloss.NewStyle().Foreground(t.StatusDim),
 		searchHighlight:     lipgloss.NewStyle().Background(t.SearchHighlightBg),
 		searchHighlightFile: lipgloss.NewStyle().Foreground(t.FileName).Background(t.SearchHighlightBg),
-		cursorOverlay:    lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.Accent),
-		selectedStatusBg:  lipgloss.NewStyle().Foreground(t.Selected).Background(t.StatusBg).Bold(true),
-		selectedTreeBg:    lipgloss.NewStyle().Foreground(t.Selected).Background(t.SelectedBg),
-		searchMatchStyle:  lipgloss.NewStyle().Foreground(t.SearchCurrentBg).Background(t.StatusBg).Bold(true),
-		searchCurrentLine: lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.SearchCurrentBg),
-		removedStatusBg:   lipgloss.NewStyle().Foreground(t.Removed).Background(t.StatusBg).Bold(true),
+		cursorOverlay:       lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.Accent),
+		selectedStatusBg:    lipgloss.NewStyle().Foreground(t.Selected).Background(t.StatusBg).Bold(true),
+		selectedTreeBg:      lipgloss.NewStyle().Foreground(t.Selected).Background(t.SelectedBg),
+		inactiveSelection:   lipgloss.NewStyle().Foreground(t.HeaderDim).Background(t.StatusBg),
+		searchMatchStyle:    lipgloss.NewStyle().Foreground(t.SearchCurrentBg).Background(t.StatusBg).Bold(true),
+		searchCurrentLine:   lipgloss.NewStyle().Foreground(t.SearchCurrentFg).Background(t.SearchCurrentBg),
+		removedStatusBg:     lipgloss.NewStyle().Foreground(t.Removed).Background(t.StatusBg).Bold(true),
 	}
 }
 

@@ -12,6 +12,10 @@ import (
 )
 
 func renderLayers(t Theme, st themeStyles, layers []image.Layer, cursor int, offset int, width, height int, focused bool, mode sizeColMode, finalLiveSize int64) string {
+	if !focused {
+		st.selectedTreeBg = st.inactiveSelection
+		st.accent = st.metaDim
+	}
 	contentWidth := width - 2
 	listHeight := height
 
@@ -164,7 +168,7 @@ func deltaColor(t Theme, delta int64, finalLiveSize int64) color.Color {
 }
 
 func formatLayerLine(t Theme, st themeStyles, l image.Layer, selected bool, maxWidth int, mode sizeColMode, finalLiveSize int64) string {
-	index := fmt.Sprintf("#%d", l.Index)
+	index := fmt.Sprintf("#%d", l.Index+1)
 
 	indexWidth := max(len([]rune(index)), 3)
 
@@ -200,7 +204,7 @@ func formatLayerLine(t Theme, st themeStyles, l image.Layer, selected bool, maxW
 	}
 
 	dimHash := st.metaDim.Render("#")
-	numStr := fmt.Sprintf("%d", l.Index)
+	numStr := fmt.Sprintf("%d", l.Index+1)
 	numPad := ""
 	if len([]rune(numStr))+1 < indexWidth {
 		numPad = strings.Repeat(" ", indexWidth-len([]rune(numStr))-1)
