@@ -200,7 +200,7 @@ go install github.com/deveshctl/layerx@latest
 ```
 
 For Linux arm64, RPM packages, direct downloads and migration from the older
-Homebrew formula, see [Install LayerX](install.md). For the current pane labels,
+Homebrew formula, see [Install LayerX](../README.md#install). For the current pane labels,
 focus markers and compact split behavior, see [Using the TUI](tui.md).
 
 ---
