@@ -7,10 +7,6 @@ layerx nginx:stable
 layerx ./build/app.tar
 ```
 
-This guide describes the current main branch. Changes marked `Unreleased` in
-[CHANGELOG.md](../CHANGELOG.md) become available in the next tagged release.
-Use [the source-build instructions](install.md#install-with-go) to try them now.
-
 ## Read the screen
 
 - **Layers** lists Dockerfile commands. `#1` is the first layer; the visible

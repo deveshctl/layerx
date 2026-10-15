@@ -12,14 +12,9 @@ image archives**, with an interactive terminal UI and scriptable commands.
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
-![LayerX demo: find waste, open and search a file, switch panes, and compare images](assets/layerx-demo.gif)
+![LayerX Image Inspector — inspect Docker, Podman, and OCI image layers in a terminal UI](assets/layerx-demo.gif)
 
-[Watch the MP4](assets/layerx-demo.mp4)
-
-The demo uses small synthetic image archives and the current main branch.
-For released behavior, check [Releases](https://github.com/deveshctl/layerx/releases)
-and [CHANGELOG.md](CHANGELOG.md). Entries under `Unreleased`, including the
-latest TUI clarity changes, will ship in the next tagged release.
+[Watch the demo (MP4)](assets/layerx-demo.mp4)
 
 [Quick start](#quick-start) · [TUI guide](docs/tui.md) · [Compare](#compare-two-images) ·
 [CI](#ci-mode) · [Install](docs/install.md)

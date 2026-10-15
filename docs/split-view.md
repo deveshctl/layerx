@@ -4,8 +4,6 @@ Split view shows two ways to read the filesystem at the selected layer: changes
 relative to the preceding layer, and diff history accumulated from the base.
 
 For file viewing, searching, saving and all keys, see [Using the TUI](tui.md).
-This guide describes main; changes under [Unreleased](../CHANGELOG.md#unreleased)
-become available in the next tagged release.
 
 ---
 

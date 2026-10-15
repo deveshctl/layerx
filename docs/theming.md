@@ -10,7 +10,7 @@ The active panel title starts with `▸`, so focus remains identifiable alongsid
 the border color. Inactive selections use quieter text and background colors.
 Metadata, scroll indicators and hints use secondary theme colors; added,
 modified, removed and search matches keep their own roles. See the
-[TUI guide](tui.md) for navigation and the current-release note.
+[TUI guide](tui.md) for navigation.
 
 ---
 

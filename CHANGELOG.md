@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- Refreshed the README and recorded demo; dedicated install, engine, TUI and troubleshooting guides now explain current pane labels, focus, compact layouts and release availability. Homebrew instructions select the current macOS cask explicitly.
+- Refreshed the README and demo; dedicated install, engine, TUI and troubleshooting guides now explain current pane labels, focus and compact layouts. Homebrew instructions select the current macOS cask explicitly.
 - Clearer active-pane markers, quieter inactive selections, filename-preserving paths, consistent layer labels, and a steady footer. Essential metadata and hints are easier to read across the existing themes.
 - Shorter command help, practical examples, and clearer configuration guidance. Build instructions now match flag handling, and compare examples preserve CI failures.
 - Clearer TUI labels, consistent layer numbering, and action hints that match the current view. Keyboard help now scrolls to fit smaller terminals.
