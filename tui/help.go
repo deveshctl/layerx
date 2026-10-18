@@ -81,9 +81,11 @@ func defaultHelpSections() []helpSection {
 			},
 		},
 		{
-			title: "Wasted Files",
+			title: "Waste and cleanup",
 			entries: []helpEntry{
-				{"w", "Layer waste and cleanup candidates (i explains, Tab switches)"},
+				{"w", "Review layer waste and potential cleanup"},
+				{"i", "Explain the selected file or cache"},
+				{"Tab", "Switch between layer waste and potential cleanup"},
 				{"Enter", "Jump to original layer and path"},
 				{"a", "Expand top 20 to up to 500"},
 				{"y", "Copy highlighted path"},

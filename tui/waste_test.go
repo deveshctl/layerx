@@ -209,7 +209,7 @@ func TestWasteTitleShowsPositionCounter(t *testing.T) {
 
 	out := m.renderWasteOverlay()
 
-	assert.Contains(t, out, "Wasted Files 5/31",
+	assert.Contains(t, out, "Layer waste 5/31",
 		"panel title shows 1-based cursor position over total wasted files")
 	assert.NotContains(t, out, "Top 20 of",
 		"body header should no longer use Top 20 framing")
@@ -222,7 +222,7 @@ func TestWasteTitleEmptyState(t *testing.T) {
 
 	out := m.renderWasteOverlay()
 
-	assert.Contains(t, out, "Wasted Files 0/0",
+	assert.Contains(t, out, "Layer waste 0/0",
 		"empty waste list shows 0/0 in panel title")
 }
 
@@ -387,7 +387,7 @@ func TestWasteHelpBlocked(t *testing.T) {
 
 func TestWasteRenderNarrow(t *testing.T) {
 	m := setupModel()
-	m.width = 60 // boxWidth=56, innerWidth=54, wide check: 52 >= 60 → false
+	m.width = 60
 
 	root := &image.FileNode{Name: "", Path: "/", IsDir: true}
 	root.AddChild(&image.FileNode{Name: "short.txt", Path: "/short.txt", IntroducedInLayer: 0})
@@ -402,9 +402,8 @@ func TestWasteRenderNarrow(t *testing.T) {
 	m.openWaste()
 
 	out := m.renderWasteOverlay()
-	// Wide layout would include the "x4" count column. Narrow drops it.
-	assert.NotContains(t, out, "x4", "narrow render must drop the count column")
-	assert.Contains(t, out, "L1", "layer column always present")
+	assert.NotContains(t, out, "x4", "the list keeps write counts in the detailed history")
+	assert.Contains(t, out, "Layer 1", "layer column always present")
 }
 
 func TestWasteRenderCopyConfirm(t *testing.T) {
@@ -415,14 +414,14 @@ func TestWasteRenderCopyConfirm(t *testing.T) {
 	// Default render: no Copied! banner, footer hints visible.
 	before := m.renderWasteOverlay()
 	assert.NotContains(t, before, "Copied!")
-	assert.Contains(t, before, "jump", "footer hints visible by default")
+	assert.Contains(t, before, "Go to layer", "footer hints visible by default")
 
 	// After y: copyConfirm flips, banner replaces footer hints.
 	updated, _ := m.Update(keyPress('y'))
 	um := updated.(model)
 	out := um.renderWasteOverlay()
 	assert.Contains(t, out, "Copied!", "copy banner shows in overlay")
-	assert.NotContains(t, out, "Enter jump", "footer hints replaced while copyConfirm")
+	assert.NotContains(t, out, "Go to layer", "footer hints replaced while copyConfirm")
 }
 
 // truncateLeft must respect display columns, not rune count. CJK ideographs

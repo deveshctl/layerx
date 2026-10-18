@@ -4,6 +4,11 @@ LayerX separates proven redundant layer payload from live content that may be
 unnecessary. Both matter when reducing image size, but they answer different
 questions.
 
+The waste screen shows both totals together. **Layer waste** means earlier
+file copies that still take space; **Potential cleanup** means cache files
+to review before removing. Press `Tab` to switch the list. The footer names
+the destination, and `i` opens a plain-language explanation of the selected row.
+
 ## Why can a 2 GB image score 100%?
 
 Layer efficiency measures how much stored file payload remains reachable in

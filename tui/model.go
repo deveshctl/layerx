@@ -2082,7 +2082,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"d", "diff"},
 			{"s", "sort"},
 			{"c", "copy command"},
-			{"w", "wasted"},
+			{"w", "waste + cleanup"},
 			{"A", "split"},
 			{"?", "help"},
 			{"q", "quit"},
@@ -2107,7 +2107,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"/", "filter"},
 			{"d", "diff"},
 			{"s", "sort"},
-			{"w", "wasted"},
+			{"w", "waste + cleanup"},
 			{"A", "split"},
 		}
 		if enterDesc != "" {
@@ -2137,7 +2137,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		waste := ""
 		if m.efficiency != nil {
 			pct := int(m.efficiency.Score * 100)
-			effStr := fmt.Sprintf("Layer eff: %d%%", pct)
+			effStr := fmt.Sprintf("Layer efficiency: %d%%", pct)
 			if m.efficiency.WastedBytes > 0 {
 				waste = " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
 			}

@@ -56,27 +56,31 @@ func (m model) renderWasteDetail() string {
 	width := max(min(m.width-6, 88), 0)
 	dim := m.styles.metaDim
 	lines := []string{m.styles.accent.Render(truncateMid(detail.row.Path, width))}
-	footer := "j/k history · Enter jump · c cmd · Esc back"
-	title := "Explain layer waste"
+	footers := []string{"↑/↓ History · Enter Go to layer", "c Copy command · y Copy path · Esc Back"}
+	title := "Why this file wastes space"
 	if detail.row.CleanupReason != "" {
 		title = "Potential cleanup"
 		lines = append(lines,
-			image.FormatBytes(detail.row.Wasted)+" live bytes (uncompressed)",
+			image.FormatBytes(detail.row.Wasted)+" of cache files",
 			detail.row.CleanupReason,
-			dim.Render("Review whether this cache is needed at runtime."),
-			dim.Render("Clean it in the same build step, or use a cache mount."),
-			dim.Render("Deleting it in a later layer does not shrink stored layers."))
-		footer = "Enter jump · y copy · Esc back"
+			dim.Render("May be useful; check before removing."),
+			dim.Render("Clean in the same build step to save space."),
+			dim.Render("Or keep the cache outside the final image."))
+		footers = []string{"Enter View files · y Copy path · Esc Back"}
 	} else {
-		lines = append(lines, image.FormatBytes(detail.explanation.TotalWasted)+" wasted (uncompressed payload)")
 		events := detail.explanation.Events
+		summary := "Old copies still use " + image.FormatBytes(detail.explanation.TotalWasted) + "."
+		if len(events) > 0 && events[len(events)-1].Change == image.Removed {
+			summary = "Deleted later; " + image.FormatBytes(detail.explanation.TotalWasted) + " remains stored."
+		}
+		lines = append(lines, summary)
 		if len(events) == 0 {
-			lines = append(lines, dim.Render("Layer history unavailable for this path."))
+			lines = append(lines, dim.Render("File history is unavailable."))
 		} else {
 			// Reserve space for the path, total, selected command/reason and
 			// persistent footer. Derive the window each render so resize is safe.
-			commandRows := min(max(m.height-13, 1), 3)
-			visible := max(m.height-10-commandRows, 1)
+			commandRows := min(max(m.height-14, 1), 3)
+			visible := max(m.height-9-commandRows, 1)
 			start := max(detail.cursor-visible+1, 0)
 			end := min(start+visible, len(events))
 			for i := start; i < end; i++ {
@@ -90,8 +94,11 @@ func (m model) renderWasteDetail() string {
 				case image.Removed:
 					change = "deleted"
 				}
-				line := fmt.Sprintf("  L%d %-8s %s · waste %s", event.Layer+1,
+				line := fmt.Sprintf("  Layer %d %-8s %s · wasted %s", event.Layer+1,
 					change, image.FormatBytes(event.Size), image.FormatBytes(event.WastedBytes))
+				if event.Change == image.Removed {
+					line = fmt.Sprintf("  Layer %d deleted the file", event.Layer+1)
+				}
 				if i == detail.cursor {
 					line = ">" + line[1:]
 					line = m.styles.selectedTreeBg.Render(ansi.Truncate(line, width, "…"))
@@ -103,14 +110,29 @@ func (m model) renderWasteDetail() string {
 			if command == "" {
 				command = "(command unavailable)"
 			}
-			lines = append(lines, dim.Render(fmt.Sprintf("History %d/%d · %s", detail.cursor+1, len(events), selected.Reason)))
+			reason := selected.Reason
+			reason = strings.ReplaceAll(reason, "Overwritten in L", "Replaced in layer ")
+			reason = strings.ReplaceAll(reason, "Deleted in L", "Deleted in layer ")
+			if selected.Change == image.Removed {
+				reason = "Deleting later keeps earlier layer bytes."
+			}
+			if strings.Contains(reason, "surviving hardlink") {
+				reason = "Another linked path still uses this copy."
+			}
+			if reason == "Present in final filesystem" {
+				reason = "This copy is still in the final image."
+			}
+			// Put the explanation before the command, with the event count in
+			// the title so short terminals retain the useful explanation.
+			title += fmt.Sprintf(" %d/%d", detail.cursor+1, len(events))
+			lines = append(lines, dim.Render(reason))
 			lines = append(lines, wrapCommandLines(command, width, commandRows)...)
 		}
 	}
 	if m.copyConfirm {
-		footer = "Copied! · Esc back"
+		footers[0] = "Copied!"
 	}
-	lines = append(lines, footer)
+	lines = append(lines, footers...)
 	panel := renderPanel(m.theme, strings.Join(lines, "\n"), title, true,
 		width, min(len(lines), max(m.height-4, 0)), false, false)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)

@@ -248,30 +248,34 @@ func (m model) renderWasteOverlay() string {
 	if visibleCount > 0 {
 		position = m.wasteCursor + 1
 	}
-	title := fmt.Sprintf("Wasted Files %d/%d", position, visibleCount)
-	var total int64
-	for _, row := range m.allWasteRows() {
-		total += row.Wasted
+	title := fmt.Sprintf("Layer waste %d/%d", position, visibleCount)
+	var waste, cleanup int64
+	if m.efficiency != nil {
+		waste = m.efficiency.WastedBytes
 	}
-	if !m.wasteShowCleanup && m.efficiency != nil {
-		total = m.efficiency.WastedBytes
+	for _, row := range m.cleanupRows {
+		cleanup += row.Wasted
 	}
-	header := fmt.Sprintf("%s layer waste across %d files", image.FormatBytes(total), originalCount)
+	description := "Old file copies still stored in the image."
 	if m.wasteShowCleanup {
-		title = fmt.Sprintf("Cleanup candidates %d/%d", position, visibleCount)
-		header = image.FormatBytes(total) + " live cache bytes; review before removing"
+		title = fmt.Sprintf("Potential cleanup %d/%d", position, visibleCount)
+		description = "Cache files to review before removing."
 	}
 	if originalCount > visibleCount {
 		title += fmt.Sprintf(" (capped, %d total)", originalCount)
 	}
 	dim := lipgloss.NewStyle().Foreground(m.theme.StatusDim)
-	lines := []string{m.styles.accent.Render(header)}
+	lines := []string{
+		m.styles.accent.Render("Layer waste:       " + image.FormatBytes(waste)),
+		m.styles.accent.Render("Potential cleanup: " + image.FormatBytes(cleanup)),
+		dim.Render(description),
+	}
 	if len(rows) == 0 {
 		empty := "No layer waste detected"
 		if m.wasteShowCleanup {
-			empty = "No recognized cache candidates"
+			empty = "No known cache folders found."
 		}
-		lines = append(lines, empty, dim.Render("Layer efficiency is not a size assessment."))
+		lines = append(lines, empty, dim.Render("Live files may still offer cleanup."))
 	} else {
 		start := min(m.wasteOffset, len(rows))
 		end := min(start+m.wasteVisibleHeight(), len(rows))
@@ -279,18 +283,29 @@ func (m model) renderWasteOverlay() string {
 			lines = append(lines, formatWasteRow(m.theme, rows[i], i == m.wasteCursor, innerWidth))
 		}
 	}
-	footer := "Enter jump · i explain · y copy · a expand"
-	if m.wasteExpanded {
-		footer = "Enter jump · i explain · y copy · a collapse"
+	if len(rows) > 0 {
+		action := "i Why wasted? · Enter Go to layer"
+		if m.wasteShowCleanup {
+			action = "i Details · Enter View files"
+		}
+		if m.copyConfirm {
+			action = m.styles.added.Render("Copied!")
+		}
+		options := "↑/↓ Select · y Copy path"
+		if len(m.allWasteRows()) > wasteDefaultLimit {
+			if m.wasteExpanded {
+				options += " · a Show fewer"
+			} else {
+				options += " · a Show more"
+			}
+		}
+		lines = append(lines, action, dim.Render(options))
 	}
-	if len(rows) == 0 {
-		footer = ""
+	nextView := "Tab Review cleanup · Esc Close"
+	if m.wasteShowCleanup {
+		nextView = "Tab View layer waste · Esc Close"
 	}
-	if m.copyConfirm {
-		footer = m.styles.added.Render("Copied!")
-	}
-	lines = append(lines, footer,
-		dim.Render(fmt.Sprintf("Tab waste/cache (%d) · Esc close", len(m.cleanupRows))))
+	lines = append(lines, dim.Render(nextView))
 	panel := renderPanel(m.theme, strings.Join(lines, "\n"), title, true,
 		innerWidth, min(len(lines), max(m.height-4, 0)), m.wasteOffset > 0,
 		m.wasteOffset+m.wasteVisibleHeight() < len(rows))
@@ -298,80 +313,30 @@ func (m model) renderWasteOverlay() string {
 }
 
 func formatWasteRow(t Theme, r wasteRow, selected bool, innerWidth int) string {
-	const (
-		gutterW   = 2
-		wastedW   = 9
-		layerW    = 5
-		countW    = 5
-		gap       = 2
-		minPath   = 12
-		narrowMin = 60
-	)
-
-	wastedStr := image.FormatBytes(r.Wasted)
-	var layerStr string
-	if r.IntroLayer < 0 {
-		layerStr = "L?"
-	} else {
-		layerStr = fmt.Sprintf("L%d", r.IntroLayer+1)
-	}
-	countStr := fmt.Sprintf("x%d", r.LayerCount)
-	if r.CleanupReason != "" {
-		countStr = "cache"
-	}
-
-	wide := innerWidth-2 >= narrowMin
-	var fixedW int
-	if wide {
-		fixedW = gutterW + wastedW + gap + countW + gap + layerW
-	} else {
-		fixedW = gutterW + wastedW + gap + layerW
-	}
-
-	pathW := innerWidth - fixedW - gap - 2
-	pathW = max(pathW, minPath)
-
-	path := truncateMid(r.Path, pathW)
-	pathPad := max(pathW-lipgloss.Width(path), 0)
-
-	gutter := "  "
-	if selected {
-		gutter = "> "
-	}
-
-	if selected {
-		var line string
-		if wide {
-			line = gutter + path + strings.Repeat(" ", pathPad) +
-				strings.Repeat(" ", gap) + padLeft(wastedStr, wastedW) +
-				strings.Repeat(" ", gap) + padLeft(countStr, countW) +
-				strings.Repeat(" ", gap) + padLeft(layerStr, layerW)
-		} else {
-			line = gutter + path + strings.Repeat(" ", pathPad) +
-				strings.Repeat(" ", gap) + padLeft(wastedStr, wastedW) +
-				strings.Repeat(" ", gap) + padLeft(layerStr, layerW)
+	const sizeWidth = 9
+	layer := ""
+	if r.CleanupReason == "" {
+		layer = "Layer ?"
+		if r.IntroLayer >= 0 {
+			layer = fmt.Sprintf("Layer %d", r.IntroLayer+1)
 		}
+	}
+	fixed := 2 + 2 + sizeWidth
+	if layer != "" {
+		fixed += 2 + lipgloss.Width(layer)
+	}
+	pathWidth := max(innerWidth-fixed, 0)
+	path := truncateMid(r.Path, pathWidth)
+	line := "  " + path + strings.Repeat(" ", max(pathWidth-lipgloss.Width(path), 0)) +
+		"  " + padLeft(image.FormatBytes(r.Wasted), sizeWidth)
+	if layer != "" {
+		line += "  " + layer
+	}
+	if selected {
+		line = ">" + line[1:]
 		return lipgloss.NewStyle().Foreground(t.Selected).Background(t.SelectedBg).Bold(true).Render(line)
 	}
-
-	pathStyle := styleWithFg(t.FileName)
-	wastedStyle := styleWithFg(t.HeaderDim)
-	layerStyle := styleWithFg(t.MetaDim)
-	countStyle := styleWithFg(t.MetaDim)
-
-	var b strings.Builder
-	b.WriteString(gutter)
-	b.WriteString(pathStyle.Render(path))
-	b.WriteString(strings.Repeat(" ", pathPad))
-	b.WriteString(strings.Repeat(" ", gap))
-	b.WriteString(wastedStyle.Render(padLeft(wastedStr, wastedW)))
-	if wide {
-		b.WriteString(strings.Repeat(" ", gap))
-		b.WriteString(countStyle.Render(padLeft(countStr, countW)))
-	}
-	b.WriteString(strings.Repeat(" ", gap))
-	b.WriteString(layerStyle.Render(padLeft(layerStr, layerW)))
-	return b.String()
+	return styleWithFg(t.FileName).Render(line)
 }
 
 // truncateLeft trims the left side of s so it fits within width display
