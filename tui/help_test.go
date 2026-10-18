@@ -24,7 +24,7 @@ func TestOverlayHelp_WideTerminal_UsesHorizontalLayout(t *testing.T) {
 	assert.Contains(t, m.helpContent(), "File Tree")
 	assert.Contains(t, m.helpContent(), "Change = files in the image")
 	// Both section titles appear on one screen without requiring only vertical stack order.
-	assert.True(t, strings.Index(m.helpContent(), "Navigation") < strings.Index(m.helpContent(), "Wasted Files"))
+	assert.True(t, strings.Index(m.helpContent(), "Navigation") < strings.Index(m.helpContent(), "Waste and cleanup"))
 }
 
 func TestOverlayHelp_NarrowTerminal_StillHasLayersSection(t *testing.T) {

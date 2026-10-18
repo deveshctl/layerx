@@ -464,3 +464,71 @@ func TestEfficiency_HardlinkAlias_DeletedOriginal_NotWasted(t *testing.T) {
 	assert.Empty(t, result.WastedFiles)
 	assert.Equal(t, 1.0, result.Score)
 }
+
+func TestEfficiencyHardlinksRetainSpecificPayloadCopies(t *testing.T) {
+	alias := func(name, target string) *FileNode {
+		n := makeFile(name, "/"+name, 0)
+		n.IsHardlink, n.Linkname = true, target
+		return n
+	}
+	tests := []struct {
+		name        string
+		layers      []Layer
+		waste, live int64
+	}{
+		{"deleted original contributes live denominator", []Layer{
+			{Tree: makeTree(makeFile("a", "/a", 100), alias("b", "a"), makeFile("junk", "/junk", 100))},
+			{Tree: makeTree(makeFile(".wh.a", "/.wh.a", 0), makeFile(".wh.junk", "/.wh.junk", 0))},
+		}, 100, 100},
+		{"alias retains old copy after overwrite", []Layer{
+			{Tree: makeTree(makeFile("a", "/a", 100), alias("b", "a"))},
+			{Tree: makeTree(makeFile("a", "/a", 200))},
+		}, 0, 300},
+		{"deletion does not exempt every copy", []Layer{
+			{Tree: makeTree(makeFile("a", "/a", 100), alias("b", "a"))},
+			{Tree: makeTree(makeFile("a", "/a", 200))},
+			{Tree: makeTree(makeFile(".wh.a", "/.wh.a", 0))},
+		}, 200, 100},
+		{"alias created after overwrite retains new copy", []Layer{
+			{Tree: makeTree(makeFile("a", "/a", 100))},
+			{Tree: makeTree(makeFile("a", "/a", 200), alias("b", "a"))},
+			{Tree: makeTree(makeFile(".wh.a", "/.wh.a", 0))},
+		}, 100, 200},
+		{"reinstalled pathname does not retain deleted copy", []Layer{
+			{Tree: makeTree(makeFile("a", "/a", 100), alias("b", "a"))},
+			{Tree: makeTree(makeFile(".wh.a", "/.wh.a", 0))},
+			{Tree: makeTree(makeFile("a", "/a", 200))},
+			{Tree: makeTree(makeFile(".wh.a", "/.wh.a", 0))},
+		}, 200, 100},
+		{"hardlink chain survives both original names", []Layer{
+			{Tree: makeTree(makeFile("a", "/a", 100), alias("b", "a"), alias("c", "b"))},
+			{Tree: makeTree(makeFile(".wh.a", "/.wh.a", 0), makeFile(".wh.b", "/.wh.b", 0), makeFile("junk", "/junk", 100))},
+			{Tree: makeTree(makeFile(".wh.junk", "/.wh.junk", 0))},
+		}, 100, 100},
+		{"malformed hardlink cycle terminates", []Layer{
+			{Tree: makeTree(alias("a", "b"), alias("b", "a"))},
+		}, 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Analysis{Layers: tc.layers}
+			result := EfficiencyFromAnalysis(a)
+			assert.Equal(t, tc.waste, result.WastedBytes)
+			score := 1.0
+			if tc.live+tc.waste > 0 {
+				score = float64(tc.live) / float64(tc.live+tc.waste)
+			}
+			assert.InDelta(t, score, result.Score, 1e-9)
+			for _, file := range result.WastedFiles {
+				explanation := ExplainWaste(a, file.Path)
+				assert.Equal(t, file.TotalWasted, explanation.TotalWasted)
+				for _, event := range explanation.Events {
+					if event.WastedBytes > 0 {
+						assert.Equal(t, event.Layer, file.FirstWastedLayer)
+						break
+					}
+				}
+			}
+		})
+	}
+}

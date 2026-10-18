@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Waste explanations (`w`, then `i`) show per-file layer history, Dockerfile commands and byte attribution. `Tab` in the waste overlay switches to potential cleanup candidates for recognized apt, apk, pip, npm, Yarn and Go build caches, independently of the layer-efficiency score.
+
 ### Changed
+- The TUI spells out Layer efficiency and shows Layer waste and Potential cleanup totals together. File explanations lead with plain-language summaries; prompts such as "Press i to explain waste" name the next action and fit the minimum terminal size. A 100% score means no detected redundant layer payload; it does not establish that an image is small or its live contents are necessary.
 - Refined the README and demo, corrected installation and engine guidance, and documented TUI focus, pane labels and compact layouts.
 - Clearer active-pane markers, quieter inactive selections, filename-preserving paths, consistent layer labels, and a steady footer. Essential metadata and hints are easier to read across the existing themes.
 - Shorter command help, practical examples, and clearer configuration guidance. Build instructions now match flag handling, and compare examples preserve CI failures.
 - Clearer TUI labels, consistent layer numbering, and action hints that match the current view. Keyboard help now scrolls to fit smaller terminals.
 
 ### Fixed
+- Waste accounting follows the specific stored payload retained by surviving hardlinks, including chained links. Rewrites and reinstalls no longer inherit a blanket exemption from an alias to an older copy, and surviving linked payload contributes to the efficiency denominator even after the original filename is deleted.
+- Waste navigation finds earlier stored copies of deleted or reinstalled paths and focuses the matching file tree when jumping from split view.
 - TUI selections stay visible when scrolling, resizing, or opening and closing filters. Headers, footers, search input, and Unicode commands fit the terminal; multiline commands retain their blank lines, short split views show the active pane, and long errors can be scrolled without hiding the exit hint.
 - Invalid CI options and build inspection failures now show an error; unknown cache commands no longer succeed silently. Image pull errors retain the registry's explanation.
 - File viewing and extraction now use the same platform as image analysis, preventing wrong-architecture contents or export failures when inspecting multi-platform images. Compatibility with older engines and exact image IDs is preserved.

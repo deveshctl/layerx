@@ -12,31 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildIntroIndex(t *testing.T) {
-	root := &image.FileNode{Name: "", Path: "/", IsDir: true}
-	etc := &image.FileNode{Name: "etc", Path: "/etc", IsDir: true, IntroducedInLayer: 0}
-	etc.AddChild(&image.FileNode{Name: "passwd", Path: "/etc/passwd", IntroducedInLayer: 0})
-	root.AddChild(etc)
-
-	app := &image.FileNode{Name: "app", Path: "/app", IsDir: true, IntroducedInLayer: 2}
-	app.AddChild(&image.FileNode{Name: "server", Path: "/app/server", IntroducedInLayer: 2})
-	root.AddChild(app)
-
-	idx := buildIntroIndex(root)
-
-	assert.Equal(t, 0, idx["/etc/passwd"])
-	assert.Equal(t, 2, idx["/app/server"])
-
-	_, hasEtcDir := idx["/etc"]
-	_, hasAppDir := idx["/app"]
-	assert.False(t, hasEtcDir, "directories should not appear in the index")
-	assert.False(t, hasAppDir, "directories should not appear in the index")
-
-	idxNil := buildIntroIndex(nil)
-	assert.NotNil(t, idxNil)
-	assert.Empty(t, idxNil)
-}
-
 // efficiencyOf returns a deterministic EfficiencyResult with N wasted entries,
 // sorted desc by TotalWasted to match image.Efficiency()'s contract.
 func efficiencyOf(n int) *image.EfficiencyResult {
@@ -234,7 +209,7 @@ func TestWasteTitleShowsPositionCounter(t *testing.T) {
 
 	out := m.renderWasteOverlay()
 
-	assert.Contains(t, out, "Wasted Files 5/31",
+	assert.Contains(t, out, "Layer waste 5/31",
 		"panel title shows 1-based cursor position over total wasted files")
 	assert.NotContains(t, out, "Top 20 of",
 		"body header should no longer use Top 20 framing")
@@ -247,7 +222,7 @@ func TestWasteTitleEmptyState(t *testing.T) {
 
 	out := m.renderWasteOverlay()
 
-	assert.Contains(t, out, "Wasted Files 0/0",
+	assert.Contains(t, out, "Layer waste 0/0",
 		"empty waste list shows 0/0 in panel title")
 }
 
@@ -412,7 +387,7 @@ func TestWasteHelpBlocked(t *testing.T) {
 
 func TestWasteRenderNarrow(t *testing.T) {
 	m := setupModel()
-	m.width = 60 // boxWidth=56, innerWidth=54, wide check: 52 >= 60 → false
+	m.width = 60
 
 	root := &image.FileNode{Name: "", Path: "/", IsDir: true}
 	root.AddChild(&image.FileNode{Name: "short.txt", Path: "/short.txt", IntroducedInLayer: 0})
@@ -427,9 +402,8 @@ func TestWasteRenderNarrow(t *testing.T) {
 	m.openWaste()
 
 	out := m.renderWasteOverlay()
-	// Wide layout would include the "x4" count column. Narrow drops it.
-	assert.NotContains(t, out, "x4", "narrow render must drop the count column")
-	assert.Contains(t, out, "L1", "layer column always present")
+	assert.NotContains(t, out, "x4", "the list keeps write counts in the detailed history")
+	assert.Contains(t, out, "Layer 1", "layer column always present")
 }
 
 func TestWasteRenderCopyConfirm(t *testing.T) {
@@ -440,14 +414,14 @@ func TestWasteRenderCopyConfirm(t *testing.T) {
 	// Default render: no Copied! banner, footer hints visible.
 	before := m.renderWasteOverlay()
 	assert.NotContains(t, before, "Copied!")
-	assert.Contains(t, before, "jump", "footer hints visible by default")
+	assert.Contains(t, before, "Press i to explain waste · Enter to view layer", "footer hints visible by default")
 
 	// After y: copyConfirm flips, banner replaces footer hints.
 	updated, _ := m.Update(keyPress('y'))
 	um := updated.(model)
 	out := um.renderWasteOverlay()
 	assert.Contains(t, out, "Copied!", "copy banner shows in overlay")
-	assert.NotContains(t, out, "Enter jump", "footer hints replaced while copyConfirm")
+	assert.NotContains(t, out, "Enter to view layer", "footer hints replaced while copyConfirm")
 }
 
 // truncateLeft must respect display columns, not rune count. CJK ideographs
@@ -516,17 +490,17 @@ func TestTruncateMid(t *testing.T) {
 			wantContainsMid: false,
 		},
 		{
-			name:            "cjk filename preserves display width",
-			input:           "/usr/local/share/ファイル名.bin",
-			width:           20,
-			wantFitsWidth:   true,
+			name:          "cjk filename preserves display width",
+			input:         "/usr/local/share/ファイル名.bin",
+			width:         20,
+			wantFitsWidth: true,
 		},
 		{
-			name:            "cjk segment in prefix preserves display width",
-			input:           "/データ/モデル/ファイル/large.bin",
-			width:           18,
-			wantFilename:    "large.bin",
-			wantFitsWidth:   true,
+			name:          "cjk segment in prefix preserves display width",
+			input:         "/データ/モデル/ファイル/large.bin",
+			width:         18,
+			wantFilename:  "large.bin",
+			wantFitsWidth: true,
 		},
 	}
 	for _, tc := range cases {

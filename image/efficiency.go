@@ -1,14 +1,14 @@
 package image
 
-import (
-	"sort"
-	"strings"
-)
+import "sort"
 
 type WastedFile struct {
 	Path        string
 	TotalWasted int64
 	LayerCount  int
+	// FirstWastedLayer is the zero-based layer storing the earliest wasted
+	// copy. This navigation metadata is not part of the JSON export schema.
+	FirstWastedLayer int `json:"-"`
 }
 
 type EfficiencyResult struct {
@@ -21,12 +21,9 @@ type EfficiencyResult struct {
 // layers. It stacks layers internally; prefer EfficiencyFromAnalysis when the
 // caller already has stacked trees.
 //
-// Within a run of a path's occurrences (a span with no deletion in between),
-// all but the last occurrence are wasted — the last is the copy that survives.
-// A run that ends in a deletion (whiteout or opaque whiteout) has ALL of its
-// occurrences wasted: the bytes were written into earlier layers, still ship in
-// the image, and are never reclaimed by the later deletion, yet none of them
-// survive into the final filesystem.
+// A stored copy is wasted when no final path or hardlink retains that specific
+// payload. Overwrites and deletions do not reclaim bytes stored in older layers.
+// This measures layer efficiency, not whether live files are needed at runtime.
 func Efficiency(layers []Layer) *EfficiencyResult {
 	if len(layers) == 0 {
 		return &EfficiencyResult{Score: 1.0}
@@ -59,16 +56,17 @@ func EfficiencyFromAnalysis(a *Analysis) *EfficiencyResult {
 type efficiencyOccurrence struct {
 	layerIdx int
 	size     int64
+	change   DiffType
 }
 
 // pathRun is one contiguous span of a path's Added/Modified occurrences.
 // endedInDeletion records why the span closed: true when a whiteout, opaque
-// whiteout, or absence removed the path (nothing from the run survives into the
-// final image), false when the run reached the top of the layer stack still
-// live. The charge rule differs between the two — see computeEfficiency.
+// whiteout, or absence removed the path, false when the name remains live.
+// A surviving alias can retain a payload from either kind of run.
 type pathRun struct {
 	occ             []efficiencyOccurrence
 	endedInDeletion bool
+	endLayer        int
 }
 
 func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
@@ -86,14 +84,9 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		indices[i] = idx
 	}
 
-	// Build the set of Linkname values for hardlinks that survive in the final
-	// stacked snapshot. A deleted path whose content is still reachable via a
-	// surviving hardlink alias is not truly wasted — the payload stays in the
-	// image and can be read through the alias.
-	survivingHardlinkTargets := make(map[string]struct{})
-	if n := len(stacked); n > 0 && stacked[n-1] != nil && stacked[n-1].Root != nil {
-		walkSurvivingHardlinks(stacked[n-1].Root, survivingHardlinkTargets)
-	}
+	// Track stored payload identity, not just a hardlink's target pathname:
+	// an alias can retain an older copy after that name is rewritten/deleted.
+	livePayloads := survivingPayloads(indices)
 
 	paths := make(map[string]struct{})
 	for _, layer := range layers {
@@ -112,28 +105,17 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		runs := pathRuns(path, indices)
 		var pathWaste int64
 		var occurrenceCount int
+		firstWastedLayer := -1
 		for _, run := range runs {
-			// A run that ended in deletion ships every one of its copies with
-			// nothing surviving into the final image, so all occurrences are
-			// waste. A run still live at the top of the stack keeps its last
-			// occurrence (the copy present in the image); only the earlier,
-			// shadowed copies are waste.
-			charged := run.occ
-			if !run.endedInDeletion {
-				if len(run.occ) < 2 {
-					// Single live occurrence with no prior copy in this run: no
-					// waste, and the path's reinstall copy must not inflate
-					// LayerCount for waste entries produced by earlier deleted runs.
-					continue
-				}
-				charged = run.occ[:len(run.occ)-1]
-			} else if _, alive := survivingHardlinkTargets[path]; alive {
-				// The path was deleted, but a hardlink alias pointing at it
-				// survives in the final tree — the payload is still live.
+			charged := chargedOccurrences(path, run, livePayloads)
+			if len(charged) == 0 {
 				continue
 			}
 			for _, occ := range charged {
 				pathWaste += occ.size
+				if occ.size > 0 && firstWastedLayer < 0 {
+					firstWastedLayer = occ.layerIdx
+				}
 			}
 			// LayerCount counts byte-contributing occurrences across charged
 			// copies only. For deleted runs, every occurrence is charged. For
@@ -158,9 +140,10 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 		}
 		wastedBytes += pathWaste
 		wastedFiles = append(wastedFiles, WastedFile{
-			Path:        path,
-			TotalWasted: pathWaste,
-			LayerCount:  occurrenceCount,
+			Path:             path,
+			TotalWasted:      pathWaste,
+			LayerCount:       occurrenceCount,
+			FirstWastedLayer: firstWastedLayer,
 		})
 	}
 
@@ -176,10 +159,8 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	// files (which would show up as N copies in raw layers) while still
 	// charging the user for redundant rewrites.
 	var liveBytes int64
-	if n := len(stacked); n > 0 && stacked[n-1] != nil && stacked[n-1].Root != nil {
-		walkLiveFiles(stacked[n-1].Root, func(_ string, size int64) {
-			liveBytes += size
-		})
+	for _, size := range livePayloads {
+		liveBytes += size
 	}
 
 	totalBytes := liveBytes + wastedBytes
@@ -209,9 +190,8 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 // Removed or absence, so a Modified or Added hardlink (which is what Stack
 // emits when a hardlink replaces or reintroduces a real file at the same
 // path) extends the run past the prior real occurrence; computeEfficiency
-// then charges run[:len-1] as waste. The previous behaviour — skipping all
-// hardlinks unconditionally — caused regular-file → hardlink replacements
-// to silently vanish from the waste total.
+// then charges copies that no final name retains. Skipping hardlinks would
+// lose both replacements and surviving payload references.
 func indexTree(node *FileNode, idx map[string]*FileNode) {
 	for _, child := range node.Children {
 		if isWhiteoutName(child.Name) {
@@ -234,58 +214,49 @@ func indexTree(node *FileNode, idx map[string]*FileNode) {
 // not contribute.
 //
 // Each run records whether it ended in a deletion. A run flushed by a Removed
-// node, an absence, or a nil index is marked endedInDeletion — none of its
-// bytes survive into the final image, yet all of them shipped, so
-// computeEfficiency charges every occurrence. A run flushed only by reaching
-// the end of the layer stack is still live; its last occurrence is the copy
-// present in the final image and is not waste.
+// node, an absence, or a nil index is marked endedInDeletion. Reaching the end
+// leaves the name live. Payload survival is resolved separately, including aliases.
 func pathRuns(path string, indices []map[string]*FileNode) []pathRun {
 	var runs []pathRun
 	var cur []efficiencyOccurrence
 
-	flush := func(deleted bool) {
+	flush := func(deleted bool, layer int) {
 		if len(cur) > 0 {
-			runs = append(runs, pathRun{occ: cur, endedInDeletion: deleted})
+			runs = append(runs, pathRun{occ: cur, endedInDeletion: deleted, endLayer: layer})
 			cur = nil
 		}
 	}
 
 	for i, idx := range indices {
 		if idx == nil {
-			flush(true)
+			flush(true, i)
 			continue
 		}
 		node, ok := idx[path]
 		switch {
 		case !ok:
-			flush(true)
+			flush(true, i)
 		case node.DiffType == Removed:
-			flush(true)
+			flush(true, i)
 		case node.DiffType == Added || node.DiffType == Modified:
-			cur = append(cur, efficiencyOccurrence{layerIdx: i, size: node.Size})
+			cur = append(cur, efficiencyOccurrence{layerIdx: i, size: node.Size, change: node.DiffType})
 		}
 		// Unchanged carryover: skip (no new bytes; don't flush).
 	}
-	flush(false)
+	flush(false, len(indices))
 	return runs
 }
 
-// walkLiveFiles is walkFiles but skips Removed leaves so the denominator
-// reflects only files actually present in the snapshot.
-func walkLiveFiles(node *FileNode, fn func(path string, size int64)) {
-	for _, child := range node.Children {
-		if isWhiteoutName(child.Name) {
-			continue
-		}
-		if child.DiffType == Removed {
-			continue
-		}
-		if child.IsDir {
-			walkLiveFiles(child, fn)
-		} else if !child.IsHardlink {
-			fn(child.Path, child.Size)
+// Shared by the score and the per-file explanation so attribution cannot
+// silently diverge from the waste total used by CI.
+func chargedOccurrences(path string, run pathRun, live map[payloadRef]int64) []efficiencyOccurrence {
+	var charged []efficiencyOccurrence
+	for _, occ := range run.occ {
+		if _, survives := live[payloadRef{path, occ.layerIdx}]; !survives {
+			charged = append(charged, occ)
 		}
 	}
+	return charged
 }
 
 // walkFiles recursively visits all non-directory file nodes. Hardlinks are
@@ -301,22 +272,6 @@ func walkFiles(node *FileNode, fn func(path string, size int64)) {
 			walkFiles(child, fn)
 		} else if !child.IsHardlink {
 			fn(child.Path, child.Size)
-		}
-	}
-}
-
-// walkSurvivingHardlinks collects the Linkname (target path) of every
-// non-removed hardlink in the tree into targets. Used to avoid charging
-// deleted original paths as waste when a hardlink alias still references them.
-func walkSurvivingHardlinks(node *FileNode, targets map[string]struct{}) {
-	for _, child := range node.Children {
-		if isWhiteoutName(child.Name) || child.DiffType == Removed {
-			continue
-		}
-		if child.IsDir {
-			walkSurvivingHardlinks(child, targets)
-		} else if child.IsHardlink && child.Linkname != "" {
-			targets["/"+strings.TrimPrefix(child.Linkname, "/")] = struct{}{}
 		}
 	}
 }

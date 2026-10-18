@@ -44,9 +44,26 @@ The viewer title prioritizes the path and an earlier origin layer such as
 
 ## Investigate waste
 
+The waste screen always shows two separate totals: **Layer waste** is stored
+data from earlier file copies, and **Potential cleanup** is live cache content
+worth reviewing. The footer names the next action, such as **Review cleanup**
+or **View layer waste**.
+
 Press `w` to see wasted files sorted by wasted bytes. Select a row and press
 `Enter` to jump to its introducing layer and path. Press `a` to expand the
 top 20 entries to up to 500; `Esc` closes the overlay.
+
+Press `i` to explain waste for the selected file. A short explanation appears
+before its layer history. Use the arrow keys or `j`/`k` to select a history
+event and read its Dockerfile command, stored payload and wasted-byte
+contribution. `Enter` jumps to that event's layer; `Esc` returns to the list.
+
+`Tab` switches between layer waste and potential cleanup candidates. The
+candidate list groups recognized package and build caches that remain in the
+final filesystem. `i` explains the candidate and `Enter` jumps to its directory
+at the final layer. Candidates require review and do not change CI thresholds
+or the efficiency score. [Understanding waste](waste-analysis.md) explains why
+a large image can still have 100% layer efficiency.
 
 A file written in one layer and deleted later still occupies image space.
 Move temporary downloads and cleanup into the same build step, or keep build
