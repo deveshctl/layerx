@@ -57,8 +57,8 @@ LayerX Image Inspector is a **single static binary** with no runtime dependencie
 ## Quick start
 
 ```bash
-# macOS / Linux
-brew install deveshctl/tap/layerx
+# macOS (13 Ventura or later)
+brew install --cask deveshctl/tap/layerx
 
 # Windows
 scoop bucket add layerx https://github.com/deveshctl/scoop-bucket
@@ -88,7 +88,7 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 - **File extraction** (`x`) — pull any single file out of any layer, straight to disk.
 - Clipboard integration (`y`, `Y`) — copy a path or a file's contents to the system clipboard, over SSH and tmux.
 - Sort by size, filter by name, hide unchanged files, jump to the layer that introduced the biggest waste (`w`).
-- Split-pane view (`A`) — the selected layer's changes on top, the cumulative filesystem up to that layer below, both following the same layer selection.
+- Split-pane view (`A`) — Layer files highlights the selected step's changes; Cumulative retains diff markers from earlier layers. Both follow the same layer selection.
 
 ### Multi-engine, multi-source
 
@@ -120,11 +120,13 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 
 ## Install
 
-### Homebrew (macOS & Linux)
+### Homebrew (macOS)
 
 ```bash
-brew install deveshctl/tap/layerx
+brew install --cask deveshctl/tap/layerx
 ```
+
+If you installed the older formula, run `brew uninstall --formula layerx` before installing the cask. Linux packages and direct downloads are listed below.
 
 ### Scoop (Windows)
 
@@ -175,14 +177,17 @@ LayerX is a client to a running container engine, so the image needs the host en
 **Docker on Linux** — the socket is owned by `root:docker` on the host. The image runs as `nonroot` (uid 65532) and needs the host's numeric `docker` GID passed in as a supplementary group (the distroless image has no `/etc/group`, so `--group-add docker` by name won't resolve inside the container):
 
 ```bash
-DOCKER_GID=$(getent group docker | cut -d: -f3 2>/dev/null || awk -F: '/^docker:/{print $3}' /etc/group)
+DOCKER_GID=$(getent group docker 2>/dev/null | cut -d: -f3)
+if [ -z "$DOCKER_GID" ]; then
+    DOCKER_GID=$(awk -F: '$1 == "docker" {print $3; exit}' /etc/group)
+fi
 docker run --rm -it \
     --group-add "$DOCKER_GID" \
     -v /var/run/docker.sock:/var/run/docker.sock \
     ghcr.io/deveshctl/layerx:latest nginx:latest
 ```
 
-(`getent` is glibc-only; the `awk` fallback covers Alpine and musl hosts.)
+The `awk` fallback handles hosts without `getent`. Confirm `DOCKER_GID` is non-empty before running the container.
 
 **Docker Desktop (macOS / Windows)** — the socket is proxied and no group is enforced, so the group flag is not needed:
 
@@ -211,8 +216,6 @@ docker run --rm -it \
 ```
 
 Trade-offs vs. the native binary: the image is a distroless base plus the layerx binary (a few MB of overhead — check the release page for the exact compressed size), it needs the `--group-add` step on Linux for Docker's `root:docker`-owned socket, and file-extraction (`x` key) writes into the container's filesystem — bind-mount an output directory if you want the file on the host. Native binaries are the smoother path for daily use; the container image shines in CI runners that already have an engine but no package manager, and for pinning the exact LayerX version alongside your other build tooling.
-
-> **First release only:** GHCR packages default to private, so `docker pull` returns 401 until visibility is flipped to public — usually within a few hours of a new release landing.
 
 ### Build from source
 
@@ -246,19 +249,19 @@ layerx --json analysis.json nginx:latest
 source <(layerx completion bash)
 ```
 
-`IMAGE_OR_ARCHIVE` is auto-detected: an existing regular file is read directly without contacting any runtime; anything else is resolved through the active container engine. Every subcommand (`ci`, `compare`, `build`, `--json`) accepts both forms.
+`IMAGE_OR_ARCHIVE` is auto-detected: an existing regular file is read directly without contacting any runtime; anything else is resolved through the active container engine. Inspection, `ci`, `compare` and JSON export accept both forms. `layerx build` builds through the engine, then inspects the resulting image.
 
 ### TUI keybindings
 
 | Key         | Action                                                       |
 |-------------|--------------------------------------------------------------|
-| `Tab`       | Cycle panels (layers, file tree, cumulative files in split view) |
+| `Tab`       | Cycle Layers → Layer files → Cumulative in split view |
 | `j` / `k`   | Move up / down                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
 | `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
 | `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
 | `h` / `l`   | Scroll left / right (file viewer, long lines)                |
-| `Enter`     | Open file viewer; expand or collapse a folder                |
+| `Enter`     | Confirm a filter; open a file; expand or collapse a folder                |
 | `Esc`       | Close help, clear search/filter, or close the viewer. Quits only on loading and error screens. |
 | `/`         | Filter file tree (tree) / search in viewer (viewer)          |
 | `n` / `N`   | Next / previous search match (viewer)                        |
@@ -270,7 +273,7 @@ source <(layerx completion bash)
 | `S`         | Cycle layer size column: change → stored → stored+change     |
 | `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
 | `x`         | Extract focused file to disk                                 |
-| `A`         | Toggle split view (layer changes over cumulative filesystem)  |
+| `A`         | Toggle Layer files + Cumulative split view  |
 | `?`         | Toggle scrollable help (↑/↓ or PgUp/PgDn)                     |
 | `q`         | Quit                                                         |
 
@@ -278,12 +281,16 @@ source <(layerx completion bash)
 
 Press `A` to split the file tree into two stacked panes:
 
-- **Top — Layer changes.** Only what the selected layer changed: files it added, modified, or removed.
-- **Bottom — Cumulative.** The full filesystem as it exists after that layer is applied, with every earlier layer merged in.
+- **Top — Layer files.** The filesystem at the selected layer, with that step's additions, modifications and removals highlighted. Unchanged files remain visible for context; press `d` to hide them.
+- **Bottom — Cumulative.** Files and diff markers accumulated from the base through the selected layer, including historical removal markers.
 
 Both halves track the layer you have selected. `Tab` moves focus to the layers pane; move up and down there and both panes update to the new layer together. `Tab` again cycles focus through the two tree panes so you can scroll and open files in either.
 
-This is a layer-against-its-own-history view — top shows the delta, bottom shows the result — not a diff between two arbitrary layers. Press `A` again to return to the single tree.
+Both panes follow one selected layer. To compare separate images, use `layerx compare OLD NEW`. Press `A` again to return to the single tree.
+
+The active panel title starts with `▸`; inactive selections keep quieter styling. Short terminals show the active tree in `compact` mode, and `Tab` still reaches both trees. The main view needs at least 50 columns × 11 rows.
+
+Visible layer numbers start at `#1`, and origin labels at `L1`; JSON indices remain zero-based. Long paths preserve filenames where they fit. See [Using the TUI](docs/tui.md) for file origins, filtering, searching and the complete key reference.
 
 Full walkthrough, worked example, and the mechanics of each pane: [docs/split-view.md](docs/split-view.md).
 
@@ -295,27 +302,35 @@ LayerX talks to any daemon that implements the Docker Engine REST API. Docker an
 
 ### Docker (default)
 
-No setup required. LayerX resolves the endpoint the same way `docker` itself does:
+LayerX resolves the Docker endpoint in this order:
 
 1. `DOCKER_HOST` env if set — for scripted or CI workflows.
 2. `DOCKER_CONTEXT` env if set — overrides the active context per-shell.
-3. `DOCKER_CONFIG` env if set — overrides the Docker config directory (default `~/.docker`); contexts and credentials are loaded from here.
-4. The active Docker context from `~/.docker/config.json` (`docker context use <name>`).
-5. The platform default socket:
+3. The active Docker context from `config.json` (`docker context use <name>`).
+4. The platform default socket:
    - Linux: `/var/run/docker.sock`
    - macOS: `~/.docker/run/docker.sock`
    - Windows: `\\.\pipe\docker_engine`
 
+`DOCKER_CONFIG` selects the configuration directory; the default is
+`~/.docker`. LayerX reads context metadata and Docker credentials there.
+
 ### Podman
 
-Same idea, with Podman's own env vars and config files:
+LayerX resolves the Podman endpoint in this order:
 
-1. `CONTAINER_HOST` env if set (also `DOCKER_HOST` for back-compat).
-2. `CONTAINER_CONNECTION` env if set — overrides the active connection per-shell.
-3. `PODMAN_CONNECTIONS_CONF` env if set — overrides the path to `podman-connections.json`.
-4. `CONTAINERS_CONF` env if set — overrides the path to `containers.conf`.
-5. The default connection from `~/.config/containers/podman-connections.json` or `containers.conf` (`podman system connection default <name>`).
-6. On Linux, the rootless / rootful Podman socket if the systemd unit is running.
+1. `CONTAINER_HOST` env if set.
+2. The connection named by `CONTAINER_CONNECTION`.
+3. The default connection in `podman-connections.json` or `containers.conf`
+   (`podman system connection default <name>`).
+4. `DOCKER_HOST` for compatibility, when no Podman connection was selected.
+5. On Linux, an available local rootless or rootful Podman socket.
+
+`PODMAN_CONNECTIONS_CONF` and `CONTAINERS_CONF` override the configuration file
+paths. Otherwise LayerX uses the operating system's user configuration
+directory. When both files exist, `podman-connections.json` takes precedence.
+A malformed configuration or a named connection that cannot be found is an
+error; `DOCKER_HOST` does not bypass it.
 
 The upshot: once you've run `podman system connection add` / `podman system connection default`, `layerx --engine podman <image>` just works. No `DOCKER_HOST=$(podman system connection list …)` shim required.
 
@@ -452,7 +467,7 @@ layerx compare --mode full myapp:old myapp:new
 ```
 
 - Reports size, efficiency, layer, file, and waste deltas in a deterministic text report with aligned columns.
-- Default compact mode shows the largest deltas per section with `... and N more` counters; `--mode full` prints everything; `--mode summary` keeps only header + verdict.
+- Default compact mode shows the largest deltas per section with `... and N more` counters; `--mode full` prints everything; `--mode summary` keeps the header, any warnings and the verdict.
 - Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>`, or `verdict: noop reason=path-equal`.
 - Exit codes: `0` no regression, `1` regression detected, `2` operational error.
 - Live progress on stderr while resolving remote images. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating.
@@ -618,7 +633,7 @@ LayerX reads image tarballs, walks their file trees, and caps in-memory reads at
 
 ### Is this project actively maintained?
 
-Yes. Releases are cut on a monthly cadence; every release ships signed artefacts, an SBOM, and SLSA provenance. See the [Releases page](https://github.com/deveshctl/layerx/releases) for the current version and [CHANGELOG.md](CHANGELOG.md) for what's new.
+Every release ships signed artefacts, an SBOM, and SLSA provenance. See the [Releases page](https://github.com/deveshctl/layerx/releases) for the current version and [CHANGELOG.md](CHANGELOG.md) for what's new.
 
 ---
 

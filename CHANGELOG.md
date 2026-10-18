@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Refined the README and demo, corrected installation and engine guidance, and documented TUI focus, pane labels and compact layouts.
 - Clearer active-pane markers, quieter inactive selections, filename-preserving paths, consistent layer labels, and a steady footer. Essential metadata and hints are easier to read across the existing themes.
 - Shorter command help, practical examples, and clearer configuration guidance. Build instructions now match flag handling, and compare examples preserve CI failures.
 - Clearer TUI labels, consistent layer numbering, and action hints that match the current view. Keyboard help now scrolls to fit smaller terminals.

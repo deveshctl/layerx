@@ -184,8 +184,8 @@ The main difference: `highest-wasted-bytes` takes a plain integer (bytes), not a
 ## Install
 
 ```bash
-# macOS / Linux
-brew install deveshctl/tap/layerx
+# macOS (13 Ventura or later)
+brew install --cask deveshctl/tap/layerx
 
 # Windows
 scoop bucket add layerx https://github.com/deveshctl/scoop-bucket
@@ -198,6 +198,10 @@ sudo dpkg -i layerx_linux_amd64.deb
 # From source (Go 1.27.2+)
 go install github.com/deveshctl/layerx@latest
 ```
+
+For Linux arm64, RPM packages, direct downloads and migration from the older
+Homebrew formula, see [Install LayerX](../README.md#install). For the current pane labels,
+focus markers and compact split behavior, see [Using the TUI](tui.md).
 
 ---
 

@@ -1,8 +1,9 @@
 # The split view (`A`)
 
-The split view is one of the more powerful things the TUI can do, and also the easiest to misread. This page explains it in plain language first, then goes deep for anyone who wants to know exactly what they're looking at.
+Split view shows two ways to read the filesystem at the selected layer: changes
+relative to the preceding layer, and diff history accumulated from the base.
 
-For the rest of the interactive controls, see the [TUI keybindings](../README.md#tui-keybindings) in the README.
+For file viewing, searching, saving and all keys, see [Using the TUI](tui.md).
 
 ---
 
@@ -11,18 +12,19 @@ For the rest of the interactive controls, see the [TUI keybindings](../README.md
 Press **`A`** (that's **Shift + a** — a capital A) while browsing an image. The file tree splits into two stacked panes:
 
 ```
-┌─ Layer changes ────────────────────┐
-│  what THIS layer changed           │   ← top: just the diff
-│  (added / modified / removed)      │
-├─ ▾ Cumulative ─────────────────────┤
-│  the whole filesystem at this      │   ← bottom: the result
-│  point, all earlier layers merged  │
+┌─ ▸ Layer files ────────────────────┐
+│  changes from the selected layer   │
+│  plus unchanged files for context  │
+├─   Cumulative ─────────────────────┤
+│  diff history from the base up to  │
+│  this layer, including removals    │
 └────────────────────────────────────┘
 ```
 
 Both panes always show the **same layer** — the one selected in the layers pane on the left. Press `A` again to go back to the single tree.
 
-That's the whole feature. If you only remember one thing: **top is the change, bottom is the result.**
+**Layer files highlights this step; Cumulative retains earlier diff markers.**
+Press `d` to hide entries marked unchanged.
 
 ---
 
@@ -30,10 +32,16 @@ That's the whole feature. If you only remember one thing: **top is the change, b
 
 Say you're inspecting `nginx:latest` and you've selected the layer that runs `apt-get install nginx`.
 
-- The **top pane (Layer changes)** shows only what that one command touched — the `nginx` binary, the config files under `/etc/nginx`, the handful of libraries it pulled in. Nothing else. If a file wasn't added, modified, or removed by this layer, it isn't here.
-- The **bottom pane (Cumulative)** shows the *entire* filesystem as it exists right after that layer runs — the base image's `/bin`, `/lib`, `/usr`, plus everything the earlier layers added, plus this layer's changes folded in. It's what you'd see if you `docker run` this image and stopped it at this layer.
+- **Layer files** highlights what the command added, modified or removed, such
+  as the `nginx` binary and files under `/etc/nginx`. Files carried forward from
+  earlier layers appear as unchanged. Press `d` to narrow the list to changes.
+- **Cumulative** keeps the added, modified and removed labels built up from the
+  base through this layer. A base-image file can still be green here even when
+  the selected command did not touch it. Red entries are historical removal
+  markers; they do not mean the file exists in the live filesystem.
 
-Select the next layer down and both panes move together: the top shows *that* layer's changes, the bottom shows the filesystem grown by one more layer.
+Select the next layer and both panes update together. Layer files resets prior
+diff labels; Cumulative carries them forward.
 
 ### Driving it
 
@@ -41,12 +49,16 @@ You move between the layers pane and the two tree panes with `Tab`:
 
 ```
 Tab  →  layers pane      (pick which layer both halves show)
-Tab  →  top tree (Δ)     (scroll / open files in the change set)
-Tab  →  bottom tree      (scroll / open files in the full tree)
+Tab  →  Layer files      (browse the selected layer's changes and context)
+Tab  →  Cumulative       (browse accumulated file history)
 Tab  →  back to layers
 ```
 
-When focus is on the layers pane, `j`/`k` (or `↑`/`↓`) change the selected layer and **both halves update at once**. When focus is on either tree, the same keys scroll that tree. The focused pane is highlighted so you always know which one your keys are driving.
+When Layers has focus, `j`/`k` (or `↑`/`↓`) change the selected layer and both
+trees update. When either tree has focus, the same keys move its cursor.
+The active panel title has a `▸` marker and a highlighted border. When Cumulative
+has focus, its name leads the outer title and its divider also shows `▸`.
+Inactive selections remain visible with quieter styling.
 
 Everything else works as normal inside whichever tree has focus — `Enter` opens a file, `/` filters, `x` extracts, `d` hides unchanged files.
 
@@ -56,24 +68,25 @@ Everything else works as normal inside whichever tree has focus — `Enter` open
 
 This is the part that trips people up, so it's worth being precise.
 
-| | Top pane — **Layer changes** | Bottom pane — **Cumulative** |
+| | Top pane — **Layer files** | Bottom pane — **Cumulative** |
 |---|---|---|
-| Shows | Only the files this layer added, modified, or removed | The full merged filesystem up to and including this layer |
+| Shows | Files at this layer, current-step changes and removal markers | Files and diff markers accumulated through this layer |
 | Answers | "What did this build step do?" | "What does the image look like at this point?" |
-| Grows as you go down | No — always just one layer's diff | Yes — each layer merges into the running total |
-| Diff colouring | Green added, yellow modified, red removed | Same colours, relative to the layer that introduced each file |
+| Unchanged entries | Shown by default; `d` hides them | Earlier diff labels persist, so `d` can leave many earlier files visible |
+| Diff colouring | Green added, yellow modified, red removed by the selected step | Labels retained from earlier steps and updated by later changes |
 
-The bottom pane is built by stacking every layer from the base up to the selected one, honouring whiteouts (deletions) exactly the way the container runtime would. A file deleted by a later layer disappears from the cumulative tree at that layer, even though it's still present in the layers below it.
+Both views interpret whiteouts as deletions. Cumulative retains removal markers
+for inspection, so it is not a literal directory listing from a running
+container. Removed entries cannot be opened or saved. Bytes stored by earlier
+layers remain in the image even after a later step deletes their files.
 
 ---
 
-## What it is *not*
+## Compare two images
 
-The most common expectation — and the reason this page exists — is that `A` gives you a **diff between two arbitrary layers**. It does not.
-
-The split is always one layer *against its own history*: the change on top, the result below. There is no "compare layer 3 to layer 7" mode inside the split view.
-
-If you want to compare two whole *images* (for example, this build against the last release), that's a different tool — the `layerx compare OLD NEW` command, documented in the [README](../README.md#compare-two-images).
+The split follows one selected layer. It has no selector for comparing two
+arbitrary layers. To compare separate builds or releases, use
+`layerx compare OLD NEW`; see [Compare two images](../README.md#compare-two-images).
 
 ---
 
@@ -81,13 +94,20 @@ If you want to compare two whole *images* (for example, this build against the l
 
 - **`A` is a toggle.** Press it once to split, again to return to the single tree. Turning it off while you were focused on the bottom pane snaps focus back to the single tree so your keys keep working.
 - **Your filters carry over.** Toggling the split keeps your active filter (`/`), diff-only mode (`d`), and sort order (`s`) — they apply to both halves the same way, so you don't have to set them up twice.
-- **Cursor position resets.** The two trees have different shapes (a small change set vs. a full filesystem), so a scroll position saved from one wouldn't mean anything in the other. Each pane starts at the top when you toggle.
-- **The divider is live.** The `▾ Cumulative` label in the middle divider doubles as a position readout — when the bottom pane has focus it shows `3/240`-style counts so you can see where you are without a separate scrollbar.
+- **Toggling resets tree cursors.** Each pane starts at the top when you turn
+  split mode on or off. Changing the selected layer also resets tree cursors,
+  directory collapse state and size sorting. Resizing retains each selection.
+- **The divider is live.** The Cumulative divider shows its item count while
+  inactive, and `▸ Cumulative 3/240`-style position information when focused.
+- **Short terminals use compact mode.** When both trees cannot fit, only the
+  active tree is drawn. `Tab` still reaches each pane. Enlarging the terminal
+  restores the split and retains each tree's selection. The main view needs
+  at least 50 columns and 11 rows.
 
 ---
 
 ## See also
 
-- [TUI keybindings](../README.md#tui-keybindings) — the full key reference.
+- [TUI keybindings](tui.md#keybindings) — the full key reference.
 - [Compare two images](../README.md#compare-two-images) — for image-to-image diffs.
 - [Switching from Dive to LayerX](migrating-from-dive.md) — if you're used to Dive's aggregated view.

@@ -6,6 +6,12 @@ LayerX ships 8 built-in colour themes. The theme controls every colour in the
 TUI: panel borders, file tree diff colours, the status bar, the header, search
 highlights, and syntax highlighting in the file viewer.
 
+The active panel title starts with `▸`, so focus remains identifiable alongside
+the border color. Inactive selections use quieter text and background colors.
+Metadata, scroll indicators and hints use secondary theme colors; added,
+modified, removed and search matches keep their own roles. See the
+[TUI guide](tui.md) for navigation.
+
 ---
 
 ## Selecting a theme
@@ -160,7 +166,7 @@ cannot be changed mid-session without restarting.
 
 ## Terminal background
 
-Each theme sets the terminal background colour via `tea.WithBackgroundColor`.
+Each theme sets the terminal background colour.
 This means the header bar, footer bar, and any empty space in the panels all
 share the same surface colour as the rest of the UI — no mismatch with the
 terminal's own background setting. If your terminal overrides background colours
@@ -185,9 +191,8 @@ governs all text and border colours; only background fills are suppressed.
 
 **Notes:**
 - Default is `false` — themed background colours apply normally.
-- On terminals with a very light custom background, some foreground text may
-  lose contrast. If readability suffers, use a lighter theme (e.g.
-  `catppuccin-mocha` has higher-contrast foreground colours than `oxocarbon`
-  on a white background).
+- The built-in palettes are designed for dark backgrounds. On a very light
+  custom background, turn transparent mode off or choose a darker terminal
+  background to keep foreground text readable.
 - `transparent_background` is independent of `--theme` and `theme:` — you can
   combine it with any theme.

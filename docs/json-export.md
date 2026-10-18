@@ -147,6 +147,9 @@ Schema version `1.0.1`. Pretty-printed with two-space indent.
 | `command` | string | Dockerfile instruction that produced the layer (verbatim, including any leading `/bin/sh -c`). |
 | `files` | array | Files visible at this stacked position. Always `[]` when empty (never `null`). Leaves only — directory nodes are recursed into but never emitted as their own entries. |
 
+The TUI displays layer `index: 0` as `#1`, and file origins use `L1` for the
+same first layer. This display convention does not change JSON indices.
+
 ### `layers[].files[]`
 
 | Field | Type | Description |
