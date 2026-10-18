@@ -414,14 +414,14 @@ func TestWasteRenderCopyConfirm(t *testing.T) {
 	// Default render: no Copied! banner, footer hints visible.
 	before := m.renderWasteOverlay()
 	assert.NotContains(t, before, "Copied!")
-	assert.Contains(t, before, "Go to layer", "footer hints visible by default")
+	assert.Contains(t, before, "Press i to explain waste · Enter to view layer", "footer hints visible by default")
 
 	// After y: copyConfirm flips, banner replaces footer hints.
 	updated, _ := m.Update(keyPress('y'))
 	um := updated.(model)
 	out := um.renderWasteOverlay()
 	assert.Contains(t, out, "Copied!", "copy banner shows in overlay")
-	assert.NotContains(t, out, "Go to layer", "footer hints replaced while copyConfirm")
+	assert.NotContains(t, out, "Enter to view layer", "footer hints replaced while copyConfirm")
 }
 
 // truncateLeft must respect display columns, not rune count. CJK ideographs

@@ -237,7 +237,7 @@ func (m model) renderWasteOverlay() string {
 	if m.wasteDetail != nil {
 		return m.renderWasteDetail()
 	}
-	innerWidth := max(min(m.width-6, 68), 0)
+	innerWidth := max(min(m.width-4, 68), 0)
 	rows := m.visibleWasteRows()
 	visibleCount := len(m.allWasteRows())
 	originalCount := visibleCount
@@ -284,9 +284,9 @@ func (m model) renderWasteOverlay() string {
 		}
 	}
 	if len(rows) > 0 {
-		action := "i Why wasted? · Enter Go to layer"
+		action := "Press i to explain waste · Enter to view layer"
 		if m.wasteShowCleanup {
-			action = "i Details · Enter View files"
+			action = "Press i for details · Enter to view files"
 		}
 		if m.copyConfirm {
 			action = m.styles.added.Render("Copied!")

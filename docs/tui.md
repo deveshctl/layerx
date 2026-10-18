@@ -53,8 +53,8 @@ Press `w` to see wasted files sorted by wasted bytes. Select a row and press
 `Enter` to jump to its introducing layer and path. Press `a` to expand the
 top 20 entries to up to 500; `Esc` closes the overlay.
 
-Press `i` (**Why wasted?**) on a row for a short explanation before its layer
-history. Use the arrow keys or `j`/`k` to select a history
+Press `i` to explain waste for the selected file. A short explanation appears
+before its layer history. Use the arrow keys or `j`/`k` to select a history
 event and read its Dockerfile command, stored payload and wasted-byte
 contribution. `Enter` jumps to that event's layer; `Esc` returns to the list.
 

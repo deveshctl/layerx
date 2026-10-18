@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Waste explanations (`w`, then `i`) show per-file layer history, Dockerfile commands and byte attribution. `Tab` in the waste overlay switches to potential cleanup candidates for recognized apt, apk, pip, npm, Yarn and Go build caches, independently of the layer-efficiency score.
 
 ### Changed
-- The TUI spells out Layer efficiency and shows Layer waste and Potential cleanup totals together. File explanations lead with plain-language summaries; keyboard hints name the next action. A 100% score means no detected redundant layer payload; it does not establish that an image is small or its live contents are necessary.
+- The TUI spells out Layer efficiency and shows Layer waste and Potential cleanup totals together. File explanations lead with plain-language summaries; prompts such as "Press i to explain waste" name the next action and fit the minimum terminal size. A 100% score means no detected redundant layer payload; it does not establish that an image is small or its live contents are necessary.
 - Refined the README and demo, corrected installation and engine guidance, and documented TUI focus, pane labels and compact layouts.
 - Clearer active-pane markers, quieter inactive selections, filename-preserving paths, consistent layer labels, and a steady footer. Essential metadata and hints are easier to read across the existing themes.
 - Shorter command help, practical examples, and clearer configuration guidance. Build instructions now match flag handling, and compare examples preserve CI failures.

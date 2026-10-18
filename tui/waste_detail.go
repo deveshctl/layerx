@@ -56,7 +56,7 @@ func (m model) renderWasteDetail() string {
 	width := max(min(m.width-6, 88), 0)
 	dim := m.styles.metaDim
 	lines := []string{m.styles.accent.Render(truncateMid(detail.row.Path, width))}
-	footers := []string{"↑/↓ History · Enter Go to layer", "c Copy command · y Copy path · Esc Back"}
+	footers := []string{"↑/↓ History · Enter to view layer", "c Copy command · y Copy path · Esc Back"}
 	title := "Why this file wastes space"
 	if detail.row.CleanupReason != "" {
 		title = "Potential cleanup"
@@ -66,7 +66,7 @@ func (m model) renderWasteDetail() string {
 			dim.Render("May be useful; check before removing."),
 			dim.Render("Clean in the same build step to save space."),
 			dim.Render("Or keep the cache outside the final image."))
-		footers = []string{"Enter View files · y Copy path · Esc Back"}
+		footers = []string{"Enter to view files · y Copy path · Esc Back"}
 	} else {
 		events := detail.explanation.Events
 		summary := "Old copies still use " + image.FormatBytes(detail.explanation.TotalWasted) + "."

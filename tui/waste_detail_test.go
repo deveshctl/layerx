@@ -97,7 +97,9 @@ func TestWasteCleanupAccessibleAtFullEfficiency(t *testing.T) {
 	assert.True(t, m.wasteShowCleanup)
 	require.Len(t, m.visibleWasteRows(), 1)
 	assert.Equal(t, int64(1<<30), m.visibleWasteRows()[0].Wasted)
+	m = send(m, tea.WindowSizeMsg{Width: 50, Height: 11})
 	out = ansi.Strip(m.renderWasteOverlay())
+	assert.Contains(t, out, "Press i for details · Enter to view files")
 	assert.Contains(t, out, "Layer waste:       0 B", "both totals remain visible after switching views")
 	assert.Contains(t, out, "Tab View layer waste")
 	assert.NotContains(t, out, "Layer 3", "cache rows should not imply that the final layer created the cache")
@@ -105,6 +107,7 @@ func TestWasteCleanupAccessibleAtFullEfficiency(t *testing.T) {
 	require.NotNil(t, m.wasteDetail)
 	assert.Contains(t, ansi.Strip(m.renderWasteOverlay()), "Potential cleanup")
 	assert.Contains(t, ansi.Strip(m.renderWasteOverlay()), "check before removing")
+	assert.Contains(t, ansi.Strip(m.renderWasteOverlay()), "Enter to view files · y Copy path · Esc Back")
 	m = send(m, keyPressSpecial(tea.KeyEscape))
 	assert.True(t, m.wasteShowCleanup)
 	m = send(m, keyPressSpecial(tea.KeyEnter))
@@ -171,9 +174,13 @@ func TestWasteListRetainsSelectionAfterResizeAndDetails(t *testing.T) {
 		assert.Equal(t, 99, m.wasteCursor)
 		assert.Less(t, m.wasteCursor, m.wasteOffset+m.wasteVisibleHeight())
 		out := ansi.Strip(m.renderWasteOverlay())
+		assert.Contains(t, out, "Press i to explain waste · Enter to view layer", "the full approved prompt must fit, including at 50 columns")
 		assert.Contains(t, out, "file_099")
 		assert.Contains(t, out, "Esc Close")
 		assert.LessOrEqual(t, lipgloss.Height(out), m.height)
+		for _, line := range strings.Split(out, "\n") {
+			assert.LessOrEqual(t, ansi.StringWidth(line), m.width)
+		}
 	}
 	offset := m.wasteOffset
 	m = send(m, keyPress('i'))
@@ -199,7 +206,7 @@ func TestWasteDeletionExplanationFitsAtMinimumSize(t *testing.T) {
 	assert.Contains(t, out, "Deleted later; 16.0 MB remains stored.")
 	assert.Contains(t, out, "Layer 2 deleted the file")
 	assert.Contains(t, out, "Deleting later keeps earlier layer bytes.")
-	assert.Contains(t, out, "Enter Go to layer")
+	assert.Contains(t, out, "Enter to view layer")
 	assert.Contains(t, out, "Esc Back")
 	assert.NotContains(t, out, "wasted 0 B")
 	assert.Less(t, strings.Index(out, "Deleted later"), strings.Index(out, "Layer 2"))
