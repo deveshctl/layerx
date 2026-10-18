@@ -83,7 +83,7 @@ func defaultHelpSections() []helpSection {
 		{
 			title: "Wasted Files",
 			entries: []helpEntry{
-				{"w", "Open wasted-files overlay"},
+				{"w", "Layer waste and cleanup candidates (i explains, Tab switches)"},
 				{"Enter", "Jump to original layer and path"},
 				{"a", "Expand top 20 to up to 500"},
 				{"y", "Copy highlighted path"},

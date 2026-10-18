@@ -125,8 +125,13 @@ Schema version `1.0.1`. Pretty-printed with two-space indent.
 | Field | Type | Description |
 |---|---|---|
 | `score` | float64 | `1.0 − wastedBytes / (liveBytes + wastedBytes)`, in `[0.0, 1.0]`. Higher is better. |
-| `wastedBytes` | int64 | Bytes that ship in the image but are not live in the final filesystem. Two cases: a file rewritten across layers (only the last copy is live; earlier copies are waste), and a file added in one layer then deleted in a later one (the delete records a whiteout but never reclaims the earlier layer's bytes, so the whole file is waste). |
+| `wastedBytes` | int64 | Uncompressed stored payload bytes that no final path or hardlink retains. Overwrites and later deletions do not reclaim earlier layer payload; a surviving hardlink can keep a particular earlier copy live. |
 | `wastedFiles` | array | Per-file waste breakdown. Always `[]` when empty (never `null`). Sorted by `totalWasted` descending, then `path` ascending. |
+
+The denominator counts each surviving payload once, including copies retained
+only through hardlinks after the original name is deleted. A score of `1.0`
+does not imply minimal image size or that all live files are needed. Potential
+cache cleanup is shown separately in the TUI; see [Understanding waste](waste-analysis.md).
 
 #### `efficiency.wastedFiles[]`
 

@@ -291,6 +291,9 @@ type model struct {
 	wasteOffset       int
 	wasteExpanded     bool
 	wasteRows         []wasteRow
+	cleanupRows       []wasteRow
+	wasteShowCleanup  bool
+	wasteDetail       *wasteDetailState
 	sizeMode          sizeColMode
 	noCache           bool
 	theme             Theme
@@ -430,6 +433,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		if m.state == stateReady {
 			m.clampCursors()
+		}
+		if m.showWaste {
+			m.adjustWasteScroll(m.wasteVisibleHeight())
 		}
 		if m.state == stateError {
 			m.errorOffset = min(m.errorOffset, m.errorMaxOffset())
@@ -677,6 +683,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.showWaste {
+				if m.wasteDetail != nil {
+					m.wasteDetail = nil
+					return m, nil
+				}
 				m.closeWaste()
 				return m, nil
 			}
@@ -2127,7 +2137,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 		waste := ""
 		if m.efficiency != nil {
 			pct := int(m.efficiency.Score * 100)
-			effStr := fmt.Sprintf("Eff: %d%%", pct)
+			effStr := fmt.Sprintf("Layer eff: %d%%", pct)
 			if m.efficiency.WastedBytes > 0 {
 				waste = " · " + image.FormatBytes(m.efficiency.WastedBytes) + " wasted"
 			}

@@ -48,6 +48,17 @@ Press `w` to see wasted files sorted by wasted bytes. Select a row and press
 `Enter` to jump to its introducing layer and path. Press `a` to expand the
 top 20 entries to up to 500; `Esc` closes the overlay.
 
+Press `i` on a row to explain its waste. Use `j`/`k` to select a history
+event and read its Dockerfile command, stored payload and wasted-byte
+contribution. `Enter` jumps to that event's layer; `Esc` returns to the list.
+
+`Tab` switches between layer waste and potential cleanup candidates. The
+candidate list groups recognized package and build caches that remain in the
+final filesystem. `i` explains the candidate and `Enter` jumps to its directory
+at the final layer. Candidates require review and do not change CI thresholds
+or the efficiency score. [Understanding waste](waste-analysis.md) explains why
+a large image can still have 100% layer efficiency.
+
 A file written in one layer and deleted later still occupies image space.
 Move temporary downloads and cleanup into the same build step, or keep build
 dependencies in a separate build stage.

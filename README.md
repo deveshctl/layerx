@@ -88,6 +88,7 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 - **File extraction** (`x`) — pull any single file out of any layer, straight to disk.
 - Clipboard integration (`y`, `Y`) — copy a path or a file's contents to the system clipboard, over SSH and tmux.
 - Sort by size, filter by name, hide unchanged files, jump to the layer that introduced the biggest waste (`w`).
+- Explain a wasted file with `i` in the waste list: see its layer history, commands and wasted bytes per write. `Tab` switches to live cache candidates worth reviewing, even at 100% layer efficiency. See [Understanding waste](docs/waste-analysis.md).
 - Split-pane view (`A`) — Layer files highlights the selected step's changes; Cumulative retains diff markers from earlier layers. Both follow the same layer selection.
 
 ### Multi-engine, multi-source

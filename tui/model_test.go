@@ -1527,7 +1527,7 @@ func TestEfficiencyBadgeInStatusBar(t *testing.T) {
 	m.efficiency = &image.EfficiencyResult{Score: 0.85, WastedBytes: 1500000}
 	view := m.View()
 	content := viewContent(view)
-	assert.Contains(t, content, "Eff: 85%")
+	assert.Contains(t, content, "Layer eff: 85%")
 	assert.Contains(t, content, "wasted")
 }
 

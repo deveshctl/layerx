@@ -12,31 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildIntroIndex(t *testing.T) {
-	root := &image.FileNode{Name: "", Path: "/", IsDir: true}
-	etc := &image.FileNode{Name: "etc", Path: "/etc", IsDir: true, IntroducedInLayer: 0}
-	etc.AddChild(&image.FileNode{Name: "passwd", Path: "/etc/passwd", IntroducedInLayer: 0})
-	root.AddChild(etc)
-
-	app := &image.FileNode{Name: "app", Path: "/app", IsDir: true, IntroducedInLayer: 2}
-	app.AddChild(&image.FileNode{Name: "server", Path: "/app/server", IntroducedInLayer: 2})
-	root.AddChild(app)
-
-	idx := buildIntroIndex(root)
-
-	assert.Equal(t, 0, idx["/etc/passwd"])
-	assert.Equal(t, 2, idx["/app/server"])
-
-	_, hasEtcDir := idx["/etc"]
-	_, hasAppDir := idx["/app"]
-	assert.False(t, hasEtcDir, "directories should not appear in the index")
-	assert.False(t, hasAppDir, "directories should not appear in the index")
-
-	idxNil := buildIntroIndex(nil)
-	assert.NotNil(t, idxNil)
-	assert.Empty(t, idxNil)
-}
-
 // efficiencyOf returns a deterministic EfficiencyResult with N wasted entries,
 // sorted desc by TotalWasted to match image.Efficiency()'s contract.
 func efficiencyOf(n int) *image.EfficiencyResult {
@@ -516,17 +491,17 @@ func TestTruncateMid(t *testing.T) {
 			wantContainsMid: false,
 		},
 		{
-			name:            "cjk filename preserves display width",
-			input:           "/usr/local/share/ファイル名.bin",
-			width:           20,
-			wantFitsWidth:   true,
+			name:          "cjk filename preserves display width",
+			input:         "/usr/local/share/ファイル名.bin",
+			width:         20,
+			wantFitsWidth: true,
 		},
 		{
-			name:            "cjk segment in prefix preserves display width",
-			input:           "/データ/モデル/ファイル/large.bin",
-			width:           18,
-			wantFilename:    "large.bin",
-			wantFitsWidth:   true,
+			name:          "cjk segment in prefix preserves display width",
+			input:         "/データ/モデル/ファイル/large.bin",
+			width:         18,
+			wantFilename:  "large.bin",
+			wantFitsWidth: true,
 		},
 	}
 	for _, tc := range cases {

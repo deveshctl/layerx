@@ -19,29 +19,17 @@ const (
 )
 
 type wasteRow struct {
-	Path       string
-	Wasted     int64
-	LayerCount int
-	IntroLayer int
+	Path          string
+	Wasted        int64
+	LayerCount    int
+	IntroLayer    int
+	CleanupReason string
 }
 
-func buildIntroIndex(root *image.FileNode) map[string]int {
-	idx := make(map[string]int)
-	if root == nil {
-		return idx
-	}
-	var walk func(n *image.FileNode)
-	walk = func(n *image.FileNode) {
-		for _, c := range n.Children {
-			if c.IsDir {
-				walk(c)
-			} else {
-				idx[c.Path] = c.IntroducedInLayer
-			}
-		}
-	}
-	walk(root)
-	return idx
+type wasteDetailState struct {
+	row         wasteRow
+	explanation image.WasteExplanation
+	cursor      int
 }
 
 func (m *model) openWaste() {
@@ -49,29 +37,24 @@ func (m *model) openWaste() {
 	m.wasteCursor = 0
 	m.wasteOffset = 0
 	m.wasteExpanded = false
+	m.wasteShowCleanup = false
+	m.wasteDetail = nil
+	m.cleanupRows = nil
+	for _, candidate := range image.CleanupCandidates(m.analysis) {
+		m.cleanupRows = append(m.cleanupRows, wasteRow{
+			Path: candidate.Path, Wasted: candidate.Bytes,
+			IntroLayer: len(m.layers()) - 1, CleanupReason: candidate.Reason,
+		})
+	}
 
 	if m.efficiency != nil && len(m.efficiency.WastedFiles) > 0 {
-		var introIdx map[string]int
-		if m.analysis != nil && len(m.analysis.StackedTrees) > 0 {
-			last := m.analysis.StackedTrees[len(m.analysis.StackedTrees)-1]
-			if last != nil {
-				introIdx = buildIntroIndex(last.Root)
-			}
-		}
-		if introIdx == nil {
-			introIdx = map[string]int{}
-		}
-
 		capRows := min(len(m.efficiency.WastedFiles), wasteMaxRows)
 		m.wasteRows = make([]wasteRow, 0, capRows)
 		for i, wf := range m.efficiency.WastedFiles {
 			if i >= wasteMaxRows {
 				break
 			}
-			intro := -1
-			if v, ok := introIdx[wf.Path]; ok {
-				intro = v
-			}
+			intro := wf.FirstWastedLayer
 			m.wasteRows = append(m.wasteRows, wasteRow{
 				Path:       wf.Path,
 				Wasted:     wf.TotalWasted,
@@ -89,20 +72,27 @@ func (m *model) closeWaste() {
 	m.wasteCursor = 0
 	m.wasteOffset = 0
 	m.wasteExpanded = false
+	m.cleanupRows = nil
+	m.wasteShowCleanup = false
+	m.wasteDetail = nil
 }
 
-func (m model) visibleWasteRows() []wasteRow {
-	if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
-		return m.wasteRows[:wasteDefaultLimit]
+func (m model) allWasteRows() []wasteRow {
+	if m.wasteShowCleanup {
+		return m.cleanupRows
 	}
 	return m.wasteRows
 }
 
-// wasteVisibleHeight returns how many row lines fit inside the overlay
-// body. The overlay chrome is: top blank + title + blank + blank + footer
-// + bottom blank = 6 lines, plus the panel's 2 border rows and the
-// surrounding 1-row margin from lipgloss.Place clamping (boxHeight ≤
-// m.height - 2). That works out to m.height - 10.
+func (m model) visibleWasteRows() []wasteRow {
+	rows := m.allWasteRows()
+	if !m.wasteExpanded && len(rows) > wasteDefaultLimit {
+		return rows[:wasteDefaultLimit]
+	}
+	return rows
+}
+
+// Leave room for the summary, persistent key hints, panel borders and margins.
 func (m model) wasteVisibleHeight() int {
 	h := m.height - 10
 	if h < 1 {
@@ -129,14 +119,18 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cancelInflight()
 		return m, tea.Quit
 	}
+	if m.wasteDetail != nil {
+		return m.handleWasteDetail(msg)
+	}
 	rows := m.visibleWasteRows()
+	allRows := m.allWasteRows()
 	visibleHeight := m.wasteVisibleHeight()
 	switch {
 	case key.Matches(msg, m.keys.Down):
 		if m.wasteCursor < len(rows)-1 {
 			m.wasteCursor++
 			m.adjustWasteScroll(visibleHeight)
-		} else if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
+		} else if !m.wasteExpanded && len(allRows) > wasteDefaultLimit {
 			m.wasteExpanded = true
 			m.wasteCursor++
 			m.adjustWasteScroll(visibleHeight)
@@ -150,11 +144,11 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.wasteCursor = 0
 		m.wasteOffset = 0
 	case key.Matches(msg, m.keys.Bottom):
-		if len(m.wasteRows) > 0 {
-			if !m.wasteExpanded && len(m.wasteRows) > wasteDefaultLimit {
+		if len(allRows) > 0 {
+			if !m.wasteExpanded && len(allRows) > wasteDefaultLimit {
 				m.wasteExpanded = true
 			}
-			m.wasteCursor = len(m.wasteRows) - 1
+			m.wasteCursor = len(allRows) - 1
 			m.adjustWasteScroll(visibleHeight)
 		}
 	case msg.Code == tea.KeyEnter:
@@ -162,6 +156,18 @@ func (m model) handleWasteOverlay(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.wasteJump(rows[m.wasteCursor])
+	case msg.Text == "i":
+		if len(rows) > 0 {
+			row := rows[m.wasteCursor]
+			m.wasteDetail = &wasteDetailState{row: row}
+			if row.CleanupReason == "" {
+				m.wasteDetail.explanation = image.ExplainWaste(m.analysis, row.Path)
+			}
+		}
+	case key.Matches(msg, m.keys.Switch):
+		m.wasteShowCleanup = !m.wasteShowCleanup
+		m.wasteCursor, m.wasteOffset = 0, 0
+		m.wasteExpanded = false
 	case msg.Text == "a" || msg.Text == "A":
 		m.wasteExpanded = !m.wasteExpanded
 		m.wasteCursor = 0
@@ -186,6 +192,7 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 		m.filterActive = false
 		m.filterQuery = ""
 		m.layerCursor = row.IntroLayer
+		m.focus = focusTree
 		jumped = true
 	}
 	mp := &m
@@ -227,101 +234,66 @@ func indexOfPath(files []*image.FileNode, path string) int {
 }
 
 func (m model) renderWasteOverlay() string {
-	boxWidth := min(m.width-4, 70)
-	boxWidth = max(boxWidth, 30)
-	innerWidth := boxWidth - 2
-
+	if m.wasteDetail != nil {
+		return m.renderWasteDetail()
+	}
+	innerWidth := max(min(m.width-6, 68), 0)
 	rows := m.visibleWasteRows()
-	originalCount := 0
-	if m.efficiency != nil {
+	visibleCount := len(m.allWasteRows())
+	originalCount := visibleCount
+	if !m.wasteShowCleanup && m.efficiency != nil {
 		originalCount = len(m.efficiency.WastedFiles)
 	}
-	visibleCount := len(m.wasteRows)
-
-	posNum := 0
+	position := 0
 	if visibleCount > 0 {
-		posNum = m.wasteCursor + 1
+		position = m.wasteCursor + 1
 	}
-	panelTitle := fmt.Sprintf("Wasted Files %d/%d", posNum, visibleCount)
+	title := fmt.Sprintf("Wasted Files %d/%d", position, visibleCount)
+	var total int64
+	for _, row := range m.allWasteRows() {
+		total += row.Wasted
+	}
+	if !m.wasteShowCleanup && m.efficiency != nil {
+		total = m.efficiency.WastedBytes
+	}
+	header := fmt.Sprintf("%s layer waste across %d files", image.FormatBytes(total), originalCount)
+	if m.wasteShowCleanup {
+		title = fmt.Sprintf("Cleanup candidates %d/%d", position, visibleCount)
+		header = image.FormatBytes(total) + " live cache bytes; review before removing"
+	}
 	if originalCount > visibleCount {
-		panelTitle += fmt.Sprintf(" (capped, %d total)", originalCount)
+		title += fmt.Sprintf(" (capped, %d total)", originalCount)
 	}
-
-	t := m.theme
-	titleStyle := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(t.StatusDim)
-	keyStyle := lipgloss.NewStyle().Foreground(t.StatusKey).Bold(true)
-	descStyle := lipgloss.NewStyle().Foreground(t.FileName)
-
-	var lines []string
-	lines = append(lines, "")
-
-	if originalCount == 0 {
-		empty := "No wasted files — efficiency 100%"
-		pad := 0
-		if innerWidth > len(empty) {
-			pad = (innerWidth - len(empty)) / 2
+	dim := lipgloss.NewStyle().Foreground(m.theme.StatusDim)
+	lines := []string{m.styles.accent.Render(header)}
+	if len(rows) == 0 {
+		empty := "No layer waste detected"
+		if m.wasteShowCleanup {
+			empty = "No recognized cache candidates"
 		}
-		bodyHeight := 5
-		mid := bodyHeight / 2
-		for i := range bodyHeight {
-			if i == mid {
-				lines = append(lines, strings.Repeat(" ", pad)+dimStyle.Render(empty))
-			} else {
-				lines = append(lines, "")
-			}
-		}
+		lines = append(lines, empty, dim.Render("Layer efficiency is not a size assessment."))
 	} else {
-		header := fmt.Sprintf("%s wasted across %d files",
-			image.FormatBytes(m.efficiency.WastedBytes), originalCount)
-		lines = append(lines, "  "+titleStyle.Render(header))
-		lines = append(lines, "")
-
-		visibleHeight := m.wasteVisibleHeight()
 		start := min(m.wasteOffset, len(rows))
-		end := min(start+visibleHeight, len(rows))
+		end := min(start+m.wasteVisibleHeight(), len(rows))
 		for i := start; i < end; i++ {
-			lines = append(lines, formatWasteRow(t, rows[i], i == m.wasteCursor, innerWidth))
+			lines = append(lines, formatWasteRow(m.theme, rows[i], i == m.wasteCursor, innerWidth))
 		}
 	}
-
-	lines = append(lines, "")
-
-	var footer string
-	switch {
-	case m.copyConfirm:
-		copied := lipgloss.NewStyle().Foreground(t.Added).Bold(true).Render("Copied!")
-		pad := 0
-		if innerWidth > lipgloss.Width(copied) {
-			pad = (innerWidth - lipgloss.Width(copied)) / 2
-		}
-		footer = strings.Repeat(" ", pad) + copied
-		lines = append(lines, footer)
-	case originalCount == 0:
-		footer = keyStyle.Render("Esc") + " " + descStyle.Render("close")
-		lines = append(lines, "  "+footer)
-	case m.wasteExpanded:
-		footer = keyStyle.Render("Enter") + " " + descStyle.Render("jump") + dimStyle.Render(" │ ") +
-			keyStyle.Render("a") + " " + descStyle.Render("collapse") + dimStyle.Render(" │ ") +
-			keyStyle.Render("y") + " " + descStyle.Render("copy") + dimStyle.Render(" │ ") +
-			keyStyle.Render("Esc") + " " + descStyle.Render("close")
-		lines = append(lines, "  "+footer)
-	default:
-		footer = keyStyle.Render("Enter") + " " + descStyle.Render("jump") + dimStyle.Render(" │ ") +
-			keyStyle.Render("a") + " " + descStyle.Render("expand") + dimStyle.Render(" │ ") +
-			keyStyle.Render("y") + " " + descStyle.Render("copy") + dimStyle.Render(" │ ") +
-			keyStyle.Render("Esc") + " " + descStyle.Render("close")
-		lines = append(lines, "  "+footer)
+	footer := "Enter jump · i explain · y copy · a expand"
+	if m.wasteExpanded {
+		footer = "Enter jump · i explain · y copy · a collapse"
 	}
-	lines = append(lines, "")
-
-	body := strings.Join(lines, "\n")
-	boxHeight := len(lines)
-	if m.height > 2 && boxHeight > m.height-2 {
-		boxHeight = m.height - 2
+	if len(rows) == 0 {
+		footer = ""
 	}
-
-	panel := renderPanel(t, body, panelTitle, true, innerWidth, boxHeight, false, false)
+	if m.copyConfirm {
+		footer = m.styles.added.Render("Copied!")
+	}
+	lines = append(lines, footer,
+		dim.Render(fmt.Sprintf("Tab waste/cache (%d) · Esc close", len(m.cleanupRows))))
+	panel := renderPanel(m.theme, strings.Join(lines, "\n"), title, true,
+		innerWidth, min(len(lines), max(m.height-4, 0)), m.wasteOffset > 0,
+		m.wasteOffset+m.wasteVisibleHeight() < len(rows))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 }
 
@@ -344,6 +316,9 @@ func formatWasteRow(t Theme, r wasteRow, selected bool, innerWidth int) string {
 		layerStr = fmt.Sprintf("L%d", r.IntroLayer+1)
 	}
 	countStr := fmt.Sprintf("x%d", r.LayerCount)
+	if r.CleanupReason != "" {
+		countStr = "cache"
+	}
 
 	wide := innerWidth-2 >= narrowMin
 	var fixedW int
