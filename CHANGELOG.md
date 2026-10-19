@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.6.4] - 2026-10-19
+
 ### Added
 - Waste explanations (`w`, then `i`) show per-file layer history, Dockerfile commands and byte attribution. `Tab` in the waste overlay switches to potential cleanup candidates for recognized apt, apk, pip, npm, Yarn and Go build caches, independently of the layer-efficiency score.
 
