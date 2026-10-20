@@ -77,3 +77,28 @@ func TestExplainWasteMissingHistory(t *testing.T) {
 	a := &Analysis{Layers: []Layer{{Tree: NewFileTree()}}}
 	assert.Empty(t, ExplainWaste(a, "/missing").Events)
 }
+
+func TestExplainWasteEmptyWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		next *FileTree
+	}{
+		{"overwritten", makeTree(makeFile("x", "/x", 200))},
+		{"deleted", makeTree(makeFile(".wh.x", "/.wh.x", 0))},
+		{"live", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Analysis{Layers: []Layer{
+				{Tree: makeTree(makeFile("x", "/x", 100))},
+				{Tree: makeTree(makeFile("x", "/x", 0))},
+				{Tree: tc.next},
+			}}
+			e := ExplainWaste(a, "/x")
+			require.GreaterOrEqual(t, len(e.Events), 2)
+			assert.Equal(t, "No payload bytes stored", e.Events[1].Reason)
+			assert.Zero(t, e.Events[1].WastedBytes)
+			assert.Equal(t, int64(100), e.TotalWasted)
+			assert.Equal(t, EfficiencyFromAnalysis(a).WastedBytes, e.TotalWasted)
+		})
+	}
+}

@@ -298,6 +298,36 @@ func TestEfficiency_AddModifyThenDelete_BothCopiesWasted(t *testing.T) {
 	assert.Equal(t, 2, result.WastedFiles[0].LayerCount)
 }
 
+func TestEfficiency_EmptyReinstallLayerCount(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		sizes      []int64
+		waste      int64
+		layerCount int
+	}{
+		{"empty then live payload", []int64{0, 200}, 100, 1},
+		{"multiple empty writes then live payload", []int64{0, 0, 200}, 100, 1},
+		{"empty live copy", []int64{0}, 100, 1},
+		{"reinstall also wastes payload", []int64{0, 50, 200}, 150, 3},
+		{"reinstall ends empty", []int64{0, 200, 0}, 300, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			layers := []Layer{
+				{Tree: makeTree(makeFile("x", "/x", 100))},
+				{Tree: makeTree(makeFile(".wh.x", "/.wh.x", 0))},
+			}
+			for _, size := range tc.sizes {
+				layers = append(layers, Layer{Tree: makeTree(makeFile("x", "/x", size))})
+			}
+			result := Efficiency(layers)
+			require.Len(t, result.WastedFiles, 1)
+			assert.Equal(t, tc.waste, result.WastedBytes)
+			assert.Equal(t, tc.layerCount, result.WastedFiles[0].LayerCount)
+			assert.Zero(t, result.WastedFiles[0].FirstWastedLayer)
+		})
+	}
+}
+
 // Regression guard: a file added once and never duplicated or deleted stays
 // live and contributes zero waste. The deletion-aware charge rule must not
 // touch the ordinary single-occurrence live case.
