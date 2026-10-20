@@ -80,10 +80,9 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 
 	if opaque {
 		// Opaque whiteout semantics: wipe directory contents, then apply the
-		// new layer's children. If a name in cumulative is reintroduced by
-		// this layer, skip the Removed clone — emitting both clones leaves
-		// duplicate-Name children that confuse FindChild and double-count
-		// the path in efficiency calculations.
+		// new layer's children. Reintroduced names retain only their deleted
+		// descendants: duplicate-Name clones would confuse FindChild and
+		// double-count the path in efficiency calculations.
 		layerNames := make(map[string]struct{})
 		for _, child := range layerRoot.Children {
 			if !isWhiteoutName(child.Name) {
@@ -102,6 +101,9 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 				continue
 			}
 			added := cloneAsAdded(child, layerIdx)
+			if previous := cumulative.FindChild(child.Name); previous != nil {
+				preserveRemovalMarkers(previous, added)
+			}
 			merged.AddChild(added)
 		}
 	} else {
@@ -113,12 +115,10 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 		for _, cChild := range cumulative.Children {
 			lChild := layerRoot.FindChild(cChild.Name)
 
-			if _, whited := whiteouts[cChild.Name]; whited {
-				// A regular re-add of the same name in this layer shadows the
-				// whiteout (overlayfs upper-layer "readd shadows deletion"
-				// semantics), matching findFileInLayer in extractor.go. Only
-				// emit the Removed clone when the layer does not reintroduce
-				// the path; otherwise fall through to merge the re-add.
+			_, whited := whiteouts[cChild.Name]
+			if whited {
+				// Same-layer entries survive the whiteout, but none of the
+				// deleted directory's lower-layer contents may survive.
 				if lChild == nil {
 					removed := cloneAsRemoved(cChild)
 					merged.AddChild(removed)
@@ -128,6 +128,13 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 
 			if lChild == nil {
 				merged.AddChild(carry(cChild))
+				continue
+			}
+
+			if cChild.DiffType == Removed || (whited && cChild.IsDir && lChild.IsDir) {
+				added := cloneAsAdded(lChild, layerIdx)
+				preserveRemovalMarkers(cChild, added)
+				merged.AddChild(added)
 				continue
 			}
 
@@ -191,6 +198,22 @@ func mergeLayerWith(cumulative, layerRoot *FileNode, layerIdx int, carry carryFo
 	}
 
 	return merged
+}
+
+// preserveRemovalMarkers records deleted descendants beneath a fresh directory
+// without restoring lower-layer contents or duplicating reintroduced names.
+func preserveRemovalMarkers(previous, replacement *FileNode) {
+	if !previous.IsDir || !replacement.IsDir {
+		return
+	}
+	for _, child := range previous.Children {
+		current := replacement.FindChild(child.Name)
+		if current == nil {
+			replacement.AddChild(cloneAsRemoved(child))
+		} else {
+			preserveRemovalMarkers(child, current)
+		}
+	}
 }
 
 func extractWhiteouts(node *FileNode) (map[string]struct{}, bool) {
