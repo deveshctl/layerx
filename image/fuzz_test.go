@@ -32,38 +32,49 @@ func writeBytesToTempFile(t *testing.T, data []byte) *os.File {
 	return f
 }
 
-// FuzzReadManifestFromSpool exercises the outer-tar walker that locates
-// manifest.json. The contract: any byte slice either yields a valid
-// manifest or a structured error — never a panic or hang. Coverage-guided
-// fuzzing should explore truncated headers, oversized declared sizes, and
-// pax-extended-header sequences.
-func FuzzReadManifestFromSpool(f *testing.F) {
+// FuzzReadImageArchiveMetadata exercises the production metadata reader for
+// Docker-save and standalone OCI archives, including descriptor parsing and
+// the OCI fallback. Malformed input must return an error, never panic or hang.
+func FuzzReadImageArchiveMetadata(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte("not a tar"))
 	// A minimal-shaped tar: blank-padded buffer ends up failing tar.Next
 	// quickly, exercising the early-EOF path.
 	f.Add(make([]byte, 1024))
+	f.Add(buildTar(f, map[string][]byte{
+		"manifest.json": []byte(`[{"Config":"config.json","Layers":["layer.tar"]}]`),
+		"config.json":   []byte(`{}`),
+		"layer.tar":     []byte("payload"),
+	}).Bytes())
+	f.Add(buildTar(f, map[string][]byte{
+		"index.json":        []byte(`{"manifests":[{"digest":"sha256:aaaa"}]}`),
+		"blobs/sha256/aaaa": []byte(`{"config":{"digest":"sha256:bbbb"},"layers":[{"digest":"sha256:cccc"}]}`),
+	}).Bytes())
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		spool := writeBytesToTempFile(t, data)
 		// Discard returns deliberately. The assertion is "does not panic" —
 		// any returned error (including the "manifest.json not found"
 		// sentinel) is acceptable behaviour.
-		_, _ = readManifestFromSpool(spool)
+		_, _ = readImageArchiveMetadata(spool)
 	})
 }
 
-// FuzzScanBlobIndex exercises the size-only scan that builds blobIndex.
-// The scan must terminate on every input — a malformed header that lies
-// about its size or stream length must not OOM the process.
-func FuzzScanBlobIndex(f *testing.F) {
+// FuzzScanResolveMetadata exercises the production outer-tar scan, including
+// metadata-size and entry-count limits. Malformed input must not panic or hang.
+func FuzzScanResolveMetadata(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte("garbage"))
 	f.Add(make([]byte, 1024))
+	f.Add(buildTar(f, map[string][]byte{
+		"manifest.json": []byte(`[]`),
+		"config.json":   []byte(`{}`),
+		"layer.tar":     []byte("payload"),
+	}).Bytes())
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		spool := writeBytesToTempFile(t, data)
-		_, _ = scanBlobIndex(spool)
+		_, _, _, _ = scanResolveMetadata(spool)
 	})
 }
 
