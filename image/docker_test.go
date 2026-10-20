@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func buildTar(t *testing.T, files map[string][]byte) *bytes.Buffer {
+func buildTar(t testing.TB, files map[string][]byte) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)

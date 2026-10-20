@@ -419,25 +419,6 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 	return layerPaths, load, cleanup, nil
 }
 
-func readManifestFromSpool(spool *os.File) ([]byte, error) {
-	if _, err := spool.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seek spool: %w", err)
-	}
-	tr := tar.NewReader(spool)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("invalid image archive: manifest.json not found")
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading image archive: %w", err)
-		}
-		if hdr.Name == "manifest.json" {
-			return readMetadataEntry(tr, hdr.Size, "manifest.json")
-		}
-	}
-}
-
 // readSingleBlobFromSpool walks the spooled outer tar from the beginning and
 // returns the bytes of the entry whose name equals wanted, or (nil, nil) if
 // the spool does not contain that entry. Other entries are streamed past
@@ -476,43 +457,6 @@ func readSingleBlobFromSpool(spool *os.File, wanted string) ([]byte, error) {
 			return nil, fmt.Errorf("layer blob %s too large: stream exceeds %d bytes", wanted, MaxLayerBlobSize)
 		}
 		return data, nil
-	}
-}
-
-// blobIndex maps a blob name to its declared header.Size. The lazy loader
-// uses the size to early-reject oversized blobs before opening a tar reader,
-// and to short-circuit "blob is in the manifest but missing from the spool"
-// vs "blob exists but exceeds the cap" with distinct errors.
-//
-// Offset tracking is intentionally NOT included: tar.Reader does not expose
-// the post-header file position in a stable way across stdlib versions, and
-// rebuilding it via spool.Seek(SeekCurrent) after Next() is fragile (the
-// reader internally buffers). The index is the cheap-but-sufficient win:
-// one full scan to build the map, and from then on each load reseeks and
-// scans header-only until it finds the wanted name. Header scan is two
-// orders of magnitude cheaper than re-reading bodies, so an N-layer extract
-// does N header scans + 1 body read, not N body reads.
-type blobIndex map[string]int64
-
-// scanBlobIndex walks the spooled outer tar once, recording every entry's
-// declared size. Bodies are streamed past via io.Copy(io.Discard, tr) so
-// peak memory during the scan is the tar reader's internal buffer (~tens
-// of KB), not the sum of layer bodies.
-func scanBlobIndex(spool *os.File) (blobIndex, error) {
-	if _, err := spool.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seek spool: %w", err)
-	}
-	idx := make(blobIndex)
-	tr := tar.NewReader(spool)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return idx, nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("indexing image archive: %w", err)
-		}
-		idx[hdr.Name] = hdr.Size
 	}
 }
 

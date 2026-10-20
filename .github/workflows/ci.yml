@@ -69,9 +69,9 @@ jobs:
       # 60s (up from 30s) leaves headroom past Go's coverage-gathering warmup
       # so a worker landing on a slow input near the deadline doesn't trip
       # "context deadline exceeded" on shared runners.
-      - run: go test -run=^$ -fuzz=FuzzReadManifestFromSpool -fuzztime=60s ./image
-      - run: go test -run=^$ -fuzz=FuzzScanBlobIndex      -fuzztime=60s ./image
-      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer    -fuzztime=60s ./image
+      - run: go test -run=^$ -fuzz=FuzzReadImageArchiveMetadata -fuzztime=60s ./image
+      - run: go test -run=^$ -fuzz=FuzzScanResolveMetadata    -fuzztime=60s ./image
+      - run: go test -run=^$ -fuzz=FuzzFindFileInLayer        -fuzztime=60s ./image
 
   test-podman:
     runs-on: ubuntu-latest
