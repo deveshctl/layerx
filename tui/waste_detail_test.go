@@ -22,6 +22,67 @@ func wasteHistoryAnalysis() *image.Analysis {
 	return a
 }
 
+func TestWasteJumpScrollsSelectedLayerIntoView(t *testing.T) {
+	for _, source := range []string{"list", "detail"} {
+		for _, tc := range []struct {
+			name                   string
+			target, cursor, offset int
+		}{
+			{"down", 39, 0, 0},
+			{"up", 0, 39, 36},
+		} {
+			t.Run(source+"/"+tc.name, func(t *testing.T) {
+				m := setupModel()
+				m.height = 12
+				a := &image.Analysis{}
+				for i := range 40 {
+					tree := image.NewFileTree()
+					tree.Root.AddChild(&image.FileNode{Name: "x", Path: "/x", Size: int64(i + 1)})
+					a.Layers = append(a.Layers, image.Layer{Index: i, Tree: tree})
+				}
+				a.StackedTrees = image.Stack(a.Layers)
+				m.analysis = a
+				m.analysisGen++
+				m.layerCursor, m.layerOffset = tc.cursor, tc.offset
+				m.showWaste = true
+				m.wasteRows = []wasteRow{{Path: "/x", IntroLayer: tc.target}}
+				if source == "detail" {
+					m = send(m, keyPress('i'))
+					require.NotNil(t, m.wasteDetail)
+					m.wasteDetail.cursor = tc.target
+				}
+				m = send(m, keyPressSpecial(tea.KeyEnter))
+				assert.Equal(t, tc.target, m.layerCursor)
+				assert.LessOrEqual(t, m.layerOffset, m.layerCursor)
+				assert.Less(t, m.layerCursor, m.layerOffset+m.layerVisibleHeight())
+				assert.False(t, m.showWaste)
+				assert.Equal(t, focusTree, m.focus)
+				files := m.displayTree()
+				require.Less(t, m.treeCursor, len(files))
+				assert.Equal(t, "/x", files[m.treeCursor].Path)
+			})
+		}
+	}
+}
+
+func TestWasteDetailEmptyWriteReason(t *testing.T) {
+	m := setupModel()
+	a := &image.Analysis{}
+	for _, size := range []int64{100, 0, 200} {
+		tree := image.NewFileTree()
+		tree.Root.AddChild(&image.FileNode{Name: "x", Path: "/x", Size: size})
+		a.Layers = append(a.Layers, image.Layer{Tree: tree})
+	}
+	m.analysis = a
+	m.efficiency = image.EfficiencyFromAnalysis(a)
+	m.openWaste()
+	m = send(m, keyPress('i'))
+	m = send(m, keyPress('j'))
+	out := ansi.Strip(m.renderWasteOverlay())
+	assert.Contains(t, out, "No payload bytes stored")
+	assert.NotContains(t, out, "Another linked path")
+}
+
 func TestWasteExplainReturnAndJump(t *testing.T) {
 	m := setupModel()
 	m.analysis = wasteHistoryAnalysis()

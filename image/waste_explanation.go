@@ -49,7 +49,9 @@ func ExplainWaste(a *Analysis, path string) WasteExplanation {
 				Layer: occ.layerIdx, Command: a.Layers[occ.layerIdx].Command,
 				Change: occ.change, Size: occ.size, Reason: "Present in final filesystem",
 			}
-			if bytes := chargedLayers[occ.layerIdx]; bytes > 0 {
+			if occ.size == 0 {
+				event.Reason = "No payload bytes stored"
+			} else if bytes := chargedLayers[occ.layerIdx]; bytes > 0 {
 				event.WastedBytes = bytes
 				if j+1 < len(run.occ) {
 					event.Reason = fmt.Sprintf("Overwritten in L%d", run.occ[j+1].layerIdx+1)

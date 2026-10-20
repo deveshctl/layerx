@@ -117,13 +117,13 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 					firstWastedLayer = occ.layerIdx
 				}
 			}
-			// LayerCount counts byte-contributing occurrences across charged
-			// copies only. For deleted runs, every occurrence is charged. For
+			// LayerCount counts byte-contributing occurrences in runs with
+			// charged payload. For deleted runs, every payload is charged. For
 			// live runs, the surviving last copy is excluded from charged but
 			// is still a real byte-contributor visible to the user, so include
 			// all non-zero occurrences in the run (not just the charged slice).
-			// The single-occurrence live run above is skipped entirely, so
-			// reinstalled copies from a separate run do not inflate the count.
+			// Runs with no charged payload are skipped above, so separate live
+			// reinstalls, even after empty writes, do not inflate the count.
 			for _, occ := range run.occ {
 				if occ.size > 0 {
 					occurrenceCount++
@@ -252,7 +252,7 @@ func pathRuns(path string, indices []map[string]*FileNode) []pathRun {
 func chargedOccurrences(path string, run pathRun, live map[payloadRef]int64) []efficiencyOccurrence {
 	var charged []efficiencyOccurrence
 	for _, occ := range run.occ {
-		if _, survives := live[payloadRef{path, occ.layerIdx}]; !survives {
+		if _, survives := live[payloadRef{path, occ.layerIdx}]; occ.size > 0 && !survives {
 			charged = append(charged, occ)
 		}
 	}

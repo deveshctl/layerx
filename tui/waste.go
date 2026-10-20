@@ -192,6 +192,7 @@ func (m model) wasteJump(row wasteRow) (tea.Model, tea.Cmd) {
 		m.filterActive = false
 		m.filterQuery = ""
 		m.layerCursor = row.IntroLayer
+		m.adjustLayerScroll()
 		m.focus = focusTree
 		jumped = true
 	}

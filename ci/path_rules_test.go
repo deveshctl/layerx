@@ -314,3 +314,22 @@ func TestMaxLayerCountRule_DisabledZero(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Passed, "MaxCount: 0 means disabled — never fire")
 }
+
+func TestMaxLayerCountRule_EmptyReinstall(t *testing.T) {
+	a := &image.Analysis{}
+	for _, entry := range []struct {
+		name string
+		size int64
+	}{{"x", 100}, {".wh.x", 0}, {"x", 0}, {"x", 200}} {
+		tree := image.NewFileTree()
+		tree.Root.AddChild(&image.FileNode{Name: entry.name, Path: "/" + entry.name, Size: entry.size})
+		a.Layers = append(a.Layers, image.Layer{Tree: tree})
+	}
+	efficiency := image.EfficiencyFromAnalysis(a)
+	assert.Equal(t, int64(100), efficiency.WastedBytes)
+	results := (MaxLayerCountRule{ID: "reinstall-cap", MaxCount: 1}).Evaluate(EvalContext{Efficiency: efficiency})
+	require.NotEmpty(t, results)
+	for _, result := range results {
+		assert.True(t, result.Passed, "a separate live reinstall must not inflate the wasted run's layer count: %s", result.Detail)
+	}
+}
