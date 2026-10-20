@@ -77,7 +77,10 @@ Reports go to stdout; progress and errors go to stderr. The last report line
 starts with "verdict:" and contains ok, regression, or noop. In CI, run the
 command directly so its exit code determines whether the step passes.
 
-Use --mode full for all entries, or --mode summary for totals and verdict.`,
+Use --mode full for all entries, or --mode summary for totals and verdict.
+
+This command does not read .layerx.yaml. The inherited --config flag has no
+effect; CI thresholds and path rules do not configure the comparison verdict.`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
   layerx compare --mode full app:1.4.0 app:1.5.0

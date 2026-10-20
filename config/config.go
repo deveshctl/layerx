@@ -42,10 +42,8 @@ type Config struct {
 	// form). Tagged "-" so yaml.Strict() doesn't barf on a missing key.
 	PathRules []PathRuleSpec `yaml:"-"`
 
-	// Keybindings is a placeholder for the M12 keybinding-override feature
-	// documented in CLAUDE.md. Declared here so yaml.Strict() accepts the
-	// documented top-level key without rejecting the whole config; semantics
-	// are wired up in M12.
+	// Keybindings is reserved. Keep accepting the mapping for compatibility;
+	// it does not change viewer shortcuts.
 	Keybindings map[string]string `yaml:"keybindings,omitempty"`
 }
 

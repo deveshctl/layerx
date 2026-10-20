@@ -13,6 +13,8 @@ version: 1
 #
 # theme: tokyo-night
 
+# CI thresholds: omitted values use defaults; set 0 to disable a rule.
+# Used by layerx ci and CI=true; layerx compare ignores this file.
 rules:
   lowest-efficiency: 0.95
   highest-user-wasted-percent: 0.05

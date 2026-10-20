@@ -181,7 +181,7 @@ func validateMaxLayerCount(n int) error {
 		return fmt.Errorf("max-layer-count must be >= 0; got %d", n)
 	}
 	if n == 1 {
-		return fmt.Errorf("max-layer-count must be >= 2; %d would flag every file", n)
+		return fmt.Errorf("max-layer-count must be >= 2 or 0 to disable; got %d", n)
 	}
 	return nil
 }

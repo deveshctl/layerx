@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/deveshctl/layerx/config"
@@ -74,4 +76,27 @@ func TestLoadConfig_BadRulesNull(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, buf.String(), "must be a mapping, not null")
 	assert.Contains(t, buf.String(), "rules — global CI efficiency thresholds")
+}
+
+func TestLoadConfig_ExplicitPathSkipsDiscovery(t *testing.T) {
+	writeConfig(t, "rules: null\n")
+	oldConfig := flagConfig
+	t.Cleanup(func() { flagConfig = oldConfig })
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing=%t", missing), func(t *testing.T) {
+			flagConfig = filepath.Join(t.TempDir(), "chosen.yaml")
+			want := config.Default()
+			if !missing {
+				require.NoError(t, os.WriteFile(flagConfig, []byte("rules:\n  lowest-efficiency: 0.97\n"), 0o600))
+				want.Rules.LowestEfficiency = 0.97
+			}
+			cmd := &cobra.Command{}
+			var stderr bytes.Buffer
+			cmd.SetErr(&stderr)
+			got, err := loadConfig(cmd)
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+			assert.Empty(t, stderr.String())
+		})
+	}
 }

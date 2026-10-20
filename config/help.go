@@ -19,6 +19,10 @@ var sectionHelp = map[string]string{
   path-rules:      path-scoped CI rules (block, deny-waste, max-layer-count)
   version:         schema version (currently 1)
   theme:           TUI colour theme (see below)
+  transparent_background: remove viewer background fills (default false)
+  keybindings:     reserved; accepted but ignored
+
+"layerx compare" does not read this file; --config has no effect there.
 
 Reference: https://github.com/deveshctl/layerx/blob/main/docs/configuration.md
 Run "layerx init --flavour generic" to write a starter file.`,
@@ -39,6 +43,8 @@ Precedence (highest to lowest):
     lowest-efficiency: 0.9              # minimum score, 0.0–1.0 (0 disables)
     highest-wasted-bytes: 0             # max wasted bytes (0 disables)
     highest-user-wasted-percent: 0.1    # max waste fraction (0 disables)
+
+Omitted thresholds keep these defaults; set 0 explicitly to disable a rule.
 
 Run "layerx init --flavour generic" for a starter file.`,
 	SectionPathRules: `path-rules — path-scoped CI rules (block, deny-waste, max-layer-count):
