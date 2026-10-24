@@ -30,3 +30,9 @@ path-rules:
     - "**/.DS_Store"         # macOS Finder metadata
     - "**/Thumbs.db"         # Windows Explorer metadata
     - "**/*.swp"             # vim swap files
+
+# Optional image-size limits (uncompressed layers). Omitted limits are disabled.
+# Growth checks require: layerx ci --baseline OLD IMAGE, or compare OLD NEW.
+# size-budget:
+#   max: 500MB
+#   max-growth: 5%

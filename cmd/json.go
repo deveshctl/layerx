@@ -16,26 +16,29 @@ import (
 // FIRST field so it appears first in encoding/json output (which preserves
 // struct declaration order). Downstream consumers can pin against it.
 type jsonExport struct {
-	SchemaVersion string         `json:"schemaVersion"`
-	ImageRef      string         `json:"imageRef"`
+	SchemaVersion string `json:"schemaVersion"`
+	ImageRef      string `json:"imageRef"`
 	// Platform is the canonical "os/arch[/variant]" pinned by --platform on
 	// this run, or omitted when the user did not pass --platform. Lets a
 	// downstream consumer disambiguate two exports of the same multi-
 	// platform image without re-running layerx.
-	Platform      string         `json:"platform,omitempty"`
-	TotalSize     int64          `json:"totalSize"`
-	LayerCount    int            `json:"layerCount"`
-	Efficiency    jsonEfficiency `json:"efficiency"`
-	Layers        []jsonLayer    `json:"layers"`
+	Platform               string         `json:"platform,omitempty"`
+	UncompressedLayerBytes int64          `json:"uncompressedLayerBytes"`
+	MeasuredPlatform       string         `json:"measuredPlatform,omitempty"`
+	TotalSize              int64          `json:"totalSize"`
+	LayerCount             int            `json:"layerCount"`
+	Efficiency             jsonEfficiency `json:"efficiency"`
+	Layers                 []jsonLayer    `json:"layers"`
 }
 
 // jsonSchemaVersion identifies the format produced by buildJSONExport.
 // Bump per semver: patch for non-breaking field additions, minor for
 // additive structural changes, major for incompatible changes.
 //
+// 1.0.2 — adds uncompressedLayerBytes and the observed measuredPlatform.
 // 1.0.1 — added optional "platform" field (omitempty); existing consumers
 //         that don't read it are unaffected, so this is a patch bump.
-const jsonSchemaVersion = "1.0.1"
+const jsonSchemaVersion = "1.0.2"
 
 type jsonEfficiency struct {
 	Score       float64          `json:"score"`
@@ -112,10 +115,12 @@ func runJSONExportFromAnalysis(analysis *image.Analysis, outputPath string) erro
 
 func buildJSONExport(analysis *image.Analysis, efficiency *image.EfficiencyResult) *jsonExport {
 	export := &jsonExport{
-		SchemaVersion: jsonSchemaVersion,
-		ImageRef:      analysis.ImageRef,
-		TotalSize:     analysis.TotalSize,
-		LayerCount:    len(analysis.Layers),
+		SchemaVersion:          jsonSchemaVersion,
+		UncompressedLayerBytes: analysis.UncompressedSize,
+		MeasuredPlatform:       analysis.Platform,
+		ImageRef:               analysis.ImageRef,
+		TotalSize:              analysis.TotalSize,
+		LayerCount:             len(analysis.Layers),
 		Efficiency: jsonEfficiency{
 			Score:       efficiency.Score,
 			WastedBytes: efficiency.WastedBytes,

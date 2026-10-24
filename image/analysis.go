@@ -7,11 +7,13 @@ import (
 )
 
 type Analysis struct {
-	ImageRef        string
-	Layers          []Layer
-	StackedTrees    []*FileTree // per-layer delta view: filesystem changes introduced by each layer only.
-	AggregatedTrees []*FileTree // cumulative provenance view: full filesystem state from layer 0 up to each layer.
-	TotalSize       int64
+	ImageRef         string
+	Layers           []Layer
+	StackedTrees     []*FileTree // per-layer delta view: filesystem changes introduced by each layer only.
+	AggregatedTrees  []*FileTree // cumulative provenance view: full filesystem state from layer 0 up to each layer.
+	TotalSize        int64       // stored layer blobs; retained for export compatibility
+	UncompressedSize int64
+	Platform         string
 }
 
 // AnalyzeOptions controls the analyze pipeline. Zero value is valid: caching
@@ -135,17 +137,29 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	aggregated := BuildAggregatedTrees(layers)
 	assignNetDeltas(layers, stacked)
 
-	var totalSize int64
+	var totalSize, uncompressedSize int64
+	var platform string
 	for _, l := range layers {
 		totalSize += l.Size
+		uncompressedSize += l.UncompressedSize
+		if l.Platform != "" {
+			platform = l.Platform
+		}
 	}
 
+	if len(layers) == 0 {
+		if meta, err := resolver.Inspect(ctx, imageRef); err == nil && meta != nil {
+			platform = meta.Platform
+		}
+	}
 	return &Analysis{
-		ImageRef:        imageRef,
-		Layers:          layers,
-		StackedTrees:    stacked,
-		AggregatedTrees: aggregated,
-		TotalSize:       totalSize,
+		ImageRef:         imageRef,
+		Layers:           layers,
+		StackedTrees:     stacked,
+		AggregatedTrees:  aggregated,
+		TotalSize:        totalSize,
+		UncompressedSize: uncompressedSize,
+		Platform:         platform,
 	}, nil
 }
 

@@ -18,15 +18,7 @@ import (
 // up from CWD looking for .layerx.yaml, then falls back to the OS user-config
 // directory.
 func loadConfig(cmd *cobra.Command) (*config.Config, error) {
-	var (
-		cfg *config.Config
-		err error
-	)
-	if flagConfig != "" {
-		cfg, err = config.LoadFrom(flagConfig)
-	} else {
-		cfg, err = config.Load()
-	}
+	cfg, err := readConfig()
 	if err != nil {
 		wrapped := fmt.Errorf("loading config: %w", err)
 		presentConfigLoadFailure(cmd, wrapped)
@@ -60,4 +52,11 @@ func printConfigSectionHint(w io.Writer, err error) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, config.SectionHelp(section))
+}
+
+func readConfig() (*config.Config, error) {
+	if flagConfig != "" {
+		return config.LoadFrom(flagConfig)
+	}
+	return config.Load()
 }

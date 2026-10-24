@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 	"math"
 	"os"
 
@@ -59,14 +61,22 @@ Built-in thresholds: 90% minimum efficiency, 10% maximum waste, no byte limit.
 
 Fractions range from 0 to 1: 0.95 means 95% efficiency; 0.1 allows 10% waste.
 Waste is measured against live plus wasted file bytes, not compressed image
-size. Set a threshold to 0 to disable that check.
+size. Set an efficiency/waste threshold to 0 to disable that check.
+
+Optional size-budget limits in .layerx.yaml measure uncompressed layer tar
+bytes. --max-image-size and --max-growth override those limits; a growth
+limit requires --baseline OLD. For size limits, 0B and 0% enforce zero,
+while an empty string disables the limit. --format json or markdown emits
+a check report; --json remains the separate image-analysis export.
 
 Reports go to stdout; progress and errors go to stderr. --json exports the
 image analysis, not the check results. --no-cache runs a fresh analysis.`,
 	Example: `  layerx ci nginx:stable
   layerx ci ./build/app.tar
   layerx ci --lowest-efficiency 0.95 app:local
-  layerx ci --highest-wasted-bytes 10485760 app:local`,
+  layerx ci --highest-wasted-bytes 10485760 app:local
+  layerx ci --max-image-size 500MB app:local
+  layerx ci --baseline app:main --max-growth 5% app:local`,
 	Args:          ciArgs,
 	RunE:          runCICmd,
 	SilenceErrors: true,
@@ -87,6 +97,8 @@ func init() {
 
 	ciCmd.Flags().StringVar(&flagJSON, "json", "", "write image analysis to `FILE` as JSON (excludes check results)")
 
+	addSizeBudgetFlags(ciCmd)
+	ciCmd.Flags().String("baseline", "", "baseline image or archive for growth checks")
 	rootCmd.AddCommand(ciCmd)
 }
 
@@ -156,8 +168,16 @@ func executeCICheck(ctx context.Context, imageRef string, cfg *config.Config, cm
 }
 
 func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, cmd *cobra.Command, noCache bool, viaCIEnv bool, progress chan<- image.ProgressEvent) (*image.Analysis, error) {
+	budgetConfig, limits, err := effectiveSizeBudget(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	baselineRef, _ := cmd.Flags().GetString("baseline")
+	if limits.Growth != nil && baselineRef == "" {
+		return nil, fmt.Errorf("size-budget.max-growth requires --baseline OLD; use layerx ci --baseline OLD IMAGE")
+	}
 	rules := buildRules(cfg, cmd)
-	if len(rules) == 0 {
+	if len(rules) == 0 && !limits.Enabled() {
 		return nil, errNoCIRulesEnabled(viaCIEnv)
 	}
 
@@ -172,6 +192,27 @@ func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, c
 		return nil, err
 	}
 
+	var before *image.Analysis
+	var baselineID string
+	var baselineSize *int64
+	if baselineRef != "" {
+		baselineResolver, err := selectResolver(baselineRef)
+		if err != nil {
+			return analysis, err
+		}
+		baselineID, before, err = analyzeForCompare(ctx, baselineResolver, baselineRef, noCache, "baseline", cmd.ErrOrStderr())
+		if err != nil {
+			return analysis, err
+		}
+		if err := matchingPlatforms(before, analysis); err != nil {
+			return analysis, err
+		}
+		baselineSize = &before.UncompressedSize
+	}
+	sizeChecks, err := limits.Evaluate(budgetConfig, analysis.UncompressedSize, baselineSize)
+	if err != nil {
+		return analysis, err
+	}
 	efficiency := image.EfficiencyFromAnalysis(analysis)
 	report := ci.Evaluate(ci.EvalContext{
 		Efficiency:   efficiency,
@@ -179,9 +220,35 @@ func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, c
 		Layers:       analysis.Layers,
 		StackedTrees: analysis.StackedTrees,
 	}, rules)
-	report.Print(os.Stdout)
+	for _, check := range sizeChecks {
+		if !check.Passed {
+			report.Passed = false
+		}
+	}
+	var text bytes.Buffer
+	report.Print(&text)
+	if limits.Enabled() || before != nil {
+		fmt.Fprintf(&text, "\nImage size (uncompressed layers): %s (%d B)\n", sizebudget.Format(analysis.UncompressedSize), analysis.UncompressedSize)
+		fmt.Fprintf(&text, "Platform: %s\n\n", fallback(analysis.Platform, "unknown"))
+		if before != nil {
+			fmt.Fprintf(&text, "Baseline: %s (%s); growth: %s\n\n", cleanCompareText(baselineRef), sizebudget.Format(before.UncompressedSize), growthLabel(before.UncompressedSize, analysis.UncompressedSize))
+		}
+		writeSizeChecks(&text, sizeChecks, 100)
+	}
+	id, _ := resolver.ImageID(ctx, imageRef)
+	checkReport := newCheckReport(analysis, id, budgetConfig, sizeChecks)
+	checkReport.CI = report
+	if before != nil {
+		snapshot := reportSnapshot(before, baselineID)
+		checkReport.Before = &snapshot
+	}
+	checkReport.Passed = checkReport.Passed && report.Passed
+	format, _ := cmd.Flags().GetString("format")
+	if err := writeCheckReport(cmd.OutOrStdout(), format, text.String(), checkReport); err != nil {
+		return analysis, err
+	}
 
-	if report.ExitCode() != 0 {
+	if !checkReport.Passed {
 		return analysis, &ErrCIFailed{}
 	}
 	return analysis, nil

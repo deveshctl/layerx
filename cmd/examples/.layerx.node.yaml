@@ -32,3 +32,9 @@ path-rules:
   deny-waste:
     - "**/node_modules/**"        # fail if earlier copies waste space
     - "**/*.map"                  # fail if earlier source maps waste space
+
+# Optional image-size limits (uncompressed layers). Omitted limits are disabled.
+# Growth checks require: layerx ci --baseline OLD IMAGE, or compare OLD NEW.
+# size-budget:
+#   max: 500MB
+#   max-growth: 5%

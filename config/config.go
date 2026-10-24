@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/deveshctl/layerx/internal/sizebudget"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
@@ -34,7 +35,8 @@ type Config struct {
 	// Opt-in only; default false preserves existing behaviour.
 	TransparentBackground bool `yaml:"transparent_background,omitempty"`
 
-	Rules RulesConfig `yaml:"rules"`
+	Rules      RulesConfig       `yaml:"rules"`
+	SizeBudget sizebudget.Config `yaml:"size-budget,omitempty"`
 
 	// PathRules is populated by the loader's normalize() pass. It is NOT
 	// directly unmarshalled from YAML — see normalizePathRules() — because
@@ -54,14 +56,15 @@ type rawConfig struct {
 	Version               int               `yaml:"version,omitempty"`
 	Theme                 string            `yaml:"theme,omitempty"`
 	TransparentBackground bool              `yaml:"transparent_background,omitempty"`
+	SizeBudget            sizebudget.Config `yaml:"size-budget,omitempty"`
 	Rules                 ast.Node          `yaml:"rules,omitempty"`
 	PathRules             ast.Node          `yaml:"path-rules,omitempty"`
 	Keybindings           map[string]string `yaml:"keybindings,omitempty"`
 }
 
 type RulesConfig struct {
-	LowestEfficiency        float64 `yaml:"lowest-efficiency"`
-	HighestWastedBytes      int64   `yaml:"highest-wasted-bytes"`
+	LowestEfficiency         float64 `yaml:"lowest-efficiency"`
+	HighestWastedBytes       int64   `yaml:"highest-wasted-bytes"`
 	HighestUserWastedPercent float64 `yaml:"highest-user-wasted-percent"`
 }
 
@@ -69,8 +72,8 @@ func Default() *Config {
 	return &Config{
 		Version: 1,
 		Rules: RulesConfig{
-			LowestEfficiency:        0.9,
-			HighestWastedBytes:      0,
+			LowestEfficiency:         0.9,
+			HighestWastedBytes:       0,
 			HighestUserWastedPercent: 0.1,
 		},
 	}
@@ -158,6 +161,7 @@ func LoadFrom(path string) (*Config, error) {
 		Theme:                 raw.Theme,
 		TransparentBackground: raw.TransparentBackground,
 		Rules:                 rules,
+		SizeBudget:            raw.SizeBudget,
 		PathRules:             specs,
 		Keybindings:           raw.Keybindings,
 	}
@@ -210,11 +214,11 @@ func checkRulesNotNull(path string, body ast.Node) error {
 		if key == nil || value == nil {
 			return nil
 		}
-		if key.String() != "rules" {
+		if key.String() != "rules" && key.String() != "size-budget" {
 			return nil
 		}
 		if _, isNull := value.(*ast.NullNode); isNull {
-			return newLoadError(path, SectionRules,
+			return newLoadError(path, key.String(),
 				fmt.Errorf("must be a mapping, not null"))
 		}
 		return nil
@@ -270,6 +274,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("theme: unknown theme %q; valid themes: catppuccin-mocha, tokyo-night, kanagawa, gruvbox-dark, rose-pine, dracula, oxocarbon, cyberdream", c.Theme)
 		}
 	}
+	if _, err := sizebudget.Parse(c.SizeBudget); err != nil {
+		return err
+	}
 	le := c.Rules.LowestEfficiency
 	if math.IsNaN(le) || math.IsInf(le, 0) || le < 0 || le > 1 {
 		return fmt.Errorf("rules.lowest-efficiency must be a finite number in [0, 1]; got %v", le)
@@ -290,6 +297,8 @@ func validationSection(msg string) string {
 		return SectionVersion
 	case strings.HasPrefix(msg, "theme:"):
 		return SectionTheme
+	case strings.HasPrefix(msg, "size-budget."):
+		return "size-budget"
 	case strings.HasPrefix(msg, "rules."):
 		return SectionRules
 	default:
@@ -309,6 +318,8 @@ func validationSection(msg string) string {
 func inferParseSection(err error) string {
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "size-budget"):
+		return "size-budget"
 	case strings.Contains(msg, "path-rules"):
 		return SectionPathRules
 	case strings.Contains(msg, "keybindings"):

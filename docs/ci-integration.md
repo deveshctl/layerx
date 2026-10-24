@@ -12,7 +12,7 @@ daemon in CI.
 
 ## Overview
 
-CI mode evaluates two families of rules against the image:
+CI mode evaluates these checks against the image:
 
 - **Global rules** — `lowest-efficiency`, `highest-wasted-bytes`,
   `highest-user-wasted-percent`. Each compares one number from the
@@ -21,6 +21,8 @@ CI mode evaluates two families of rules against the image:
   matching files with wasted payload; `max-layer-count` caps the contributing
   layer count for files with wasted payload. Block violations name the writing
   layer; waste violations report the wasted bytes and/or contributing count.
+
+- **Size budgets** — optional absolute uncompressed layer size and growth against a baseline; see [Image-size budgets](size-budgets.md).
 
 Rules come from `.layerx.yaml` (current directory or parents, then the user
 configuration directory) and can be
@@ -314,3 +316,7 @@ silently let bad images through if you only watch for `1`.
   time, prune it occasionally with `layerx cache prune --older-than 7d`
   (the cache also self-prunes by `LAYERX_CACHE_TTL_DAYS` and
   `LAYERX_CACHE_MAX_BYTES`). Ephemeral runners can ignore this.
+
+## Image-size limits and reports
+
+Add `size-budget.max: 500MB` and optionally `size-budget.max-growth: 5%` in `.layerx.yaml`. Run `layerx ci --baseline OLD NEW` for configured growth checks; missing baselines are errors. CLI overrides are `--max-image-size` and `--max-growth`. Size limits are additional to existing rules. `--format json` and `--format markdown` export check results even on policy failure; `--json` continues to export analysis separately. See [Image-size budgets and comparison](size-budgets.md) for complete setup and measurement details.
