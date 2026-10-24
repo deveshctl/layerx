@@ -165,3 +165,18 @@ func TestComparisonProgressFinishesBeforeDigestLine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Less(t, strings.Index(output.String(), "parsing"), strings.Index(output.String(), "resolved"), output.String())
 }
+
+func TestCINullSizeLimitFailsBeforeAnalysis(t *testing.T) {
+	previousConfig := flagConfig
+	t.Cleanup(func() { flagConfig = previousConfig })
+	flagConfig = filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(flagConfig, []byte("size-budget:\n  max: null\n"), 0600))
+	cmd := &cobra.Command{}
+	var out, stderr bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&stderr)
+	err := runCICmd(cmd, []string{"unused:must-not-resolve"})
+	require.ErrorContains(t, err, "not null")
+	assert.Empty(t, out.String())
+	assert.Equal(t, 1, strings.Count(stderr.String(), "Error:"))
+}

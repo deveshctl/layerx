@@ -56,7 +56,7 @@ type rawConfig struct {
 	Version               int               `yaml:"version,omitempty"`
 	Theme                 string            `yaml:"theme,omitempty"`
 	TransparentBackground bool              `yaml:"transparent_background,omitempty"`
-	SizeBudget            sizebudget.Config `yaml:"size-budget,omitempty"`
+	SizeBudget            ast.Node          `yaml:"size-budget,omitempty"`
 	Rules                 ast.Node          `yaml:"rules,omitempty"`
 	PathRules             ast.Node          `yaml:"path-rules,omitempty"`
 	Keybindings           map[string]string `yaml:"keybindings,omitempty"`
@@ -151,6 +151,11 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, newLoadError(path, SectionRules, err)
 	}
 
+	budget, err := decodeSizeBudget(raw.SizeBudget)
+	if err != nil {
+		return nil, newLoadError(path, "size-budget", err)
+	}
+
 	specs, err := normalizePathRules(raw.PathRules)
 	if err != nil {
 		return nil, newLoadError(path, SectionPathRules, err)
@@ -161,7 +166,7 @@ func LoadFrom(path string) (*Config, error) {
 		Theme:                 raw.Theme,
 		TransparentBackground: raw.TransparentBackground,
 		Rules:                 rules,
-		SizeBudget:            raw.SizeBudget,
+		SizeBudget:            budget,
 		PathRules:             specs,
 		Keybindings:           raw.Keybindings,
 	}
@@ -185,7 +190,7 @@ func LoadFrom(path string) (*Config, error) {
 // from absent — both surface as a Go nil ast.Node — so a separate pass is
 // the only place to enforce "if the user wrote it, it must be a mapping".
 //
-// Currently only `rules:` is checked. `path-rules:` accepts null as
+// Both `rules:` and `size-budget:` require mappings. `path-rules:` accepts null as
 // "no path rules" by design (see normalizePathRules), and other top-level
 // keys are scalars or maps where strict decode catches the malformed shape.
 func rejectNullSections(path string, data []byte) error {

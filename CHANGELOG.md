@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
 ### Fixed
+- Reject empty YAML size limits instead of silently skipping their checks.
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 
 ### Changed

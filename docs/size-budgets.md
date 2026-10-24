@@ -23,7 +23,7 @@ size-budget:
   max-growth: 5%
 ```
 
-Omitted size limits are disabled. Standard units are supported: `MB` means
+Omitted size limits are disabled. Explicit null or blank limits (`max: null`, an empty YAML value, or a quoted empty string) are errors; omit the key to leave it disabled. Standard units are supported: `MB` means
 1,000,000 bytes; `MiB` means 1,048,576 bytes. You can use whole byte counts
 without a suffix. Equality passes. `0B` or `0%` allows zero, rather than
 disabling a limit. Negative sizes, fractional bytes and overflow are errors.

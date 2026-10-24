@@ -143,7 +143,7 @@ size-budget:
   max-growth: 5%
 ```
 
-Both limits are disabled when omitted. Growth accepts a byte quantity such as `20MB` or a percentage. Standard decimal (`MB`) and binary (`MiB`) units are distinct. Equality passes; `0B` and `0%` are real zero limits. Null sections and unknown keys are rejected. Flags `--max-image-size` and `--max-growth` override these settings. An empty flag value disables that limit.
+Both limits are disabled when omitted. Growth accepts a byte quantity such as `20MB` or a percentage. Standard decimal (`MB`) and binary (`MiB`) units are distinct. Equality passes; `0B` and `0%` are real zero limits. Null sections, explicitly null or blank limits, and unknown keys are rejected. Flags `--max-image-size` and `--max-growth` override these settings. An empty flag value disables that limit.
 
 CI requires `--baseline OLD` when growth is enabled; comparison uses OLD automatically. Growth requires matching known image platforms. The single-image viewer displays size and the absolute budget without enforcing exit codes. See [Image-size budgets](size-budgets.md) for metric definitions and examples.
 
