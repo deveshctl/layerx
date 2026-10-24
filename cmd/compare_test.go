@@ -21,8 +21,8 @@ import (
 // produce stable, easy-to-assert strings.
 func sampleResult() *image.CompareResult {
 	return &image.CompareResult{
-		Before: image.ImageSummary{ImageRef: "old:1", LayerCount: 2, TotalSize: 2048},
-		After:  image.ImageSummary{ImageRef: "new:2", LayerCount: 3, TotalSize: 4096},
+		Before: image.ImageSummary{ImageRef: "old:1", LayerCount: 2, TotalSize: 2048, UncompressedSize: 2048, Platform: "linux/amd64"},
+		After:  image.ImageSummary{ImageRef: "new:2", LayerCount: 3, TotalSize: 4096, UncompressedSize: 4096, Platform: "linux/amd64"},
 		BeforeEfficiency: image.EfficiencySummary{
 			Score: 0.95, WastedBytes: 100,
 		},
@@ -54,17 +54,16 @@ func TestRenderCompareReport_Compact_VerdictRegression(t *testing.T) {
 	renderCompareReport(&buf, sampleResult(), compareModeCompact, compareTopDefault)
 	out := buf.String()
 
-	// Tabwriter pads cell widths variably, so assert on tokens only.
-	assert.Regexp(t, `old:\s+old:1\s+2 layers`, out)
-	assert.Regexp(t, `new:\s+new:2\s+3 layers`, out)
-	assert.Contains(t, out, "LAYERS")
-	assert.Contains(t, out, "IDX")
-	assert.Contains(t, out, "COMMAND")
-	assert.Contains(t, out, "OLD SIZE")
-	assert.Contains(t, out, "NEW SIZE")
-	assert.Contains(t, out, "FILE CHANGES")
-	assert.Contains(t, out, "WASTE CHANGES")
-	assert.Contains(t, out, "WARNINGS")
+	assert.Contains(t, out, "Before: old:1")
+	assert.Contains(t, out, "After:  new:2")
+	assert.Contains(t, out, "Uncompressed layers")
+	assert.Contains(t, out, "Layer changes")
+	assert.Contains(t, out, "File changes")
+	assert.Contains(t, out, "Waste changes")
+	assert.Contains(t, out, "Comparison notes")
+	assert.Contains(t, out, "95.0%")
+	assert.Contains(t, out, "-15.0 pp")
+
 	assert.True(t, strings.HasSuffix(out, "verdict: regression reason=efficiency,waste\n"),
 		"verdict line must be the final line; got tail: %q", lastLine(out))
 }
@@ -74,10 +73,10 @@ func TestRenderCompareReport_Summary_OmitsTables(t *testing.T) {
 	renderCompareReport(&buf, sampleResult(), compareModeSummary, compareTopDefault)
 	out := buf.String()
 
-	assert.NotContains(t, out, "LAYERS")
-	assert.NotContains(t, out, "FILE CHANGES")
-	assert.NotContains(t, out, "WASTE CHANGES")
-	assert.Contains(t, out, "WARNINGS")
+	assert.NotContains(t, out, "Layer changes")
+	assert.NotContains(t, out, "File changes")
+	assert.NotContains(t, out, "Waste changes")
+	assert.Contains(t, out, "Comparison notes")
 	assert.True(t, strings.HasSuffix(out, "verdict: regression reason=efficiency,waste\n"))
 }
 
@@ -126,9 +125,9 @@ func TestRenderCompareReport_TopN_TruncatesFilesAndAppendsCounter(t *testing.T) 
 		// Use varying SizeDelta so the rank is non-trivial; magnitudes
 		// 12, 11, ... 1 ensures top-5 picks the largest five.
 		r.FileDiffs = append(r.FileDiffs, image.FileDiff{
-			Path:      fmt.Sprintf("/f%02d", i),
-			DiffType:  image.Modified,
-			SizeDelta: int64(12 - i),
+			Path:         fmt.Sprintf("/f%02d", i),
+			DiffType:     image.Modified,
+			SizeDelta:    int64(12 - i),
 			ChangeReason: "size",
 		})
 		r.FileSummary.ModifiedCount++
@@ -138,7 +137,7 @@ func TestRenderCompareReport_TopN_TruncatesFilesAndAppendsCounter(t *testing.T) 
 	renderCompareReport(&buf, r, compareModeCompact, 5)
 	out := buf.String()
 
-	assert.Contains(t, out, "... and 7 more files",
+	assert.Contains(t, out, "… 7 more files",
 		"compact mode must announce truncation count")
 	assert.Contains(t, out, "/f00", "largest delta must survive truncation")
 	assert.NotContains(t, out, "/f11", "smallest delta must be truncated out")
@@ -233,16 +232,11 @@ func TestRankFileDiffsByDelta_StableAndDescending(t *testing.T) {
 	assert.Equal(t, "/c", out[3].Path)
 }
 
-func TestTruncate_HandlesShortBudgets(t *testing.T) {
-	assert.Equal(t, "abc", truncate("abc", 3))
-	assert.Equal(t, "a..", truncate("abcdef", 3))
-	assert.Equal(t, ".", truncate("abcdef", 1))
-	assert.Equal(t, "", truncate("abcdef", 0))
+func TestFitCompareEndPreservesFilename(t *testing.T) {
+	assert.Equal(t, "file.txt", fitCompareEnd("file.txt", 20))
+	assert.Equal(t, "…file.txt", fitCompareEnd("/long/path/file.txt", 9))
 }
 
-// lastLine returns the final newline-terminated line of s for assertion
-// messages. Empty trailing content (trailing newline only) is reported as
-// "<empty>" to keep failure output readable.
 func lastLine(s string) string {
 	s = strings.TrimRight(s, "\n")
 	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
@@ -437,75 +431,20 @@ func TestDrainProgress_NoEvents_NoOutput(t *testing.T) {
 }
 
 func TestRenderCompareReport_Alignment_NumericColumnsAlignAcrossRows(t *testing.T) {
-	r := &image.CompareResult{
-		LayerDiffs: []image.LayerDiff{
-			{Index: 0, BeforeSize: 1024, AfterSize: 2048, SizeDelta: 1024,
-				BeforeCommand: "FROM alpine", AfterCommand: "FROM alpine"},
-			{Index: 1, BeforeSize: 1024 * 1024 * 100, AfterSize: 1024 * 1024 * 200,
-				SizeDelta: 1024 * 1024 * 100,
-				BeforeCommand: "RUN apt-get install a-very-long-package-name-that-will-truncate",
-				AfterCommand:  "RUN apt-get install a-very-long-package-name-that-will-truncate"},
-		},
-	}
-	var buf bytes.Buffer
-	renderCompareReport(&buf, r, compareModeCompact, compareTopDefault)
-	out := buf.String()
-
-	lines := strings.Split(out, "\n")
-	var dataRows []string
-	for _, ln := range lines {
-		// Body rows in the LAYERS table are indented with two spaces and
-		// then have a numeric IDX (one or two digits, possibly right-padded).
-		if !strings.HasPrefix(ln, "  ") {
-			continue
+	var out bytes.Buffer
+	renderCompareReport(&out, sampleResult(), compareModeSummary, 10)
+	sizeEnd, wasteEnd := -1, -1
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(line, "  Uncompressed layers") {
+			sizeEnd = strings.Index(line, "2.05 KB") + len("2.05 KB")
 		}
-		body := strings.TrimLeft(ln[2:], " ")
-		if body == "" {
-			continue
-		}
-		if body[0] >= '0' && body[0] <= '9' {
-			dataRows = append(dataRows, ln)
+		if strings.HasPrefix(line, "  Layer waste") {
+			wasteEnd = strings.Index(line, "100 B") + len("100 B")
 		}
 	}
-	require.GreaterOrEqual(t, len(dataRows), 2,
-		"need two data rows to test alignment; got out:\n%s", out)
-
-	// Tabwriter guarantees that every cell boundary lands on the same column
-	// across rows of one tabwriter block. We test that by checking the
-	// position of the third "  " (cell separator) is identical across rows:
-	// after IDX and COMMAND, the next column (OLD SIZE) must start at the
-	// same byte offset on every row.
-	// We use the "OLD SIZE" header row's position as the reference.
-	headerIdx := -1
-	for i, ln := range lines {
-		if strings.Contains(ln, "OLD SIZE") {
-			headerIdx = strings.Index(ln, "OLD SIZE")
-			_ = i
-			break
-		}
-	}
-	require.GreaterOrEqual(t, headerIdx, 0, "header row not found in:\n%s", out)
-
-	// Each data row's third whitespace-separated field is the OLD SIZE cell
-	// (formatted by FormatBytes). Find its starting byte offset and compare.
-	getOldSizeCol := func(row string) int {
-		// Skip the "  " indent + IDX cell + cell padding + COMMAND cell.
-		// Easier: find the first run of digits or numeric units after the
-		// command padding by scanning for "1.0 KB" / "100.0 MB" tokens.
-		for _, tok := range []string{"1.0 KB", "100.0 MB"} {
-			if i := strings.Index(row, tok); i > 0 {
-				return i
-			}
-		}
-		return -1
-	}
-	off0 := getOldSizeCol(dataRows[0])
-	off1 := getOldSizeCol(dataRows[1])
-	require.GreaterOrEqual(t, off0, 0)
-	require.GreaterOrEqual(t, off1, 0)
-	assert.Equal(t, off0, off1,
-		"OLD SIZE column must align across rows; row0 col=%d, row1 col=%d\n%q\n%q",
-		off0, off1, dataRows[0], dataRows[1])
+	require.Greater(t, sizeEnd, 0)
+	require.Greater(t, wasteEnd, 0)
+	assert.Equal(t, sizeEnd, wasteEnd, "Before values must be right-aligned despite different widths")
 }
 
 func TestRenderCompareReport_NoOpHelperDirectly(t *testing.T) {

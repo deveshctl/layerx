@@ -3,7 +3,7 @@
 # JSON Export
 
 `layerx --json PATH IMAGE` writes a structured, versioned snapshot of the
-full layer analysis to disk. Schema version is `1.0.1` and is pinned by
+full layer analysis to disk. Schema version is `1.0.2` and is pinned by
 tests — a breaking change to any field will fail CI before a release.
 
 ---
@@ -69,11 +69,11 @@ A few practical notes:
 
 ## Full JSON Schema
 
-Schema version `1.0.1`. Pretty-printed with two-space indent.
+Schema version `1.0.2`. Pretty-printed with two-space indent.
 
 ```json
 {
-  "schemaVersion": "1.0.1",
+  "schemaVersion": "1.0.2",
   "imageRef": "nginx:latest",
   "platform": "linux/arm64",
   "totalSize": 187654321,
@@ -112,9 +112,9 @@ Schema version `1.0.1`. Pretty-printed with two-space indent.
 
 | Field | Type | Description |
 |---|---|---|
-| `schemaVersion` | string | `"1.0.1"`. Always emitted first. Bump = breaking change. |
+| `schemaVersion` | string | `"1.0.2"`. Always emitted first. Bump = breaking change. |
 | `imageRef` | string | The argument passed on the command line (`nginx:latest`, `./build/app.tar`, etc.). Not the digest. |
-| `platform` | string | Optional. Canonical `"os/arch[/variant]"` form of `--platform`. Omitted (not emitted at all) when `--platform` was not set on the run. Available in schema **1.0.1+**. |
+| `platform` | string | Optional. Canonical `"os/arch[/variant]"` form of `--platform`. Omitted (not emitted at all) when `--platform` was not set on the run. Available in schema **1.0.2+**. |
 | `totalSize` | int64 | Sum of every layer's raw tar size, pre-stack. Bytes. |
 | `layerCount` | int | `len(layers)`. |
 | `efficiency` | object | Aggregate efficiency data. Always present. |
@@ -347,3 +347,7 @@ jq -r '
 - **No `null` for empty arrays.** `efficiency.wastedFiles` and per-layer
   `files` are always arrays. The single exception is top-level `layers`,
   which can be `null` for zero-layer images.
+
+## Comparable image size
+
+Schema 1.0.2 adds `uncompressedLayerBytes`, the total uncompressed layer-tar bytes, and `measuredPlatform`, the actual OS/architecture/variant when known. Legacy `totalSize` and layer `size` remain stored-blob sizes and can depend on compression. Use `uncompressedLayerBytes` for budgets across supported representations. Check-result exports (`ci/compare --format json`) are a separate schema; see [Image-size budgets](size-budgets.md).

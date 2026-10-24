@@ -22,10 +22,18 @@ var sectionHelp = map[string]string{
   transparent_background: remove viewer background fills (default false)
   keybindings:     reserved; accepted but ignored
 
-"layerx compare" does not read this file; --config has no effect there.
+"layerx compare" reads size-budget and theme from this file.
 
 Reference: https://github.com/deveshctl/layerx/blob/main/docs/configuration.md
 Run "layerx init --flavour generic" to write a starter file.`,
+	"size-budget": `size-budget — optional uncompressed image-size limits:
+
+  size-budget:
+    max: 500MB
+    max-growth: 5%
+
+Growth requires ci --baseline OLD IMAGE or compare OLD NEW.
+Omit a limit to disable it; 0B and 0% enforce zero.`,
 	SectionTheme: `theme — TUI colour theme selection:
 
   theme: tokyo-night       # default

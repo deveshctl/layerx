@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -155,7 +156,7 @@ func (r *DockerResolver) Inspect(ctx context.Context, imageRef string) (*ImageMe
 		}
 		return nil, fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
-	return &ImageMeta{Size: inspect.Size}, nil
+	return &ImageMeta{Size: inspect.Size, Platform: (imageConfig{OS: inspect.Os, Architecture: inspect.Architecture, Variant: inspect.Variant}).platformName()}, nil
 }
 
 // ImageID returns the image content digest from the Docker daemon. It does
@@ -326,14 +327,21 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		return fmt.Errorf("failed to inspect image %s: %w", imageRef, err)
 	}
 
-	// When --platform is pinned, we cannot use the cheap "is the image
-	// locally cached?" short-circuit: a previous run may have populated the
-	// daemon with a different variant under the same tag. Letting a stale
-	// local copy of "linux/amd64" satisfy a "linux/arm64" request would
-	// silently inspect the wrong image. Skip ImageList and let ImagePull
-	// run — the daemon's content store deduplicates layers, so the cost of
-	// the redundant pull is at most the manifest fetch when every layer
-	// blob is already present.
+	// A platform-scoped inspect can prove that the requested local variant
+	// exists. Reuse it without pulling local-only build tags from a registry.
+	// A missing/foreign variant (or unsupported inspect API) still needs a pull.
+	if r.platform != nil {
+		inspect, err := r.cli.ImageInspect(ctx, imageRef, r.inspectOpts()...)
+		if err == nil && inspect.Os != "" && inspect.Architecture != "" && PlatformsEqual(r.platform, inspectedPlatform(inspect)) {
+			return nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		if isDaemonUnreachable(err) {
+			return r.daemonErr(err)
+		}
+	}
 	var native *ocispec.Platform
 	if r.platform == nil {
 		native = r.daemonPlatform(ctx)
@@ -384,7 +392,7 @@ func (r *DockerResolver) ensureImageWithProgress(ctx context.Context, imageRef s
 		// manifest list entries" message contains the substring "manifest
 		// for ", which isImageNotFoundMessage also matches. Without this
 		// ordering, a bad --platform on a containerd image store (where
-		// every pull goes through the daemon, no local short-circuit) is
+		// a requested variant is not locally available) is
 		// reported as "image not found" instead of "platform not found".
 		if isPlatformPullFailure(err.Error()) {
 			return r.classifyPlatformMissing(ctx, imageRef, err)
@@ -739,9 +747,10 @@ func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest docke
 	layers := make([]Layer, len(manifest.Layers))
 	for i, layerPath := range manifest.Layers {
 		layers[i] = Layer{
-			Index: i,
-			ID:    extractShortID(layerPath),
-			Size:  headers[layerPath],
+			Index:    i,
+			ID:       extractShortID(layerPath),
+			Size:     headers[layerPath],
+			Platform: config.platformName(),
 		}
 		if i < len(commands) {
 			layers[i].Command = commands[i]
@@ -790,6 +799,7 @@ func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest docke
 			empty, _ := ParseLayerTar(io.LimitReader(bytes.NewReader(nil), 0))
 			for _, idx := range indices {
 				layers[idx].Tree = empty
+				layers[idx].DiffID = fmt.Sprintf("sha256:%x", sha256.Sum256(nil))
 			}
 			continue
 		}
@@ -802,13 +812,22 @@ func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest docke
 		// tar. MaxLayerBlobSize matches the ceiling findFileInLayer enforces
 		// on the same reader so the analysis path is as bomb-resistant as the
 		// extraction path.
-		tree, parseErr := ParseLayerTar(io.LimitReader(dec, MaxLayerBlobSize+1))
+		counter := &layerStream{ctx: ctx, reader: io.LimitReader(dec, MaxLayerBlobSize+1), hash: sha256.New()}
+		tree, parseErr := ParseLayerTar(counter)
+		if parseErr == nil {
+			_, parseErr = io.Copy(io.Discard, counter)
+		}
 		dec.Close()
+		if counter.bytes > MaxLayerBlobSize {
+			return nil, fmt.Errorf("layer %s exceeds uncompressed limit", hdr.Name)
+		}
 		if parseErr != nil {
 			return nil, fmt.Errorf("parsing layer %s: %w", hdr.Name, parseErr)
 		}
 		for _, idx := range indices {
 			layers[idx].Tree = tree
+			layers[idx].UncompressedSize = counter.bytes
+			layers[idx].DiffID = fmt.Sprintf("sha256:%x", counter.hash.Sum(nil))
 		}
 	}
 

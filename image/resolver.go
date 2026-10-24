@@ -4,7 +4,8 @@ import "context"
 
 // ImageMeta holds lightweight metadata obtainable without exporting the full image.
 type ImageMeta struct {
-	Size int64
+	Size     int64
+	Platform string
 }
 
 // ProgressPhase identifies what the resolver is currently doing.
@@ -55,11 +56,15 @@ type ExtractorSource interface {
 
 // Layer holds metadata for a single image layer.
 type Layer struct {
-	Index   int
-	ID      string    // short digest (first 12 chars of sha256)
-	Size    int64
-	Command string    // Dockerfile instruction that created this layer
-	Tree    *FileTree // nil for empty layers
+	Index int
+	ID    string // short digest (first 12 chars of sha256)
+	Size  int64
+	// UncompressedSize includes the complete layer tar stream, not outer archive bytes.
+	UncompressedSize int64
+	DiffID           string    // full sha256 of the uncompressed stream; safe for layer matching
+	Platform         string    // platform recorded in the image config
+	Command          string    // Dockerfile instruction that created this layer
+	Tree             *FileTree // nil for empty layers
 	// NetDelta is the merged-filesystem change at this step.
 	// [0] = live file bytes after the first layer (full size, not 0).
 	// [i>0] = live bytes in stacked[i] minus stacked[i-1]. Negative when

@@ -79,11 +79,9 @@ is fully optimized.
 
 ## Further ways to assess image size
 
-Three complementary improvements would cover cases beyond layer waste:
+Image-size budgets now cover overall growth; other possible improvements go beyond layer waste:
 
-- **Image-size budgets:** independently limit image size or growth against a
-  baseline. A large image can violate a project budget at 100% efficiency.
-  Stored/compressed size and uncompressed payload need separate labels.
+- **[Image-size budgets](size-budgets.md):** independently limit uncompressed layer size or growth against a baseline. A large image can violate a project budget at 100% efficiency.
 - **Duplicate-content analysis:** hash file contents to identify identical
   payload under different paths. Matching sizes are not sufficient evidence;
   hashing needs an explicit performance and cache-format design.
@@ -92,7 +90,6 @@ Three complementary improvements would cover cases beyond layer waste:
   exclusions today. Runtime necessity cannot be inferred reliably from a
   filename or image size alone.
 
-These are separate directions, not additional checks already included in the
-layer-efficiency score.
+These measurements are separate from the layer-efficiency score. Duplicate-content analysis remains a possible future improvement.
 
 [Using the TUI](tui.md) · [Configuration](configuration.md)

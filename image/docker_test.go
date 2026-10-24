@@ -445,10 +445,10 @@ func TestParseLayers_StandaloneOCILayout(t *testing.T) {
 	layerBlob := gzipBytes(t, buildSimpleLayerTar(t, map[string][]byte{"etc/hostname": []byte("test")}))
 
 	tarBuf := buildTar(t, map[string][]byte{
-		"index.json":                         indexData,
-		"blobs/sha256/" + manifestDigest:     ociManData,
-		"blobs/sha256/" + configDigest:       configData,
-		"blobs/sha256/" + layerDigest:        layerBlob,
+		"index.json":                     indexData,
+		"blobs/sha256/" + manifestDigest: ociManData,
+		"blobs/sha256/" + configDigest:   configData,
+		"blobs/sha256/" + layerDigest:    layerBlob,
 	})
 
 	layers, err := parseLayers(context.Background(), tarBuf)
@@ -823,9 +823,8 @@ func TestIsImageDigestRef(t *testing.T) {
 
 func TestEnsureImage_WithPlatform_SkipsLocalCacheShortCircuit(t *testing.T) {
 	// With --platform pinned, ensureImageWithProgress must NOT trust the
-	// local-image-list short-circuit: a previous run may have populated the
-	// daemon with a different variant under the same tag. The pull goes
-	// through every time so the daemon resolves the right manifest.
+	// local-image-list short-circuit. If scoped inspect cannot find the
+	// requested variant, a pull must still resolve that variant.
 	plat, err := ParsePlatform("linux/arm64")
 	require.NoError(t, err)
 
@@ -833,6 +832,9 @@ func TestEnsureImage_WithPlatform_SkipsLocalCacheShortCircuit(t *testing.T) {
 	imagePullCalls := 0
 	var lastPullPlatforms []ocispec.Platform
 	fake := &fakeAPIClient{
+		imageInspect: func(context.Context, string) (client.ImageInspectResult, error) {
+			return client.ImageInspectResult{}, errors.New("No such image")
+		},
 		imageList: func(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
 			imageListCalls++
 			return client.ImageListResult{}, nil
@@ -1029,8 +1031,8 @@ func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotF
 		},
 		imageInspect: func(_ context.Context, _ string) (client.ImageInspectResult, error) {
 			inspectCalls++
-			// First inspect call is enumeratePlatforms reading the manifest
-			// list. With containerd image store, that succeeds and returns
+			// Scoped inspect has no matching image metadata; the later
+			// enumeratePlatforms call succeeds and returns
 			// the full set of platforms the image carries.
 			result := client.ImageInspectResult{}
 			result.Manifests = []mobyimage.ManifestSummary{
@@ -1049,12 +1051,10 @@ func TestEnsureImage_PlatformMissing_ContainerdStore_NotMisclassifiedAsImageNotF
 	require.ErrorAs(t, err, &pe, "platform-miss must surface as ErrPlatformNotInImage, not ErrImageNotFound")
 	assert.Equal(t, "linux/arm64dd", pe.Requested)
 	assert.Equal(t, []string{"linux/amd64", "linux/arm64"}, pe.Available)
-	// The fix routes straight to classifyPlatformMissing → enumeratePlatforms,
-	// which is one inspect call. The pre-fix code path would have first run
-	// classifyPullNotFound (one inspect to probe existence) and only THEN
-	// classifyPlatformMissing (a second inspect for the manifest list) — so
-	// pinning to exactly one inspect locks the win in.
-	assert.Equal(t, 1, inspectCalls, "platform classifier should reach enumeratePlatforms directly, no probe inspect needed")
+	// One scoped local probe, then one manifest enumeration after the pull
+	// fails. No additional unscoped existence probe is needed.
+	assert.Equal(t, 2, inspectCalls)
+
 }
 
 // TestClassifyPullNotFound_DaemonUnreachable_SurfacesDaemonError verifies that

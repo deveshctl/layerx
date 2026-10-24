@@ -17,12 +17,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 )
 
 type Config struct {
-	ImageRef string
-	Resolver image.Resolver
-	NoCache  bool
+	SizeBudget sizebudget.Config
+	ImageRef   string
+	Resolver   image.Resolver
+	NoCache    bool
 	// Platform is the canonical "os/arch[/variant]" string the user passed
 	// via --platform, or "" when no pin was set. Display-only: shown in the
 	// header so the operator knows which variant of a multi-platform image
@@ -215,6 +217,8 @@ type treeCache struct {
 }
 
 type model struct {
+	sizeBudget    sizebudget.Config
+	maxImageSize  *int64
 	width         int
 	height        int
 	focus         focus
@@ -354,7 +358,10 @@ func NewModel(cfg Config) model {
 	ch := make(chan image.ProgressEvent, 16)
 	ctx, cancel := context.WithCancel(context.Background())
 	theme := themeFor(cfg.Theme)
+	limits, _ := sizebudget.Parse(cfg.SizeBudget)
 	return model{
+		maxImageSize:     limits.Max,
+		sizeBudget:       cfg.SizeBudget,
 		state:            stateLoading,
 		imageRef:         cfg.ImageRef,
 		platform:         cfg.Platform,
@@ -2052,10 +2059,24 @@ func (m model) renderHeader() string {
 		platform = sep + m.styles.headerDimBg.Render(m.platform)
 	}
 
-	totalSize := image.FormatBytes(m.analysis.TotalSize)
+	size := sizebudget.Format(m.analysis.UncompressedSize)
+	totalSize := size + " uncompressed"
+	compactSize := totalSize
+	if m.sizeBudget.Max != "" {
+		totalSize += " / " + m.sizeBudget.Max + " budget"
+		compactSize = size + " / " + m.sizeBudget.Max + " budget"
+		if m.maxImageSize != nil && m.analysis.UncompressedSize > *m.maxImageSize {
+			totalSize += " (over budget)"
+			compactSize = size + " > " + m.sizeBudget.Max + " budget"
+		}
+	}
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
 	right := m.styles.headerDimBg.Render(layerCount + " · " + totalSize)
 	imageWidth := m.width - lipgloss.Width(prefix+platform+right) - 2
+	if imageWidth < 12 {
+		right = m.styles.headerDimBg.Render(compactSize)
+		imageWidth = m.width - lipgloss.Width(prefix+platform+right) - 2
+	}
 	if imageWidth < 12 {
 		// The selected platform is more useful than totals on a narrow header.
 		right = ""

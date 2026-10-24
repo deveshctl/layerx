@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.1",
+  "schemaVersion": "1.0.2",
   "imageRef": "alpine:3",
+  "uncompressedLayerBytes": 0,
   "totalSize": 1024,
   "layerCount": 1,
   "efficiency": {

@@ -147,6 +147,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		NoCache:       noCacheRequested(),
 		Theme:         theme,
 		TransparentBg: cfg.TransparentBackground,
+		SizeBudget:    cfg.SizeBudget,
 	}))
 }
 

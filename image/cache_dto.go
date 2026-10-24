@@ -10,7 +10,7 @@ import (
 // (or when the parse output produced by docker.go/parseLayers changes in a
 // way that affects what we persist). Do NOT bump for stack.go or size.go
 // changes — those run on every load and are not persisted.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 type cacheEnvelope struct {
 	Digest        string
@@ -21,11 +21,14 @@ type cacheEnvelope struct {
 
 // cachedLayer is the persisted shape of a Layer. Excludes NetDelta (derived).
 type cachedLayer struct {
-	Index   int
-	ID      string
-	Size    int64
-	Command string
-	Tree    *cachedNode // nil when the source Tree was nil
+	Index            int
+	ID               string
+	Size             int64
+	UncompressedSize int64
+	DiffID           string
+	Platform         string
+	Command          string
+	Tree             *cachedNode // nil when the source Tree was nil
 }
 
 // cachedNode is the persisted shape of a FileNode. Excludes DiffType and
@@ -47,10 +50,13 @@ func toCachedLayers(layers []Layer) []cachedLayer {
 	out := make([]cachedLayer, len(layers))
 	for i, l := range layers {
 		out[i] = cachedLayer{
-			Index:   l.Index,
-			ID:      l.ID,
-			Size:    l.Size,
-			Command: l.Command,
+			Index:            l.Index,
+			ID:               l.ID,
+			Size:             l.Size,
+			UncompressedSize: l.UncompressedSize,
+			DiffID:           l.DiffID,
+			Platform:         l.Platform,
+			Command:          l.Command,
 		}
 		if l.Tree != nil {
 			out[i].Tree = toCachedNode(l.Tree.Root)
@@ -63,10 +69,13 @@ func fromCachedLayers(dtos []cachedLayer) []Layer {
 	out := make([]Layer, len(dtos))
 	for i, d := range dtos {
 		out[i] = Layer{
-			Index:   d.Index,
-			ID:      d.ID,
-			Size:    d.Size,
-			Command: d.Command,
+			Index:            d.Index,
+			ID:               d.ID,
+			Size:             d.Size,
+			UncompressedSize: d.UncompressedSize,
+			DiffID:           d.DiffID,
+			Platform:         d.Platform,
+			Command:          d.Command,
 		}
 		if d.Tree != nil {
 			out[i].Tree = &FileTree{Root: fromCachedNode(d.Tree)}

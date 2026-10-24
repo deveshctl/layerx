@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 	"unicode/utf8"
 
+	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/image"
 	"github.com/spf13/cobra"
 )
@@ -43,13 +42,6 @@ const (
 	compareTopMax     = 1000
 	compareTopDefault = 10
 
-	// truncation budgets — tabwriter handles alignment, but very long
-	// commands and paths still get abbreviated so a single 200-char path
-	// can't push the size columns off-screen.
-	compareCommandWidth = 32
-	comparePathWidth    = 40
-	compareReasonWidth  = 15
-
 	// progressCoalesce is the minimum interval between two consecutive
 	// pulling-line refreshes. Docker emits progress JSON aggressively (up
 	// to dozens of events per second); without coalescing the stderr line
@@ -70,21 +62,26 @@ image reference, a saved-image tar archive, or an OCI layout tarball.
 
 Exit codes:
   0  no regression, or identical inputs
-  1  efficiency decreased or wasted bytes increased
+  1  efficiency decreased, wasted bytes increased, or a size budget failed
   2  operational error (invalid input, configuration, or engine connection)
 
 Reports go to stdout; progress and errors go to stderr. The last report line
 starts with "verdict:" and contains ok, regression, or noop. In CI, run the
 command directly so its exit code determines whether the step passes.
 
-Use --mode full for all entries, or --mode summary for totals and verdict.
+Use --mode full for all changes, or --mode summary for totals and verdict.
 
-This command does not read .layerx.yaml. The inherited --config flag has no
-effect; CI thresholds and path rules do not configure the comparison verdict.`,
+Reads size-budget and theme from .layerx.yaml; --config selects another file.
+Flags override size budgets. CI efficiency thresholds and path rules apply
+only to ci; compare retains its efficiency/waste regression checks.
+Size budgets measure uncompressed layer tar bytes. File differences compare
+size and metadata, not file contents. Use --format json or markdown for reports.`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
   layerx compare --mode full app:1.4.0 app:1.5.0
-  layerx compare --mode summary nginx:1.26 nginx:stable`,
+  layerx compare --mode summary nginx:1.26 nginx:stable
+  layerx compare --max-growth 5% app:main app:pr
+  layerx compare --format markdown app:main app:pr`,
 	Args:          compareArgs,
 	RunE:          runCompareCmd,
 	SilenceErrors: true,
@@ -97,6 +94,9 @@ func init() {
 	compareCmd.Flags().IntVar(&flagCompareTop, "top", compareTopDefault,
 		"rows per section in compact mode (1-1000)")
 
+	addSizeBudgetFlags(compareCmd)
+	compareCmd.Flags().String("theme", "", "report colour theme (defaults to configuration)")
+	_ = compareCmd.RegisterFlagCompletionFunc("theme", completeTheme)
 	rootCmd.AddCommand(compareCmd)
 }
 
@@ -127,7 +127,11 @@ func runCompareCmd(cmd *cobra.Command, args []string) error {
 		if _, ok := errors.AsType[*ErrCompareUsage](err); ok {
 			return err
 		}
-		_ = presentCLIError(os.Stderr, err)
+		if _, ok := errors.AsType[*config.LoadError](err); ok {
+			presentConfigLoadFailure(cmd, err)
+		} else {
+			_ = presentCLIError(cmd.ErrOrStderr(), err)
+		}
 	}
 	return err
 }
@@ -139,27 +143,26 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	cfg, err := readConfig()
+	if err != nil {
+		return err
+	}
+	budgetConfig, limits, err := effectiveSizeBudget(cmd, cfg)
+	if err != nil {
+		return err
+	}
+	themeFlag, _ := cmd.Flags().GetString("theme")
+	themeName, err := resolveTheme(cfg.Theme, themeFlag)
+	if err != nil {
+		return err
+	}
+	format, _ := cmd.Flags().GetString("format")
 	ctx := cmd.Context()
 	noCache := noCacheRequested()
 
 	out := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
 
-	// Path-equality short-circuit: identical archive paths trivially resolve
-	// to the same content. The digest-based check below catches this too when
-	// the archive's ImageID is observable, but archive resolvers don't always
-	// expose a digest (e.g. malformed manifests, OCI variants), and a cheap
-	// path comparison gets us out before two full analyses.
-	if oldRef == newRef && isRegularFilePath(oldRef) {
-		renderNoOp(out, "")
-		return nil
-	}
-
-	// Fast path: try ImageID for both refs without analyzing. For archives
-	// and already-pulled Docker images this is cheap; if either side requires
-	// a pull (Docker ref not local), ImageID returns an error and we fall
-	// through to the full analyze pipeline. Either way, the no-op shortcut
-	// is honored when both digests are known and equal.
 	oldResolver, err := selectResolver(oldRef)
 	if err != nil {
 		return fmt.Errorf("preparing old image %q: %w", oldRef, err)
@@ -167,12 +170,6 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	newResolver, err := selectResolver(newRef)
 	if err != nil {
 		return fmt.Errorf("preparing new image %q: %w", newRef, err)
-	}
-	if d1, e1 := oldResolver.ImageID(ctx, oldRef); e1 == nil && d1 != "" {
-		if d2, e2 := newResolver.ImageID(ctx, newRef); e2 == nil && d2 != "" && d1 == d2 {
-			renderNoOp(out, d1)
-			return nil
-		}
 	}
 
 	oldDigest, oldAnalysis, err := analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
@@ -184,17 +181,36 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("analyzing new image %q: %w", newRef, err)
 	}
 
-	// Re-check the no-op shortcut after analyze: the pull may have made the
-	// digests observable when they weren't before.
-	if oldDigest != "" && oldDigest == newDigest {
+	if limits.Growth != nil {
+		if err := matchingPlatforms(oldAnalysis, newAnalysis); err != nil {
+			return err
+		}
+	}
+	sizeChecks, err := limits.Evaluate(budgetConfig, newAnalysis.UncompressedSize, &oldAnalysis.UncompressedSize)
+	if err != nil {
+		return err
+	}
+	result := image.CompareAnalysis(oldAnalysis, newAnalysis)
+	if !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
 		renderNoOp(out, oldDigest)
 		return nil
 	}
 
-	result := image.CompareAnalysis(oldAnalysis, newAnalysis)
-	renderCompareReport(out, result, flagCompareMode, flagCompareTop)
-
-	if result.IsRegression() {
+	report := newCheckReport(newAnalysis, newDigest, budgetConfig, sizeChecks)
+	before := reportSnapshot(oldAnalysis, oldDigest)
+	report.Before = &before
+	report.Comparison = result
+	report.Passed = report.Passed && !result.IsRegression()
+	options := terminalCompareOptions(out, themeName)
+	if format != "text" {
+		options.Color = false
+	}
+	var rendered strings.Builder
+	renderComparison(&rendered, result, flagCompareMode, flagCompareTop, sizeChecks, options)
+	if err := writeCheckReport(out, format, rendered.String(), report); err != nil {
+		return err
+	}
+	if !report.Passed {
 		return &ErrCompareRegression{}
 	}
 	return nil
@@ -226,18 +242,15 @@ func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string,
 	wg.Go(func() {
 		drainProgress(stderr, side, ref, progress)
 	})
-	// LIFO order matters: defer wg.Wait() registers FIRST so it runs LAST,
-	// after defer close(progress) has unblocked the drain goroutine. If
-	// AnalyzeWithOptions panics or returns through any future early-return
-	// path, the goroutine still exits and we don't deadlock.
-	defer wg.Wait()
-	defer close(progress)
-
-	analysis, err := image.AnalyzeWithOptions(ctx, resolver, ref, image.AnalyzeOptions{
-		NoCache:  noCache,
-		Progress: progress,
-		Platform: activePlatformDisplay(),
-	})
+	// Drain all progress before writing the final digest line. The scoped
+	// defers also close and join the goroutine if analysis panics.
+	analysis, err := func() (*image.Analysis, error) {
+		defer wg.Wait()
+		defer close(progress)
+		return image.AnalyzeWithOptions(ctx, resolver, ref, image.AnalyzeOptions{
+			NoCache: noCache, Progress: progress, Platform: activePlatformDisplay(),
+		})
+	}()
 
 	if err != nil {
 		return "", nil, err
@@ -338,222 +351,9 @@ func renderNoOp(w io.Writer, digest string) {
 	fmt.Fprintln(w, "verdict: noop reason=path-equal")
 }
 
-// renderCompareReport writes a deterministic text report. The verdict line
-// is always the last line, prefixed `verdict: ` for grep/CI extraction.
+// renderCompareReport is the plain deterministic renderer used in tests and logs.
 func renderCompareReport(w io.Writer, r *image.CompareResult, mode string, topN int) {
-	if r == nil {
-		fmt.Fprintln(w, "verdict: ok")
-		return
-	}
-
-	writeHeader(w, r)
-
-	if mode != compareModeSummary {
-		writeLayerTable(w, r, mode, topN)
-		writeFileTable(w, r, mode, topN)
-		writeWasteTable(w, r, mode, topN)
-	}
-	writeWarnings(w, r)
-	writeVerdict(w, r)
-}
-
-func writeHeader(w io.Writer, r *image.CompareResult) {
-	tw := newCompareTabwriter(w)
-	fmt.Fprintf(tw, "old:\t%s\t%d layers\t%s\teff %.2f\n",
-		fallback(r.Before.ImageRef, "(none)"),
-		r.Before.LayerCount,
-		image.FormatBytes(r.Before.TotalSize),
-		r.BeforeEfficiency.Score)
-
-	deltaPart := ""
-	// Use the same epsilon IsRegression uses, so the header arrow doesn't
-	// flag sub-epsilon float drift the verdict treats as no change.
-	if absFloat(r.AfterEfficiency.ScoreDelta) > scoreHeaderEpsilon {
-		arrow := "^"
-		if r.AfterEfficiency.ScoreDelta < 0 {
-			arrow = "v"
-		}
-		deltaPart = fmt.Sprintf(" (delta %+.2f %s)", r.AfterEfficiency.ScoreDelta, arrow)
-	}
-	fmt.Fprintf(tw, "new:\t%s\t%d layers\t%s\teff %.2f%s\n",
-		fallback(r.After.ImageRef, "(none)"),
-		r.After.LayerCount,
-		image.FormatBytes(r.After.TotalSize),
-		r.AfterEfficiency.Score,
-		deltaPart)
-	_ = tw.Flush()
-	fmt.Fprintln(w)
-}
-
-// scoreHeaderEpsilon mirrors image.scoreEpsilon (1e-9). Defined locally so
-// cmd/ does not depend on an unexported image symbol.
-const scoreHeaderEpsilon = 1e-9
-
-func newCompareTabwriter(w io.Writer) *tabwriter.Writer {
-	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-}
-
-func writeLayerTable(w io.Writer, r *image.CompareResult, mode string, topN int) {
-	if len(r.LayerDiffs) == 0 {
-		return
-	}
-	fmt.Fprintln(w, "LAYERS")
-	tw := newCompareTabwriter(w)
-	fmt.Fprintln(tw, "  IDX\tCOMMAND\tOLD SIZE\tNEW SIZE\tdelta")
-	rows := r.LayerDiffs
-	if mode == compareModeCompact {
-		ranked := rankLayerDiffsByDelta(rows)
-		limit := min(len(ranked), topN)
-		for i := range limit {
-			writeLayerRow(tw, ranked[i])
-		}
-		_ = tw.Flush()
-		if len(ranked) > topN {
-			fmt.Fprintf(w, "  ... and %d more layers (delta %s)\n",
-				len(ranked)-topN,
-				image.FormatSignedBytes(sumLayerHidden(ranked[topN:])))
-		}
-	} else {
-		for _, d := range rows {
-			writeLayerRow(tw, d)
-		}
-		_ = tw.Flush()
-	}
-	fmt.Fprintln(w)
-}
-
-func sumLayerHidden(rows []image.LayerDiff) int64 {
-	var s int64
-	for _, d := range rows {
-		s += d.SizeDelta
-	}
-	return s
-}
-
-func writeLayerRow(tw *tabwriter.Writer, d image.LayerDiff) {
-	fmt.Fprintf(tw, "  %2d\t%s\t%s\t%s\t%s\n",
-		d.Index,
-		truncate(fallback(d.AfterCommand, d.BeforeCommand), compareCommandWidth),
-		image.FormatBytes(d.BeforeSize),
-		image.FormatBytes(d.AfterSize),
-		image.FormatSignedBytes(d.SizeDelta))
-}
-
-func writeFileTable(w io.Writer, r *image.CompareResult, mode string, topN int) {
-	if len(r.FileDiffs) == 0 {
-		return
-	}
-	netDelta := r.FileSummary.BytesAdded - r.FileSummary.BytesRemoved
-	fmt.Fprintf(w, "FILE CHANGES   +%d  ~%d  -%d   delta %s\n",
-		r.FileSummary.AddedCount, r.FileSummary.ModifiedCount, r.FileSummary.RemovedCount,
-		image.FormatSignedBytes(netDelta))
-
-	tw := newCompareTabwriter(w)
-	rows := r.FileDiffs
-	if mode == compareModeCompact {
-		ranked := rankFileDiffsByDelta(rows)
-		limit := min(len(ranked), topN)
-		for i := range limit {
-			writeFileRow(tw, ranked[i])
-		}
-		_ = tw.Flush()
-		if len(ranked) > topN {
-			fmt.Fprintf(w, "  ... and %d more files (delta %s)\n",
-				len(ranked)-topN,
-				image.FormatSignedBytes(sumFileHidden(ranked[topN:])))
-		}
-	} else {
-		for _, d := range rows {
-			writeFileRow(tw, d)
-		}
-		_ = tw.Flush()
-	}
-	fmt.Fprintln(w)
-}
-
-func sumFileHidden(rows []image.FileDiff) int64 {
-	var s int64
-	for _, d := range rows {
-		s += d.SizeDelta
-	}
-	return s
-}
-
-func writeFileRow(tw *tabwriter.Writer, d image.FileDiff) {
-	sym := "?"
-	switch d.DiffType {
-	case image.Added:
-		sym = "+"
-	case image.Modified:
-		sym = "~"
-	case image.Removed:
-		sym = "-"
-	}
-	fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n",
-		sym,
-		truncate(d.Path, comparePathWidth),
-		truncate(d.ChangeReason, compareReasonWidth),
-		image.FormatSignedBytes(d.SizeDelta))
-}
-
-func writeWasteTable(w io.Writer, r *image.CompareResult, mode string, topN int) {
-	if len(r.WasteDiffs) == 0 {
-		return
-	}
-	var totalDelta int64
-	for _, wd := range r.WasteDiffs {
-		totalDelta += wd.WastedDelta
-	}
-	fmt.Fprintf(w, "WASTE CHANGES   delta %s\n", image.FormatSignedBytes(totalDelta))
-
-	tw := newCompareTabwriter(w)
-	fmt.Fprintln(tw, "  PATH\tWAS\tNOW\tdelta")
-	rows := r.WasteDiffs
-	limit := len(rows)
-	if mode == compareModeCompact && limit > topN {
-		limit = topN
-	}
-	for i := range limit {
-		writeWasteRow(tw, rows[i])
-	}
-	_ = tw.Flush()
-	if mode == compareModeCompact && len(rows) > topN {
-		var hiddenDelta int64
-		for _, wd := range rows[topN:] {
-			hiddenDelta += wd.WastedDelta
-		}
-		fmt.Fprintf(w, "  ... and %d more (delta %s)\n",
-			len(rows)-topN, image.FormatSignedBytes(hiddenDelta))
-	}
-	fmt.Fprintln(w)
-}
-
-func writeWasteRow(tw *tabwriter.Writer, wd image.WasteDiff) {
-	fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n",
-		truncate(wd.Path, comparePathWidth),
-		image.FormatBytes(wd.BeforeWasted),
-		image.FormatBytes(wd.AfterWasted),
-		image.FormatSignedBytes(wd.WastedDelta))
-}
-
-func writeWarnings(w io.Writer, r *image.CompareResult) {
-	if len(r.Warnings) == 0 {
-		return
-	}
-	fmt.Fprintln(w, "WARNINGS")
-	for _, msg := range r.Warnings {
-		fmt.Fprintf(w, "  - %s\n", msg)
-	}
-	fmt.Fprintln(w)
-}
-
-func writeVerdict(w io.Writer, r *image.CompareResult) {
-	reasons := r.RegressionReasons()
-	if len(reasons) == 0 {
-		fmt.Fprintln(w, "verdict: ok")
-		return
-	}
-	fmt.Fprintf(w, "verdict: regression reason=%s\n", strings.Join(reasons, ","))
+	renderComparison(w, r, mode, topN, nil, compareOptions{Width: 100})
 }
 
 // rankLayerDiffsByDelta returns layer diffs sorted by |SizeDelta| desc, then
@@ -591,33 +391,21 @@ func absInt64(n int64) int64 {
 	return n
 }
 
-func absFloat(f float64) float64 {
-	if f < 0 {
-		return -f
-	}
-	return f
-}
-
-// truncate shortens s so it visually occupies at most n columns. It cuts on
-// rune boundaries (never mid-UTF-8) and reserves two columns for the trailing
-// ".." marker. The return is at most n runes wide.
-func truncate(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	if n == 1 {
-		return "."
-	}
-	runes := []rune(s)
-	return string(runes[:n-2]) + ".."
-}
-
 func fallback(s, def string) string {
 	if s == "" {
 		return def
 	}
 	return s
+}
+
+func allLayersShared(r *image.CompareResult) bool {
+	if r.Before.LayerCount != r.After.LayerCount || r.Before.Platform != r.After.Platform {
+		return false
+	}
+	for _, d := range r.LayerDiffs {
+		if d.Match != "shared" {
+			return false
+		}
+	}
+	return true
 }
