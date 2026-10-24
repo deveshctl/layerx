@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Upgrade Go to 1.27.3 and keep CI, security scans, and release builds aligned with the module's Go version.
 - Clarify configuration defaults, rule overrides, path-rule behavior, and which commands use `.layerx.yaml`; improve starter guidance and configuration error messages.
 - Remove unused archive code, strengthen parser testing, and fix recreated-file history, waste reporting, and scrolling after waste jumps.
 

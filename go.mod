@@ -1,6 +1,6 @@
 module github.com/deveshctl/layerx
 
-go 1.27.2
+go 1.27.3
 
 require (
 	charm.land/bubbles/v2 v2.2.1

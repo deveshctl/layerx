@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/deveshctl/layerx?sort=semver)](https://github.com/deveshctl/layerx/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/deveshctl/layerx.svg)](https://pkg.go.dev/github.com/deveshctl/layerx)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/deveshctl/layerx/badge)](https://scorecard.dev/viewer/?uri=github.com/deveshctl/layerx)
-![Go](https://img.shields.io/badge/Go-1.27.2+-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.27.3+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
@@ -220,7 +220,7 @@ Trade-offs vs. the native binary: the image is a distroless base plus the layerx
 
 ### Build from source
 
-Requires Go 1.27.2+:
+Requires Go 1.27.3+:
 
 ```bash
 go install github.com/deveshctl/layerx@latest
@@ -670,7 +670,7 @@ Design rules: `image/` has zero imports from `tui/`, `ci/`, or `config/`. TUI an
 
 | Concern  | Choice                                                                                         |
 |----------|------------------------------------------------------------------------------------------------|
-| Language | Go 1.27.2+                                                                                       |
+| Language | Go 1.27.3+                                                                                       |
 | CLI      | [cobra](https://github.com/spf13/cobra)                                                        |
 | TUI      | [bubbletea v2](https://github.com/charmbracelet/bubbletea) + [lipgloss v2](https://github.com/charmbracelet/lipgloss) + [bubbles v2](https://github.com/charmbracelet/bubbles) |
 | Engine   | [moby/moby client](https://github.com/moby/moby) (Docker + Podman via Docker Engine API)       |
