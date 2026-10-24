@@ -134,10 +134,9 @@ func (r DenyWastePathRule) Evaluate(ctx EvalContext) []RuleResult {
 	return results
 }
 
-// MaxLayerCountRule fails for any wasted file appearing in more than
-// MaxCount layers. MaxCount of 0 disables the rule (always passes) — the
-// config layer prevents 0 in practice, but a defensive guard avoids
-// divide-by-nothing surprises if a caller constructs a zero-value rule.
+// MaxLayerCountRule caps the contributing layer count reported for files with
+// wasted payload. The config loader omits disabled rules; a non-positive
+// MaxCount also disables evaluation for callers constructing rules directly.
 type MaxLayerCountRule struct {
 	ID       string
 	MaxCount int

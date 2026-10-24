@@ -196,9 +196,9 @@ func runCICheckInner(ctx context.Context, imageRef string, cfg *config.Config, c
 // flags they can't pass on that invocation.
 func errNoCIRulesEnabled(viaCIEnv bool) error {
 	if viaCIEnv {
-		return fmt.Errorf("no CI rules enabled — set at least one threshold > 0 in .layerx.yaml (or invoke `layerx ci` directly to use --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent)")
+		return fmt.Errorf("no CI rules enabled — enable a threshold or path rule in .layerx.yaml (or invoke `layerx ci` directly to use --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent)")
 	}
-	return fmt.Errorf("no CI rules enabled — set at least one threshold > 0 in .layerx.yaml or via --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent")
+	return fmt.Errorf("no CI rules enabled — enable a threshold or path rule in .layerx.yaml, or use --lowest-efficiency / --highest-wasted-bytes / --highest-user-wasted-percent")
 }
 
 func buildRules(cfg *config.Config, cmd *cobra.Command) []ci.Rule {

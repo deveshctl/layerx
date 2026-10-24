@@ -420,7 +420,7 @@ path-rules:
     - /tmp/**
   deny-waste:
     - "**/*.pyc"
-  max-layer-count: 5   # fail if any file is touched in more than 5 layers
+  max-layer-count: 5   # cap contributing layers for files with wasted payload
 
 # Optional: set a TUI colour theme (tokyo-night is the default)
 # theme: dracula

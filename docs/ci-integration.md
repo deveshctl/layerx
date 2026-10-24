@@ -17,8 +17,10 @@ CI mode evaluates two families of rules against the image:
 - **Global rules** — `lowest-efficiency`, `highest-wasted-bytes`,
   `highest-user-wasted-percent`. Each compares one number from the
   efficiency analysis against a threshold.
-- **Path rules** — `block`, `deny-waste`, `max-layer-count`. Each fires per
-  matching path and reports which layer introduced the violation.
+- **Path rules** — `block` checks writes in any layer; `deny-waste` rejects
+  matching files with wasted payload; `max-layer-count` caps the contributing
+  layer count for files with wasted payload. Block violations name the writing
+  layer; waste violations report the wasted bytes and/or contributing count.
 
 Rules come from `.layerx.yaml` (current directory or parents, then the user
 configuration directory) and can be
@@ -222,11 +224,12 @@ layerx ci --no-cache myapp:latest
 layerx ci --json out/analysis.json myapp:latest
 ```
 
-Flags inherited from the root command:
+Additional flags:
 
 | Flag | Effect |
 |---|---|
-| `--json PATH` | Also write the full analysis to `PATH` as JSON. CI exit code wins; JSON write failures only warn. |
+| `--json PATH` | Write image analysis, not check results, to `PATH`. A JSON write failure exits `2` if checks pass; if checks also fail, exit `1` is retained and the export failure is reported as a warning. |
+| `--config FILE` | Choose the configuration file instead of automatic lookup. |
 | `--no-cache` | Bypass the analysis cache for this run. |
 
 Path rules (`block`, `deny-waste`, `max-layer-count`) have no CLI flag —
@@ -252,7 +255,7 @@ A few ground rules:
 - The `go` starter flavour (`layerx init --flavour go`) sets `0.95` /
   `0.05` because Go images are typically distroless or scratch and almost
   never have legitimate waste.
-- Set `highest-wasted-bytes` for a hard floor on absolute waste,
+- Set `highest-wasted-bytes` for a hard ceiling on absolute waste,
   independent of image size. Useful when an image grows over time.
 
 ---

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Clarify configuration defaults, rule overrides, path-rule behavior, and which commands use `.layerx.yaml`; improve starter guidance and configuration error messages.
 - Remove unused archive code, strengthen parser testing, and fix recreated-file history, waste reporting, and scrolling after waste jumps.
 
 ## [v1.6.4] - 2026-10-19

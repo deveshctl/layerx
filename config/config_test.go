@@ -144,9 +144,8 @@ func TestLoadFrom_ValidationError_HasSection(t *testing.T) {
 	assert.Equal(t, SectionRules, loadErr.Section)
 }
 
-// keybindings is a documented (M12) top-level key. Strict YAML must accept it
-// so users following CLAUDE.md examples don't get their whole config rejected
-// when they include a keybindings block alongside rules.
+// The reserved keybindings mapping remains accepted for compatibility even
+// though it does not change viewer shortcuts.
 func TestLoadFrom_AcceptsKeybindingsBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".layerx.yaml")
@@ -495,4 +494,25 @@ func TestLoadFrom_PathRules_BothForms_Rejected(t *testing.T) {
 
 	_, err := LoadFrom(path)
 	require.Error(t, err)
+}
+
+func TestLoad_NearestConfigDoesNotMerge(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	require.NoError(t, os.Mkdir(child, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(parent, defaultConfigFile),
+		[]byte("theme: dracula\nrules:\n  lowest-efficiency: 0.5\n"), 0o600))
+	t.Chdir(child)
+	got, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "dracula", got.Theme)
+	assert.Equal(t, 0.5, got.Rules.LowestEfficiency)
+
+	require.NoError(t, os.WriteFile(defaultConfigFile,
+		[]byte("rules:\n  highest-wasted-bytes: 42\n"), 0o600))
+	got, err = Load()
+	require.NoError(t, err)
+	want := Default()
+	want.Rules.HighestWastedBytes = 42
+	assert.Equal(t, want, got, "nearest config replaces the parent; omitted values use built-in defaults")
 }

@@ -134,6 +134,11 @@ func TestInit_StarterConfigs_AllParse(t *testing.T) {
 			cfg, err := config.LoadFrom(path)
 			require.NoError(t, err, "starter %s must load without error", flavour)
 			assert.Equal(t, 1, cfg.Version)
+			want := config.Default().Rules
+			if flavour == "go" {
+				want.LowestEfficiency, want.HighestUserWastedPercent = 0.95, 0.05
+			}
+			assert.Equal(t, want, cfg.Rules, "starter thresholds must match the documented flavour")
 			assert.NotEmpty(t, cfg.PathRules, "starter %s must define at least one path rule", flavour)
 		})
 	}

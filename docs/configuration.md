@@ -3,8 +3,8 @@
 # Configuration Reference
 
 `.layerx.yaml` configures CI thresholds, path-scoped rules for `layerx ci`,
-and the TUI colour theme. LayerX searches the current directory and parents
-for `.layerx.yaml`, then the user configuration directory for
+and the TUI theme and background. LayerX searches the current directory and
+parents for `.layerx.yaml`, then the user configuration directory for
 `layerx/config.yaml`. Use `--config FILE` to choose a file explicitly.
 
 ---
@@ -20,12 +20,30 @@ for `.layerx.yaml`, then the user configuration directory for
   nearest `.layerx.yaml` in the current directory or its parents, then falls
   back to `layerx/config.yaml` in the operating system's user configuration
   directory. `--config FILE` overrides this search.
+  The first file found is used; project, parent, and user files are not merged.
+  Missing values in that file use built-in defaults. A missing file chosen with
+  `--config` also uses built-in defaults rather than searching for another file.
 - **YAML library.** Decoded with `goccy/go-yaml` in **strict mode**: any
   unknown top-level key fails with a parse error. Empty files (or files
   containing only comments and whitespace) silently fall back to built-in
   defaults.
 - **Schema version.** Only schema version `1` is accepted. `version: 0` is
   treated as `1`; `version: 2` or higher is rejected.
+
+---
+
+## Which commands use configuration?
+
+| Command | Configuration behavior |
+|---|---|
+| `layerx IMAGE` (CI disabled) | Loads and validates configuration; applies theme and background settings to the viewer. |
+| `layerx --json FILE IMAGE` (CI disabled) | Loads and validates configuration; exports analysis without evaluating CI rules. |
+| `layerx ci IMAGE` or `CI=true layerx IMAGE` | Loads and evaluates global and path rules. |
+| `layerx build ...` | Loads and validates configuration after a successful build; applies appearance settings when opening the viewer. It does not run CI rules. |
+| `layerx compare OLD NEW` | Does not read `.layerx.yaml`. The inherited `--config` flag has no effect. Its verdict uses the built-in comparison checks, not the CI thresholds or path rules. |
+
+`keybindings` is reserved: a mapping is accepted for compatibility but does not
+change shortcuts. Press `?` in the viewer for the supported shortcuts.
 
 ---
 
@@ -41,12 +59,13 @@ version: 1
 # Valid values: tokyo-night, catppuccin-mocha, kanagawa, gruvbox-dark,
 #               rose-pine, dracula, oxocarbon, cyberdream
 theme: tokyo-night
+transparent_background: false       # true removes viewer background fills
 
 # Global efficiency thresholds. Set any value to 0 to disable that rule.
 rules:
   lowest-efficiency: 0.9              # fail if score < 90%
   highest-wasted-bytes: 10485760      # fail if wasted bytes > 10 MiB
-  highest-user-wasted-percent: 0.1    # fail if waste > 10% of total size
+  highest-user-wasted-percent: 0.1    # fail if waste > 10% of live + wasted payload
 
 # Path-scoped rules — flat form (the form `layerx init` writes).
 path-rules:
@@ -107,9 +126,10 @@ is parsed as either a YAML mapping or a YAML sequence, never both.
 |---|---|---|---|---|
 | `version` | int | `1` | optional | Schema version. Accepts `0` (treated as `1`) or `1`. Anything else fails validation. |
 | `theme` | string | `""` (uses `tokyo-night`) | optional | TUI colour theme. See [docs/theming.md](theming.md) for all values and precedence. |
+| `transparent_background` | bool | `false` | optional | Remove viewer background fills when `true`. |
 | `rules` | mapping | populated from defaults | optional | Global CI thresholds. See below. |
 | `path-rules` | mapping or sequence | empty | optional | Path-scoped rules. Two equivalent forms documented below. |
-| `keybindings` | mapping | empty | optional | **Reserved.** The strict decoder accepts the key, but no code reads it today. Will be wired up in a future milestone. |
+| `keybindings` | mapping | empty | optional | **Reserved.** Accepted for compatibility; does not change shortcuts. |
 
 Any other top-level key (for example `display:`) fails to load — the
 decoder is strict.
@@ -120,7 +140,12 @@ decoder is strict.
 |---|---|---|---|---|
 | `rules.lowest-efficiency` | float64, `[0, 1]` | `0.9` | optional | Fail when `score < threshold`. `0` disables the rule. |
 | `rules.highest-wasted-bytes` | int64, raw bytes | `0` (disabled) | optional | Fail when wasted bytes exceed the threshold. `0` disables the rule. |
-| `rules.highest-user-wasted-percent` | float64, `[0, 1]` | `0.1` | optional | Fail when wasted bytes / total size exceeds the threshold. `0` disables the rule. |
+| `rules.highest-user-wasted-percent` | float64, `[0, 1]` | `0.1` | optional | Fail when wasted payload / (live + wasted payload) exceeds the threshold. Uses uncompressed file bytes, not compressed image size. `0` disables the rule. |
+
+Omitting a threshold keeps its built-in default; it does not disable that rule.
+An absent `rules` section or `rules: {}` keeps all defaults. Set a threshold to
+`0` explicitly to disable it. `rules: null` (including a bare `rules:` key or
+`rules: ~`) is invalid; it is not a way to disable checks.
 
 Range validation rejects `NaN`, `±Inf`, negative byte counts, and floats
 outside `[0, 1]`.
@@ -135,8 +160,13 @@ files duplicated across layers.
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `path-rules.block` | `[]string` of doublestar globs | empty | optional | Files matching any pattern must not appear in any layer. |
-| `path-rules.deny-waste` | `[]string` of doublestar globs | empty | optional | Files matching any pattern must not appear in more than one layer. |
-| `path-rules.max-layer-count` | int, `0` or `≥ 2` | `0` (disabled) | optional | Cap on how many layers any one file may appear in. `1` is rejected (it would flag every file). |
+| `path-rules.deny-waste` | `[]string` of doublestar globs | empty | optional | Fail when a matching file has wasted payload, including a file written once and deleted later. |
+| `path-rules.max-layer-count` | int, `0` or `≥ 2` | `0` (disabled) | optional | Cap the contributing layer count reported for files with wasted payload. `1` is not supported. |
+
+The count is the waste analysis's `LayerCount`, not the number of layers in
+which a file remains visible. Zero-byte writes and unchanged carryover do not
+contribute; a separate live reinstall with no wasted payload does not inflate
+the count. See [Understanding waste](waste-analysis.md).
 
 Each glob is validated at load time. An invalid pattern fails fast with a
 clear error pointing at the rule ID.
@@ -150,7 +180,7 @@ Each list entry:
 | `id` | string | **required** | Unique identifier across the list. Used in CI report lines and error messages. |
 | `type` | string | **required** | One of `block`, `deny-waste`, `max-layer-count`. |
 | `paths` | `[]string` | required for `block` and `deny-waste`; ignored for `max-layer-count` | Doublestar globs. |
-| `threshold` | int | required for `max-layer-count`; `0` silently drops the entry as disabled | Must be `≥ 2` if set. |
+| `threshold` | int | optional for `max-layer-count`; omitted or `0` disables the entry | Must be `≥ 2` when enabled. |
 
 ---
 
@@ -270,15 +300,17 @@ need an inline override.
 - **Strict decoding.** Typos in top-level keys are errors, not warnings.
   This is intentional — silent ignores hide configuration drift. Watch for
   `unknown field` parse errors.
-- **Disabling rules cleanly.** Set the threshold to `0` (or omit the field).
+- **Disabling rules cleanly.** Set the threshold to `0`; omission keeps the default.
   `layerx ci` errors out if every rule is disabled and no path rules are
   configured — by design, an empty rule set is almost always a mistake.
+  To run only path rules, set all three global thresholds to `0` and configure
+  at least one path rule.
 - **Glob syntax.** Patterns use [doublestar](https://github.com/bmatcuk/doublestar)
   semantics: `**` matches any number of path segments, `*` matches a single
   segment, brace expansion (`{a,b}`) works. Patterns are validated at load
   time, so an invalid glob fails fast rather than at evaluation.
-- **`max-layer-count: 1` is rejected.** A value of 1 would flag every file
-  the moment it exists. Use `2` or higher, or `0` to disable.
+- **`max-layer-count: 1` is rejected.** The supported range is `2` or higher,
+  or `0` to disable. It applies to files with wasted payload, not every live file.
 - **Quote your globs.** YAML treats `*` as a node anchor in some positions.
   All starter configs quote globs uniformly (`"**/*.pyc"`); follow suit for
   any glob that begins with `*`.
