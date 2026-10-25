@@ -1,0 +1,48 @@
+name: Bug report
+description: Report incorrect behavior or a crash in LayerX.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before reporting a bug. For vulnerabilities, follow [SECURITY.md](https://github.com/deveshctl/layerx/blob/main/SECURITY.md) instead of posting publicly.
+        Remove credentials and private image or registry details from commands, logs, and attachments.
+  - type: input
+    id: version
+    attributes:
+      label: LayerX version
+      description: Paste the output of layerx --version.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and architecture; Docker or Podman version, or archive format. For TUI bugs, include terminal and window size.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the command, relevant configuration, and a minimal public image or Dockerfile when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what happened. Attach screenshots where useful.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste error output or logs, with credentials and private details removed.
+      render: text

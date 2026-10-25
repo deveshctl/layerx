@@ -58,16 +58,6 @@ func (n *FileNode) AddChild(child *FileNode) {
 	n.Children = append(n.Children, child)
 }
 
-func (n *FileNode) RemoveChild(name string) bool {
-	for i, c := range n.Children {
-		if c.Name == name {
-			n.Children = append(n.Children[:i], n.Children[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
 func (t *FileTree) Walk(fn func(*FileNode)) {
 	var walk func(*FileNode)
 	walk = func(n *FileNode) {

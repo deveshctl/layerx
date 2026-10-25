@@ -67,7 +67,6 @@ linters:
 
   exclusions:
     paths:
-      - mcp
       - internal-docs
     # Test files routinely use "magic numbers", ignore non-critical
     # errors, and keep helpers that are referenced selectively across
