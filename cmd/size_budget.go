@@ -94,24 +94,44 @@ func writeCheckReport(w io.Writer, format, text string, report checkReport) erro
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	case "markdown":
-		// A fence longer than every run in image-controlled text prevents
-		// filenames and commands from breaking out into Markdown markup.
-		longest, run := 2, 0
-		for _, r := range text {
-			if r == '`' {
-				run++
-				longest = max(longest, run)
-			} else {
-				run = 0
-			}
-		}
-		fence := strings.Repeat("`", longest+1)
-		_, err := fmt.Fprintf(w, "### LayerX image checks\n\n%stext\n%s%s\n", fence, text, fence)
-		return err
+		return writeMarkdownCheckReport(w, text, report)
 	default:
 		_, err := io.WriteString(w, text)
 		return err
 	}
+}
+
+func writeReportFence(w io.Writer, text string) error {
+	// A fence longer than every run in image-controlled text prevents
+	// filenames and commands from breaking out into Markdown markup.
+	longest, run := 2, 0
+	for _, r := range text {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	_, err := fmt.Fprintf(w, "%stext\n%s\n%s\n", fence, strings.TrimRight(text, "\n"), fence)
+	return err
+}
+
+// Reductions consume none of a growth allowance. A zero ceiling has no
+// meaningful utilization percentage, but its remaining bytes are still exact.
+func budgetHeadroom(c sizebudget.Result) (usage, remaining string) {
+	actual := max(c.ActualBytes, 0)
+	usage = "n/a (zero limit)"
+	if c.LimitBytes > 0 {
+		usage = fmt.Sprintf("%.1f%% used", 100*float64(actual)/float64(c.LimitBytes))
+	}
+	delta := c.LimitBytes - actual
+	remaining = sizebudget.Format(delta) + " remaining"
+	if delta < 0 {
+		remaining = sizebudget.Format(-delta) + " over limit"
+	}
+	return usage, remaining
 }
 
 func writeSizeChecks(w io.Writer, checks []sizebudget.Result, width int) {
@@ -127,6 +147,8 @@ func writeSizeChecks(w io.Writer, checks []sizebudget.Result, width int) {
 			detail = "; " + sizebudget.Format(c.ActualBytes-c.LimitBytes) + " over limit"
 		}
 		writeWrapped(w, fmt.Sprintf("  %s  %s: %s / %s (%s)%s", status, c.Name, sizebudget.Format(c.ActualBytes), sizebudget.Format(c.LimitBytes), c.Limit, detail), width)
+		usage, remaining := budgetHeadroom(c)
+		writeWrapped(w, "    "+usage+" · "+remaining, width)
 		if !c.Passed {
 			writeWrapped(w, fmt.Sprintf("    Exact: %d B; allowance: %d B", c.ActualBytes, c.LimitBytes), width)
 		}

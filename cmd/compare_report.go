@@ -111,12 +111,7 @@ func renderComparison(w io.Writer, r *image.CompareResult, mode string, top int,
 	}
 	line("Platform:", platform)
 	fmt.Fprintln(w)
-	rows := [][4]string{
-		{"Uncompressed layers", sizebudget.Format(r.Before.UncompressedSize), sizebudget.Format(r.After.UncompressedSize), growthLabel(r.Before.UncompressedSize, r.After.UncompressedSize)},
-		{"Layer waste", sizebudget.Format(r.BeforeEfficiency.WastedBytes), sizebudget.Format(r.AfterEfficiency.WastedBytes), compareSigned(r.AfterEfficiency.WastedBytesDelta)},
-		{"Layer efficiency", fmt.Sprintf("%.1f%%", 100*r.BeforeEfficiency.Score), fmt.Sprintf("%.1f%%", 100*r.AfterEfficiency.Score), percentagePointDelta(r.AfterEfficiency.ScoreDelta)},
-		{"Layers", fmt.Sprint(r.Before.LayerCount), fmt.Sprint(r.After.LayerCount), fmt.Sprintf("%+d", r.After.LayerCount-r.Before.LayerCount)},
-	}
+	rows := comparisonSummaryRows(r)
 	if width >= 76 {
 		fmt.Fprintf(w, "  %-21s %12s %12s %23s\n", "", "Before", "After", "Change")
 		for _, row := range rows {
@@ -170,6 +165,15 @@ func renderComparison(w io.Writer, r *image.CompareResult, mode string, top int,
 		fmt.Fprintln(w, "verdict: ok")
 	} else {
 		fmt.Fprintf(w, "verdict: regression reason=%s\n", strings.Join(reasons, ","))
+	}
+}
+
+func comparisonSummaryRows(r *image.CompareResult) [][4]string {
+	return [][4]string{
+		{"Uncompressed layers", sizebudget.Format(r.Before.UncompressedSize), sizebudget.Format(r.After.UncompressedSize), growthLabel(r.Before.UncompressedSize, r.After.UncompressedSize)},
+		{"Layer waste", sizebudget.Format(r.BeforeEfficiency.WastedBytes), sizebudget.Format(r.AfterEfficiency.WastedBytes), compareSigned(r.AfterEfficiency.WastedBytesDelta)},
+		{"Layer efficiency", fmt.Sprintf("%.1f%%", 100*r.BeforeEfficiency.Score), fmt.Sprintf("%.1f%%", 100*r.AfterEfficiency.Score), percentagePointDelta(r.AfterEfficiency.ScoreDelta)},
+		{"Layers", fmt.Sprint(r.Before.LayerCount), fmt.Sprint(r.After.LayerCount), fmt.Sprintf("%+d", r.After.LayerCount-r.Before.LayerCount)},
 	}
 }
 

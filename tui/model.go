@@ -2062,25 +2062,29 @@ func (m model) renderHeader() string {
 	size := sizebudget.Format(m.analysis.UncompressedSize)
 	totalSize := size + " uncompressed"
 	compactSize := totalSize
+	badge := ""
 	if m.sizeBudget.Max != "" {
 		totalSize += " / " + m.sizeBudget.Max + " budget"
 		compactSize = size + " / " + m.sizeBudget.Max + " budget"
 		if m.maxImageSize != nil && m.analysis.UncompressedSize > *m.maxImageSize {
-			totalSize += " (over budget)"
-			compactSize = size + " > " + m.sizeBudget.Max + " budget"
+			badge = m.styles.headerDimBg.Foreground(m.theme.Removed).Bold(true).Render("[OVER BUDGET]")
 		}
 	}
+	badgeSuffix := ""
+	if badge != "" {
+		badgeSuffix = " " + badge
+	}
 	layerCount := fmt.Sprintf("%d layers", len(m.analysis.Layers))
-	right := m.styles.headerDimBg.Render(layerCount + " · " + totalSize)
+	right := m.styles.headerDimBg.Render(layerCount+" · "+totalSize) + badgeSuffix
 	imageWidth := m.width - lipgloss.Width(prefix+platform+right) - 2
 	if imageWidth < 12 {
-		right = m.styles.headerDimBg.Render(compactSize)
+		right = m.styles.headerDimBg.Render(compactSize) + badgeSuffix
 		imageWidth = m.width - lipgloss.Width(prefix+platform+right) - 2
 	}
 	if imageWidth < 12 {
-		// The selected platform is more useful than totals on a narrow header.
-		right = ""
-		imageWidth = m.width - lipgloss.Width(prefix+platform) - 2
+		// Keep a failed-budget warning visible when the full totals do not fit.
+		right = badge
+		imageWidth = m.width - lipgloss.Width(prefix+platform+right) - 2
 	}
 	imageName := ansi.Truncate(m.renderedImageRef, max(imageWidth, 0), "…")
 	left := " " + prefix + imageName + platform

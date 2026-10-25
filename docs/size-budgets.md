@@ -78,14 +78,19 @@ separately. File additions/removals describe the final filesystem; their
 totals do not necessarily explain every byte of layer-tar growth.
 
 The viewer header shows uncompressed size and the configured absolute budget
-when space permits. Growth budgets need a baseline and are evaluated by CI
-or comparison, not by the single-image viewer.
+when space permits. Images exceeding the limit show a theme-colored
+`[OVER BUDGET]` badge, which remains readable without color. Growth budgets
+need a baseline and are evaluated by CI or comparison, not by the
+single-image viewer.
 
 ## Read the comparison
 
 The report starts with its verdict, selected inputs and platform, followed
 by before/after totals and deltas. Size limits show PASS/FAIL, the allowance,
 and the amount over budget. A failed limit also shows exact bytes.
+Checks also show the percentage of the allowance used and remaining space.
+Shrinking images consume none of a growth allowance. Zero limits show
+`n/a (zero limit)` instead of an undefined percentage; equality still passes.
 
 Shared layers are matched using full hashes of uncompressed streams, so an
 inserted build step does not shift every later match. Remaining layers may
@@ -132,6 +137,9 @@ JSON includes shared/command/added/removed layer matches and final-file
 changes. Layer indexes in JSON are zero-based; a missing side is `-1`.
 File `diffType` values are 0 unchanged, 1 added, 2 modified, 3 removed.
 CI reports include their existing rule results as well as size checks.
+Markdown reports show native summary and check tables, followed by a
+collapsible detailed text report with the selected changes and exact failing
+byte values. JSON fields and text verdict lines are unchanged.
 
 `--json FILE` retains its existing role as an **analysis** export. Its schema
 `1.0.2` adds `uncompressedLayerBytes` and optional `measuredPlatform`;
