@@ -101,7 +101,7 @@ func TestCompareAnalysis_Identical_NoChanges(t *testing.T) {
 	require.NotNil(t, r)
 	assert.Empty(t, r.FileDiffs)
 	assert.Empty(t, r.WasteDiffs)
-	assert.Empty(t, r.Warnings)
+	assert.Contains(t, r.Warnings[0], "not file contents")
 	assert.Equal(t, FileDiffSummary{}, r.FileSummary)
 	assert.Equal(t, float64(0), r.AfterEfficiency.ScoreDelta)
 	assert.Equal(t, int64(0), r.AfterEfficiency.WastedBytesDelta)
@@ -263,14 +263,14 @@ func TestCompareAnalysis_LayerCountDiffers_Warns(t *testing.T) {
 		Layers: []Layer{
 			{Index: 0, Size: 10, Command: "FROM alpine"},
 			{Index: 1, Size: 20, Command: "RUN apk add"},
-			{Index: 2, Size: 30, Command: "COPY ./ /app"},
+			{Index: 2, Size: 30, UncompressedSize: 30, Command: "COPY ./ /app"},
 		},
 	}
 
 	r := CompareAnalysis(before, after)
 	require.Len(t, r.LayerDiffs, 3)
 	require.NotEmpty(t, r.Warnings)
-	assert.Contains(t, r.Warnings[0], "layer count differs: before=2, after=3")
+	assert.Equal(t, "added", r.LayerDiffs[2].Match)
 	// Trailing index has zeroed before counterpart.
 	assert.Equal(t, int64(0), r.LayerDiffs[2].BeforeSize)
 	assert.Equal(t, int64(30), r.LayerDiffs[2].AfterSize)
@@ -297,7 +297,7 @@ func TestCompareAnalysis_CommandsDiverge_SingleWarning(t *testing.T) {
 	}
 
 	r := CompareAnalysis(before, after)
-	require.Len(t, r.LayerDiffs, 4)
+	require.Len(t, r.LayerDiffs, 5)
 	assert.True(t, r.LayerDiffs[0].CommandsMatch)
 	assert.True(t, r.LayerDiffs[1].CommandsMatch)
 	assert.False(t, r.LayerDiffs[2].CommandsMatch)
@@ -305,14 +305,10 @@ func TestCompareAnalysis_CommandsDiverge_SingleWarning(t *testing.T) {
 	// per-row equality, not "alignment is still trustworthy".
 	assert.True(t, r.LayerDiffs[3].CommandsMatch)
 
-	// Exactly one command-divergence warning, naming the first diverging index.
-	count := 0
-	for _, w := range r.Warnings {
-		if w == "layer 2 command differs (rebuild may have shifted layers; later indexes may be misaligned)" {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count)
+	assert.Equal(t, "added", r.LayerDiffs[2].Match)
+	assert.Equal(t, "removed", r.LayerDiffs[4].Match)
+	assert.Len(t, r.Warnings, 2)
+
 }
 
 func TestCompareAnalysis_WasteDiffsSorted(t *testing.T) {

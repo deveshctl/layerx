@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
+
+### Fixed
+- Reject empty YAML size limits instead of silently skipping their checks.
+- Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
+
 ### Changed
+- Size checks show budget usage and remaining space, Markdown reports include summary tables, and the viewer highlights images over budget.
+- Clearer image comparisons with size and efficiency summaries, reliable shared-layer matching, ranked changes, and terminal-aware layouts.
 - Upgrade Go to 1.27.3 and keep CI, security scans, and release builds aligned with the module's Go version.
 - Clarify configuration defaults, rule overrides, path-rule behavior, and which commands use `.layerx.yaml`; improve starter guidance and configuration error messages.
 - Remove unused archive code, strengthen parser testing, and fix recreated-file history, waste reporting, and scrolling after waste jumps.

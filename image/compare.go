@@ -1,7 +1,6 @@
 package image
 
 import (
-	"fmt"
 	"io/fs"
 	"sort"
 	"strings"
@@ -11,81 +10,82 @@ import (
 const scoreEpsilon = 1e-9
 
 type ImageSummary struct {
-	ImageRef   string
-	LayerCount int
-	TotalSize  int64
+	ImageRef         string `json:"imageRef"`
+	LayerCount       int    `json:"layerCount"`
+	TotalSize        int64  `json:"storedLayerBytes"`
+	UncompressedSize int64  `json:"uncompressedBytes"`
+	Platform         string `json:"platform"`
 }
 
 // EfficiencySummary mirrors EfficiencyResult plus deltas relative to a peer.
 // Percent fields are 0 when their denominator is 0 (no sentinel value).
 type EfficiencySummary struct {
-	Score              float64
-	WastedBytes        int64
-	ScoreDelta         float64
-	ScoreDeltaPercent  float64
-	WastedBytesDelta   int64
-	WastedBytesPercent float64
+	Score              float64 `json:"score"`
+	WastedBytes        int64   `json:"wastedBytes"`
+	ScoreDelta         float64 `json:"scoreDelta"`
+	ScoreDeltaPercent  float64 `json:"scoreDeltaPercent"`
+	WastedBytesDelta   int64   `json:"wastedBytesDelta"`
+	WastedBytesPercent float64 `json:"wastedBytesPercent"`
 }
 
-// LayerDiff is a side-by-side comparison of two layers at the same index.
-//
-// Index-based matching is the only stable option for Docker layers across
-// rebuilds: a layer inserted in the middle of a Dockerfile shifts every
-// subsequent index. CommandsMatch and the command-divergence warning surface
-// that condition so consumers can interpret later rows skeptically.
+// LayerDiff pairs shared uncompressed content or unique command text.
+// A missing side is indexed -1. Index is retained for deterministic ranking.
 type LayerDiff struct {
-	Index          int
-	BeforeSize     int64
-	AfterSize      int64
-	SizeDelta      int64
-	BeforeNetDelta int64
-	AfterNetDelta  int64
-	NetDeltaDiff   int64
-	BeforeCommand  string
-	AfterCommand   string
-	CommandsMatch  bool
+	Index          int    `json:"index"`
+	BeforeIndex    int    `json:"beforeIndex"`
+	AfterIndex     int    `json:"afterIndex"`
+	Match          string `json:"match"` // shared, command, added, removed
+	BeforeSize     int64  `json:"beforeSize"`
+	AfterSize      int64  `json:"afterSize"`
+	SizeDelta      int64  `json:"sizeDelta"`
+	BeforeNetDelta int64  `json:"beforeNetDelta"`
+	AfterNetDelta  int64  `json:"afterNetDelta"`
+	NetDeltaDiff   int64  `json:"netDeltaDiff"`
+	BeforeCommand  string `json:"beforeCommand"`
+	AfterCommand   string `json:"afterCommand"`
+	CommandsMatch  bool   `json:"commandsMatch"`
 }
 
 // FileDiff records a change to one file in the final stacked filesystem.
 // ChangeReason is set only for Modified entries and lists the differing
 // fields in the canonical order: size,mode,uid,gid,linkname,hardlink.
 type FileDiff struct {
-	Path         string
-	DiffType     DiffType
-	BeforeSize   int64
-	AfterSize    int64
-	SizeDelta    int64
-	ChangeReason string
+	Path         string   `json:"path"`
+	DiffType     DiffType `json:"diffType"`
+	BeforeSize   int64    `json:"beforeSize"`
+	AfterSize    int64    `json:"afterSize"`
+	SizeDelta    int64    `json:"sizeDelta"`
+	ChangeReason string   `json:"changeReason"`
 }
 
 type FileDiffSummary struct {
-	AddedCount    int
-	RemovedCount  int
-	ModifiedCount int
-	BytesAdded    int64
-	BytesRemoved  int64
+	AddedCount    int   `json:"addedCount"`
+	RemovedCount  int   `json:"removedCount"`
+	ModifiedCount int   `json:"modifiedCount"`
+	BytesAdded    int64 `json:"bytesAdded"`
+	BytesRemoved  int64 `json:"bytesRemoved"`
 }
 
 type WasteDiff struct {
-	Path         string
-	BeforeWasted int64
-	AfterWasted  int64
-	WastedDelta  int64
+	Path         string `json:"path"`
+	BeforeWasted int64  `json:"beforeWasted"`
+	AfterWasted  int64  `json:"afterWasted"`
+	WastedDelta  int64  `json:"wastedDelta"`
 }
 
 type CompareResult struct {
-	Before ImageSummary
-	After  ImageSummary
+	Before ImageSummary `json:"before"`
+	After  ImageSummary `json:"after"`
 
-	BeforeEfficiency EfficiencySummary
-	AfterEfficiency  EfficiencySummary
+	BeforeEfficiency EfficiencySummary `json:"beforeEfficiency"`
+	AfterEfficiency  EfficiencySummary `json:"afterEfficiency"`
 
-	LayerDiffs  []LayerDiff
-	FileDiffs   []FileDiff
-	WasteDiffs  []WasteDiff
-	FileSummary FileDiffSummary
+	LayerDiffs  []LayerDiff     `json:"layerDiffs"`
+	FileDiffs   []FileDiff      `json:"fileDiffs"`
+	WasteDiffs  []WasteDiff     `json:"wasteDiffs"`
+	FileSummary FileDiffSummary `json:"fileSummary"`
 
-	Warnings []string
+	Warnings []string `json:"warnings"`
 }
 
 // CompareAnalysis computes a diff between two image analyses. Either input
@@ -122,14 +122,18 @@ func CompareAnalysis(before, after *Analysis) *CompareResult {
 
 	r := &CompareResult{
 		Before: ImageSummary{
-			ImageRef:   before.ImageRef,
-			LayerCount: len(before.Layers),
-			TotalSize:  before.TotalSize,
+			ImageRef:         before.ImageRef,
+			LayerCount:       len(before.Layers),
+			TotalSize:        before.TotalSize,
+			UncompressedSize: before.UncompressedSize,
+			Platform:         before.Platform,
 		},
 		After: ImageSummary{
-			ImageRef:   after.ImageRef,
-			LayerCount: len(after.Layers),
-			TotalSize:  after.TotalSize,
+			ImageRef:         after.ImageRef,
+			LayerCount:       len(after.Layers),
+			TotalSize:        after.TotalSize,
+			UncompressedSize: after.UncompressedSize,
+			Platform:         after.Platform,
 		},
 		BeforeEfficiency: efficiencySummary(beforeEff, nil),
 		AfterEfficiency:  efficiencySummary(afterEff, afterPeer),
@@ -200,29 +204,74 @@ func efficiencySummary(self, peer *EfficiencyResult) EfficiencySummary {
 	return s
 }
 
+// Match identical uncompressed streams first. Only unique remaining commands
+// can be paired; ambiguous/repeated commands remain explicitly unpaired.
 func buildLayerDiffs(before, after []Layer) []LayerDiff {
-	n := max(len(before), len(after))
-	if n == 0 {
-		return nil
+	used := make([]bool, len(before))
+	pairs := make([]int, len(after))
+	for i := range pairs {
+		pairs[i] = -1
 	}
-	out := make([]LayerDiff, n)
-	for i := range n {
-		d := LayerDiff{Index: i}
-		bothPresent := i < len(before) && i < len(after)
-		if i < len(before) {
-			d.BeforeSize = before[i].Size
-			d.BeforeNetDelta = before[i].NetDelta
-			d.BeforeCommand = before[i].Command
+	kinds := make([]string, len(after))
+	byHash := make(map[string][]int)
+	for i, l := range before {
+		if l.DiffID != "" {
+			byHash[l.DiffID] = append(byHash[l.DiffID], i)
 		}
-		if i < len(after) {
-			d.AfterSize = after[i].Size
-			d.AfterNetDelta = after[i].NetDelta
-			d.AfterCommand = after[i].Command
+	}
+	for i, l := range after {
+		if l.DiffID == "" {
+			continue
+		}
+		candidates := byHash[l.DiffID]
+		if len(candidates) > 0 {
+			j := candidates[0]
+			byHash[l.DiffID] = candidates[1:]
+			pairs[i] = j
+			used[j] = true
+			kinds[i] = "shared"
+		}
+	}
+	oldCommands, newCommands := make(map[string][]int), make(map[string][]int)
+	for i, l := range before {
+		if !used[i] && l.Command != "" {
+			oldCommands[l.Command] = append(oldCommands[l.Command], i)
+		}
+	}
+	for i, l := range after {
+		if pairs[i] < 0 && l.Command != "" {
+			newCommands[l.Command] = append(newCommands[l.Command], i)
+		}
+	}
+	for command, indices := range newCommands {
+		old := oldCommands[command]
+		if len(indices) == 1 && len(old) == 1 {
+			i, j := indices[0], old[0]
+			pairs[i] = j
+			used[j] = true
+			kinds[i] = "command"
+		}
+	}
+	var out []LayerDiff
+	for i, l := range after {
+		d := LayerDiff{Index: i, BeforeIndex: -1, AfterIndex: i, Match: "added", AfterSize: l.UncompressedSize, AfterCommand: l.Command, AfterNetDelta: l.NetDelta}
+		if j := pairs[i]; j >= 0 {
+			b := before[j]
+			d.BeforeIndex = j
+			d.BeforeSize = b.UncompressedSize
+			d.BeforeCommand = b.Command
+			d.BeforeNetDelta = b.NetDelta
+			d.CommandsMatch = b.Command == l.Command
+			d.Match = kinds[i]
 		}
 		d.SizeDelta = d.AfterSize - d.BeforeSize
 		d.NetDeltaDiff = d.AfterNetDelta - d.BeforeNetDelta
-		d.CommandsMatch = bothPresent && d.BeforeCommand == d.AfterCommand
-		out[i] = d
+		out = append(out, d)
+	}
+	for i, l := range before {
+		if !used[i] {
+			out = append(out, LayerDiff{Index: i, BeforeIndex: i, AfterIndex: -1, Match: "removed", BeforeSize: l.UncompressedSize, SizeDelta: -l.UncompressedSize, BeforeCommand: l.Command, BeforeNetDelta: l.NetDelta, NetDeltaDiff: -l.NetDelta})
+		}
 	}
 	return out
 }
@@ -426,17 +475,11 @@ func absInt64(n int64) int64 {
 }
 
 func buildWarnings(before, after []Layer, diffs []LayerDiff) []string {
-	var out []string
-	if len(before) != len(after) {
-		out = append(out, fmt.Sprintf("layer count differs: before=%d, after=%d", len(before), len(after)))
-	}
+	out := []string{"File changes compare size and metadata, not file contents; same-size content changes may be absent."}
 	for _, d := range diffs {
-		bothPresent := d.Index < len(before) && d.Index < len(after)
-		if !bothPresent {
-			continue
-		}
-		if !d.CommandsMatch {
-			out = append(out, fmt.Sprintf("layer %d command differs (rebuild may have shifted layers; later indexes may be misaligned)", d.Index))
+		if d.Match == "command" {
+			out = append(out, "Changed layers are paired by unique command text; matching commands do not prove matching build steps.")
+			break
 		}
 	}
 	return out

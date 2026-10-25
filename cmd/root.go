@@ -244,6 +244,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		Platform:      activePlatformDisplay(),
 		Theme:         theme,
 		TransparentBg: cfg.TransparentBackground,
+		SizeBudget:    cfg.SizeBudget,
 	}); err != nil {
 		return presentCLIError(os.Stderr, err)
 	}

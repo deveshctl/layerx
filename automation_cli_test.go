@@ -150,7 +150,7 @@ func TestAutomationCLI_JSONResults(t *testing.T) {
 							LayerCount    int
 						}
 						require.NoError(t, json.Unmarshal(data, &report))
-						assert.Equal(t, "1.0.1", report.SchemaVersion)
+						assert.Equal(t, "1.0.2", report.SchemaVersion)
 						assert.Equal(t, 2, report.LayerCount)
 						assert.Contains(t, stderr, "wrote analysis to")
 					} else {

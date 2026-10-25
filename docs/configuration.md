@@ -40,7 +40,7 @@ parents for `.layerx.yaml`, then the user configuration directory for
 | `layerx --json FILE IMAGE` (CI disabled) | Loads and validates configuration; exports analysis without evaluating CI rules. |
 | `layerx ci IMAGE` or `CI=true layerx IMAGE` | Loads and evaluates global and path rules. |
 | `layerx build ...` | Loads and validates configuration after a successful build; applies appearance settings when opening the viewer. It does not run CI rules. |
-| `layerx compare OLD NEW` | Does not read `.layerx.yaml`. The inherited `--config` flag has no effect. Its verdict uses the built-in comparison checks, not the CI thresholds or path rules. |
+| `layerx compare OLD NEW` | Loads `size-budget` and `theme`; `--config` selects a file. Retains built-in efficiency/waste regression checks. CI thresholds and path rules do not apply. |
 
 `keybindings` is reserved: a mapping is accepted for compatibility but does not
 change shortcuts. Press `?` in the viewer for the supported shortcuts.
@@ -128,11 +128,24 @@ is parsed as either a YAML mapping or a YAML sequence, never both.
 | `theme` | string | `""` (uses `tokyo-night`) | optional | TUI colour theme. See [docs/theming.md](theming.md) for all values and precedence. |
 | `transparent_background` | bool | `false` | optional | Remove viewer background fills when `true`. |
 | `rules` | mapping | populated from defaults | optional | Global CI thresholds. See below. |
+| `size-budget` | mapping | empty | optional | Uncompressed image size and baseline growth limits. |
 | `path-rules` | mapping or sequence | empty | optional | Path-scoped rules. Two equivalent forms documented below. |
 | `keybindings` | mapping | empty | optional | **Reserved.** Accepted for compatibility; does not change shortcuts. |
 
 Any other top-level key (for example `display:`) fails to load — the
 decoder is strict.
+
+### `size-budget` — optional image-size limits
+
+```yaml
+size-budget:
+  max: 500MB
+  max-growth: 5%
+```
+
+Both limits are disabled when omitted. Growth accepts a byte quantity such as `20MB` or a percentage. Standard decimal (`MB`) and binary (`MiB`) units are distinct. Equality passes; `0B` and `0%` are real zero limits. Null sections, explicitly null or blank limits, and unknown keys are rejected. Flags `--max-image-size` and `--max-growth` override these settings. An empty flag value disables that limit.
+
+CI requires `--baseline OLD` when growth is enabled; comparison uses OLD automatically. Growth requires matching known image platforms. The single-image viewer displays size and the absolute budget without enforcing exit codes. See [Image-size budgets](size-budgets.md) for metric definitions and examples.
 
 ### `rules` — global thresholds
 

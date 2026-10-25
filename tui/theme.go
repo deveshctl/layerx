@@ -390,3 +390,6 @@ func TokyoNight() Theme {
 		GradientEnd:   lipgloss.Color("#BB9AF7"),
 	}
 }
+
+// ThemeByName returns the named palette, falling back to the default.
+func ThemeByName(name string) Theme { return themeFor(name) }

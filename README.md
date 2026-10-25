@@ -27,6 +27,7 @@
 - [Multi-platform images (`--platform`)](#multi-platform-images---platform)
 - [CI mode & GitHub Actions](#ci-mode)
 - [Compare two images](#compare-two-images)
+- [Image-size budgets](docs/size-budgets.md)
 - [JSON export](#json-export)
 - [Theming](#theming)
 - [Caching](#caching--environment)
@@ -100,8 +101,9 @@ Full install matrix (Debian/Ubuntu, RHEL/Fedora, direct download, `go install`, 
 
 ### CI & automation
 
-- `layerx ci` — three configurable rules (lowest efficiency, highest wasted bytes, highest user-wasted percent). Exit `0` pass, `1` rule failure, `2` operational error.
-- `layerx compare OLD NEW` — deterministic side-by-side deltas with a machine-parseable last line (`verdict: ok` / `verdict: regression`).
+- `layerx ci` — configurable efficiency, waste, path, and optional image-size checks. Exit `0` pass, `1` rule failure, `2` operational error.
+- `layerx compare OLD NEW` — before/after size, waste and efficiency, shared-layer matching, ranked file changes, and text, JSON or Markdown check reports.
+- Optional image-size and baseline-growth budgets in `.layerx.yaml`, shared by CI and comparison. See [Image-size budgets](docs/size-budgets.md).
 - `layerx build` — build via docker/podman and inspect the result in a single command.
 - `--json` — full analysis (layers, files, efficiency) exported to JSON for scripts, dashboards, and `jq`.
 - Starter configs for Node, Python, Java, Go, and generic images (`layerx init --flavour ...`).
@@ -474,6 +476,8 @@ layerx compare --mode full myapp:old myapp:new
 - Live progress on stderr while resolving remote images. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating.
 
 ---
+
+Configure `size-budget.max` and `size-budget.max-growth` in `.layerx.yaml` to enforce size limits during comparison. Use `--max-image-size 500MB` or `--max-growth 5%` to override them. Reports label uncompressed layer size separately from waste and identify failed checks. File changes compare size and metadata, not file contents. See [Image-size budgets and comparison](docs/size-budgets.md) for measurements, baselines and CI reports.
 
 ## JSON export
 

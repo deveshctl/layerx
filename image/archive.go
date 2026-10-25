@@ -176,7 +176,11 @@ func (r *ArchiveResolver) Inspect(ctx context.Context, imageRef string) (*ImageM
 	for _, layerPath := range metadata.manifest.Layers {
 		total += metadata.headers[layerPath]
 	}
-	return &ImageMeta{Size: total}, nil
+	platform, err := readArchivePlatform(f, metadata)
+	if err != nil {
+		return nil, err
+	}
+	return &ImageMeta{Size: total, Platform: (imageConfig{OS: platform.OS, Architecture: platform.Architecture, Variant: platform.Variant}).platformName()}, nil
 }
 
 // ImageID returns the image's content digest, derived from the config blob's
