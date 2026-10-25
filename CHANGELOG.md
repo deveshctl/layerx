@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- PR checklist and bug report and feature request forms, with guidance for private security reports.
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
 ### Fixed
@@ -15,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 
 ### Changed
+- Remove unused review tooling and correct contributor release guidance.
 - Size checks show budget usage and remaining space, Markdown reports include summary tables, and the viewer highlights images over budget.
 - Clearer image comparisons with size and efficiency summaries, reliable shared-layer matching, ranked changes, and terminal-aware layouts.
 - Upgrade Go to 1.27.3 and keep CI, security scans, and release builds aligned with the module's Go version.

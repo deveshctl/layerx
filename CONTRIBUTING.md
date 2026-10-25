@@ -2,7 +2,7 @@
 
 Thanks for your interest. Bug reports, fixes, and small features are welcome.
 
-For anything beyond a small fix, **open an issue first** to discuss the approach — it's faster than guessing whether a PR will land.
+For anything beyond a small fix, **open an issue first** to discuss the approach — it's faster than guessing whether a PR will land. Use the [bug report or feature request forms](https://github.com/deveshctl/layerx/issues/new/choose) to include the details needed to investigate or discuss it.
 
 ## Prerequisites
 
@@ -34,7 +34,11 @@ Don't push to `main`; PRs are merged on GitHub.
 
 - One logical change per commit.
 - The commit message explains *why*, not just *what*. Minimum 20 characters.
-- If your `.go` change fixes a bug or adds user-visible behaviour, update `CHANGELOG.md` (`[Unreleased]` section) in the same commit. Pure internal refactors can skip it.
+- Every PR includes a short, user-friendly entry in `CHANGELOG.md` under `[Unreleased]` describing the change.
+
+## Pull requests
+
+Explain the problem and resulting behavior, link any related issue, and list validation commands and results in the PR template. Review the final diff and affected behavior, fix any issues, and complete the build and test checks above before requesting review. Include screenshots for visual changes when useful.
 
 ## What goes where
 
@@ -48,7 +52,7 @@ config/   .layerx.yaml loader
 
 Hard rules:
 
-- `image/` does not import `tui/`, `ci/`, `config/`, or `mcp/`.
+- `image/` does not import `tui/`, `ci/`, or `config/`.
 - `tui/` and `ci/` import `image/` interfaces, never concrete Docker SDK types.
 - `cmd/` is the only package allowed to wire the rest together.
 
@@ -66,7 +70,7 @@ Don't add a dependency without asking first. Open an issue and explain why.
 
 ## Releasing
 
-Maintainer-only. See `docs/releasing.md` for the full sequence (CHANGELOG + README + tag + GoReleaser + Homebrew tap + Scoop bucket).
+Maintainer-only. Update `CHANGELOG.md` and the README for the release, then push a `v*` tag. The [release workflow](.github/workflows/release.yml) uses [GoReleaser](.goreleaser.yaml) to publish release assets and update Homebrew and Scoop, then publishes the container image. See [SECURITY.md](SECURITY.md) for release verification.
 
 ## Reporting security issues
 

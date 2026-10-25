@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/deveshctl/layerx/blob/main/SECURITY.md
+    about: Follow the security policy; do not publish vulnerabilities in an issue.

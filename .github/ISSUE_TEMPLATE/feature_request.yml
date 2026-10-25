@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose an improvement to LayerX.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Discuss larger changes here before starting implementation.
+        For vulnerabilities, follow [SECURITY.md](https://github.com/deveshctl/layerx/blob/main/SECURITY.md) instead of posting publicly.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the improvement, with an example command or workflow if useful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include existing workarounds or other approaches.
