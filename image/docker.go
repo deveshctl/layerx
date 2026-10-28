@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -14,6 +13,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/moby/moby/client"
 	"github.com/moby/moby/client/pkg/versions"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -718,7 +718,7 @@ func readImageArchiveMetadata(spool *os.File) (*imageArchiveMetadata, error) {
 	return metadata, nil
 }
 
-const archiveReadBufferSize = 1 << 20 // Reduce small reads from archives on mounted filesystems.
+const archiveReadBufferSize = 1 << 20 // Reduce small reads during archive scans.
 
 // parseLayersFromManifest resolves config and layer trees from a dockerManifest,
 // using the pre-built header-size map and any root-level JSON already in rootJSON.

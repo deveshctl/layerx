@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/distribution/reference v0.6.0
 	github.com/goccy/go-yaml v1.19.2
+	github.com/klauspost/compress v1.20.3
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
 	github.com/opencontainers/image-spec v1.1.1
