@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 
 ### Changed
+- Speed up image analysis and archive inspection, especially for larger images and slower filesystems.
 - Remove unused review tooling and correct contributor release guidance.
 - Size checks show budget usage and remaining space, Markdown reports include summary tables, and the viewer highlights images over budget.
 - Clearer image comparisons with size and efficiency summaries, reliable shared-layer matching, ranked changes, and terminal-aware layouts.

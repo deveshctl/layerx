@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -14,6 +13,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/moby/moby/client"
 	"github.com/moby/moby/client/pkg/versions"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -718,6 +718,8 @@ func readImageArchiveMetadata(spool *os.File) (*imageArchiveMetadata, error) {
 	return metadata, nil
 }
 
+const archiveReadBufferSize = 1 << 20 // Reduce small reads during archive scans.
+
 // parseLayersFromManifest resolves config and layer trees from a dockerManifest,
 // using the pre-built header-size map and any root-level JSON already in rootJSON.
 // Both the Docker-manifest path and the OCI-index fallback path converge here.
@@ -777,7 +779,7 @@ func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest docke
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek spool: %w", err)
 	}
-	tr := tar.NewReader(spool)
+	tr := tar.NewReader(bufio.NewReaderSize(spool, archiveReadBufferSize))
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -909,7 +911,7 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, nil, nil, fmt.Errorf("seek spool: %w", err)
 	}
-	tr := tar.NewReader(spool)
+	tr := tar.NewReader(bufio.NewReaderSize(spool, archiveReadBufferSize))
 
 	var manifestData []byte
 	rootJSON := make(map[string][]byte)
