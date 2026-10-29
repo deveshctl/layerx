@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 
 ### Changed
+- Focused split panes get more room, long lists show scroll position, and mouse wheel browsing moves faster.
 - File browsing now offers folder navigation keys, a files-only size list, and a wider names view.
 - Speed up image analysis and archive inspection, especially for larger images and slower filesystems.
 - Remove unused review tooling and correct contributor release guidance.

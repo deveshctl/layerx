@@ -12,7 +12,11 @@ import (
 // is colored as a notable size increase. 0.10 = 10% of final live size.
 const largeStepGrowthFraction = 0.10
 
-func renderPanel(t Theme, content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool) string {
+type scrollInfo struct {
+	offset, total, visible int
+}
+
+func renderPanel(t Theme, content, title string, focused bool, contentWidth, height int, hasAbove, hasBelow bool, scroll ...scrollInfo) string {
 	// Defensive: callers can compute negative widths/heights when the
 	// terminal is unusually small (m.width-2 with m.width=1, etc.).
 	// strings.Repeat panics on negative counts; clamp here so every code
@@ -73,7 +77,9 @@ func renderPanel(t Theme, content, title string, focused bool, contentWidth, hei
 		sb.WriteString(strings.Repeat(" ", pad))
 
 		rightBorder := vLine
-		if hasAbove && i == 0 {
+		if len(scroll) > 0 && scroll[0].total > scroll[0].visible && height >= 5 && i > 0 && i < height-1 && scrollThumb(i, height, scroll[0]) {
+			rightBorder = styleWithFg(t.ScrollDim).Render("┃")
+		} else if hasAbove && i == 0 {
 			rightBorder = styleWithFg(t.ScrollDim).Render("▴")
 		} else if hasBelow && i == height-1 {
 			rightBorder = styleWithFg(t.ScrollDim).Render("▾")
@@ -89,6 +95,13 @@ func renderPanel(t Theme, content, title string, focused bool, contentWidth, hei
 	sb.WriteString(bottomBorder)
 
 	return sb.String()
+}
+
+func scrollThumb(row, height int, info scrollInfo) bool {
+	track := height - 2
+	thumb := max(1, track*info.visible/info.total)
+	start := 1 + info.offset*(track-thumb)/max(info.total-info.visible, 1)
+	return row >= start && row < start+thumb
 }
 
 func styleWithFg(c color.Color) lipgloss.Style {
