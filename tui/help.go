@@ -60,9 +60,11 @@ func defaultHelpSections() []helpSection {
 			entries: []helpEntry{
 				{"/", "Filter file paths"},
 				{"Enter", "View file / expand or collapse folder"},
+				{"h / l", "Collapse / expand folder, or move to parent / child"},
+				{"m", "Toggle file metadata columns"},
 				{"Backspace", "Clear confirmed filter"},
 				{"d", "Show only changed files"},
-				{"s", "Sort by size (↓ → ↑ → off)"},
+				{"s", "List files by size (largest → smallest → tree)"},
 				{"x", "Save file to current directory"},
 				{"y", "Copy file path to clipboard"},
 				{"Esc", "Clear filter"},

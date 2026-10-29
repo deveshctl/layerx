@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -217,43 +218,44 @@ type treeCache struct {
 }
 
 type model struct {
-	sizeBudget    sizebudget.Config
-	maxImageSize  *int64
-	width         int
-	height        int
-	focus         focus
-	state         appState
-	imageRef      string
-	platform      string
-	analysis      *image.Analysis
-	layerCursor   int
-	layerOffset   int
-	treeCursor    int
-	treeOffset    int
-	errMsg        string
-	quitting      bool
-	resolver      image.Resolver
-	spinnerFrame  int
-	imageSize     int64
-	loadPhase     image.ProgressPhase
-	pullLayers    int
-	pullTotal     int
-	pullBytes     int64
-	pullBytesMax  int64
-	progressCh    chan image.ProgressEvent
-	copyConfirm   bool
-	statusMsg     string
-	statusIsError bool
-	statusGen     uint64
-	showHelp      bool
-	helpOffset    int
-	errorOffset   int
-	filterActive  bool
-	filterQuery   string
-	diffOnly      bool
-	aggregated    bool
-	sortMode      sortMode
-	treeCollapsed map[string]bool
+	sizeBudget      sizebudget.Config
+	maxImageSize    *int64
+	width           int
+	height          int
+	focus           focus
+	state           appState
+	imageRef        string
+	platform        string
+	analysis        *image.Analysis
+	layerCursor     int
+	layerOffset     int
+	treeCursor      int
+	treeOffset      int
+	errMsg          string
+	quitting        bool
+	resolver        image.Resolver
+	spinnerFrame    int
+	imageSize       int64
+	loadPhase       image.ProgressPhase
+	pullLayers      int
+	pullTotal       int
+	pullBytes       int64
+	pullBytesMax    int64
+	progressCh      chan image.ProgressEvent
+	copyConfirm     bool
+	statusMsg       string
+	statusIsError   bool
+	statusGen       uint64
+	showHelp        bool
+	helpOffset      int
+	errorOffset     int
+	filterActive    bool
+	filterQuery     string
+	diffOnly        bool
+	aggregated      bool
+	sortMode        sortMode
+	compactTreeMeta bool
+	treeCollapsed   map[string]bool
 	// aggCursor / aggOffset / aggCollapsed mirror treeCursor / treeOffset /
 	// treeCollapsed but drive the bottom (Cumulative) sub-panel when
 	// aggregated mode is on. Kept independent so the two panes can scroll
@@ -882,6 +884,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveUp()
 			return m, nil
 
+		case key.Matches(msg, m.keys.Left):
+			m.moveTreeLeft()
+			return m, nil
+
+		case key.Matches(msg, m.keys.Right):
+			m.moveTreeRight()
+			return m, nil
+
 		case key.Matches(msg, m.keys.Top):
 			m.moveToTop()
 			return m, nil
@@ -981,6 +991,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.treeOffset = 0
 			m.aggCursor = 0
 			m.aggOffset = 0
+			return m, nil
+
+		case key.Matches(msg, m.keys.TreeColumns):
+			m.compactTreeMeta = !m.compactTreeMeta
 			return m, nil
 
 		case key.Matches(msg, m.keys.Aggregate):
@@ -1223,15 +1237,8 @@ func (m model) tryOpenSelectedFile() (tea.Model, tea.Cmd) {
 	f := files[cur]
 	if f.IsDir {
 		if m.useTreeCollapse() {
-			if pane == focusTreeAgg {
-				m.aggCollapsed = toggleCollapsed(m.aggCollapsed, f.Path)
-			} else {
-				m.treeCollapsed = toggleCollapsed(m.treeCollapsed, f.Path)
-			}
-			m.collapsedGen++
-			mp := &m
-			mp.clampCursors()
-			return *mp, nil
+			m.toggleTreeDirectory(pane, f.Path)
+			return m, nil
 		}
 		var msg string
 		switch {
@@ -1416,6 +1423,9 @@ func (m model) computeDisplayTreeFor(f focus) []*image.FileNode {
 	if m.filterQuery != "" {
 		files = applySubstringFilter(files, m.filterQuery)
 	}
+	if m.sortMode != sortNone {
+		files = regularFiles(files)
+	}
 	files = applySortBySize(files, m.sortMode)
 	return files
 }
@@ -1532,6 +1542,70 @@ func (m *model) moveUp() {
 			m.adjustTreeScrollFor(focusTreeAgg)
 		}
 	}
+}
+
+// The horizontal keys follow familiar tree navigation when hierarchy is visible.
+func (m *model) moveTreeRight() {
+	if !m.isTreeFocused() || !m.useTreeCollapse() {
+		return
+	}
+	pane := m.focus
+	files := m.displayTreeFor(pane)
+	cur := m.treeCursorFor(pane)
+	if cur >= len(files) || !files[cur].IsDir {
+		return
+	}
+	dir := files[cur]
+	if isCollapsed(m.collapsedFor(pane), dir.Path) {
+		m.toggleTreeDirectory(pane, dir.Path)
+		return
+	}
+	if cur+1 < len(files) && len(files[cur+1].Path) > len(dir.Path) && strings.HasPrefix(files[cur+1].Path, dir.Path+"/") {
+		m.setTreeCursor(pane, cur+1)
+	}
+}
+
+func (m *model) moveTreeLeft() {
+	if !m.isTreeFocused() || !m.useTreeCollapse() {
+		return
+	}
+	pane := m.focus
+	files := m.displayTreeFor(pane)
+	cur := m.treeCursorFor(pane)
+	if cur >= len(files) {
+		return
+	}
+	node := files[cur]
+	if node.IsDir && !isCollapsed(m.collapsedFor(pane), node.Path) {
+		m.toggleTreeDirectory(pane, node.Path)
+		return
+	}
+	parent := path.Dir(node.Path)
+	for i := cur - 1; i >= 0; i-- {
+		if files[i].Path == parent {
+			m.setTreeCursor(pane, i)
+			return
+		}
+	}
+}
+
+func (m *model) setTreeCursor(pane focus, cursor int) {
+	if pane == focusTreeAgg {
+		m.aggCursor = cursor
+	} else {
+		m.treeCursor = cursor
+	}
+	m.adjustTreeScrollFor(pane)
+}
+
+func (m *model) toggleTreeDirectory(pane focus, dir string) {
+	if pane == focusTreeAgg {
+		m.aggCollapsed = toggleCollapsed(m.aggCollapsed, dir)
+	} else {
+		m.treeCollapsed = toggleCollapsed(m.treeCollapsed, dir)
+	}
+	m.collapsedGen++
+	m.clampCursors()
 }
 
 func (m *model) moveToTop() {
@@ -1883,7 +1957,7 @@ func (m model) renderRightPanel(width, height int) string {
 		return renderFileTree(m.theme, m.styles, treeFiles, m.treeCursor, m.treeOffset,
 			width, height, m.focus == focusTree, m.filterActive,
 			m.filterQuery, m.useTreeCollapse(), false,
-			m.treeCollapsed, m.layerCursor)
+			m.treeCollapsed, m.layerCursor, treeDisplayOptions{m.compactTreeMeta, m.sortMode})
 	}
 	topFiles := m.displayTreeFor(focusTree)
 	botFiles := m.displayTreeFor(focusTreeAgg)
@@ -1906,6 +1980,8 @@ func (m model) renderRightPanel(width, height int) string {
 		botCollapsed: m.aggCollapsed,
 		filterActive: m.filterActive,
 		filterQuery:  m.filterQuery,
+		compactMeta:  m.compactTreeMeta,
+		sortMode:     m.sortMode,
 	})
 }
 
@@ -2130,6 +2206,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
 			{"/", "filter"},
+			{"m", "columns"},
 			{"d", "diff"},
 			{"s", "sort"},
 			{"w", "waste + cleanup"},
@@ -2178,11 +2255,14 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			}
 			badges += m.styles.accentBg.Render(label) + " "
 		}
+		if m.compactTreeMeta {
+			badges += m.styles.accentBg.Render("[names]") + " "
+		}
 		switch m.sortMode {
 		case sortDesc:
-			badges += m.styles.accentBg.Render("[↓size]") + " "
+			badges += m.styles.accentBg.Render("[largest files]") + " "
 		case sortAsc:
-			badges += m.styles.accentBg.Render("[↑size]") + " "
+			badges += m.styles.accentBg.Render("[smallest files]") + " "
 		}
 
 		layerNum := fmt.Sprintf("%d", m.layerCursor+1)
