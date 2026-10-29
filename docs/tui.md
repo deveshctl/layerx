@@ -16,7 +16,8 @@ layerx ./build/app.tar
   relative to the preceding layer highlighted. Unchanged files remain visible
   until you press `d`.
 - **Cumulative** appears when you press `A`. It retains diff markers from
-  earlier layers. See [the split-view guide](split-view.md) for exact semantics.
+  earlier layers. The focused half gets more rows while both remain visible.
+  See [the split-view guide](split-view.md) for exact semantics.
 - **Focus** is marked by `▸` in the active panel title and a highlighted
   border. Inactive panes retain a quieter selection so you can keep your place.
 - **Size columns** cycle with `S` while Layers has focus: `change` is the
@@ -90,6 +91,8 @@ The main view needs at least **50 columns × 11 rows**. Short terminals show
 only the active tree in split mode, marked `compact`; `Tab` still reaches both
 trees, and enlarging the terminal restores the split. Selections are retained
 when resizing. The footer stays at the bottom as command lengths change.
+Long single-pane lists show position on the right border. The mouse wheel
+advances three rows at a time when the main view captures mouse input.
 
 Use `?` for scrollable help and `q` or `Ctrl+C` to quit. While typing a filter
 or search, `q` is ordinary text; `Ctrl+C` still quits.

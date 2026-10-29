@@ -1965,7 +1965,7 @@ func TestMouseWheelDownScrollsViewer(t *testing.T) {
 	m.height = 20
 
 	m = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-	assert.Equal(t, 1, m.viewOffset)
+	assert.Equal(t, 3, m.viewOffset)
 }
 
 func TestMouseWheelUpScrollsViewer(t *testing.T) {

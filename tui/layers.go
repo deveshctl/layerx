@@ -62,7 +62,8 @@ func renderLayers(t Theme, st themeStyles, layers []image.Layer, cursor int, off
 	hasBelow := end < len(layers)
 
 	content := sb.String()
-	return renderPanel(t, content, title, focused, contentWidth, height, hasAbove, hasBelow)
+	return renderPanel(t, content, title, focused, contentWidth, height, hasAbove, hasBelow,
+		scrollInfo{offset, len(layers), listHeight})
 }
 
 func renderCommandBar(st themeStyles, cmd string, width int) string {

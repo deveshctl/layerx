@@ -532,18 +532,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			switch m.viewState {
-			case viewReady:
-				m.scrollViewUp()
-			case viewNone:
-				m.moveUp()
+			for range 3 {
+				if m.viewState == viewReady {
+					m.scrollViewUp()
+				} else {
+					m.moveUp()
+				}
 			}
 		case tea.MouseWheelDown:
-			switch m.viewState {
-			case viewReady:
-				m.scrollViewDown()
-			case viewNone:
-				m.moveDown()
+			for range 3 {
+				if m.viewState == viewReady {
+					m.scrollViewDown()
+				} else {
+					m.moveDown()
+				}
 			}
 		}
 		return m, nil
@@ -1764,7 +1766,7 @@ func (m *model) treeVisibleHeightFor(f focus) int {
 	totalContent := m.height - 8 // chrome rows excluded; matches viewReady
 	showFilter := m.filterQuery != "" || m.filterActive
 	if m.aggregated && splitTreeFits(totalContent, showFilter) {
-		top, bottom := splitPanelRows(totalContent)
+		top, bottom := splitPanelRows(totalContent, m.focus)
 		totalContent = top
 		if f == focusTreeAgg {
 			totalContent = bottom
@@ -1778,7 +1780,7 @@ func (m *model) treeVisibleHeightFor(f focus) int {
 // splitPanelRows divides total content rows between top and bottom
 // sub-panels with a 1-row divider between them. The top half is given any
 // odd extra row so a 9-row panel yields 4-1-4 (top, divider, bottom).
-func splitPanelRows(total int) (top, bottom int) {
+func splitPanelRows(total int, active ...focus) (top, bottom int) {
 	if total < 4 {
 		// Below 4 rows the split is meaningless; let both panes render
 		// a degenerate single line and let the renderer clamp.
@@ -1787,7 +1789,14 @@ func splitPanelRows(total int) (top, bottom int) {
 	usable := total - 1 // reserve one row for the divider
 	top = (usable + 1) / 2
 	bottom = usable - top
-	return top, bottom
+	if len(active) == 0 || active[0] == focusLayers {
+		return top, bottom
+	}
+	major := min(max(usable*2/3, top), usable-3)
+	if active[0] == focusTreeAgg {
+		return usable - major, major
+	}
+	return major, usable - major
 }
 
 func (m *model) clampCursors() {

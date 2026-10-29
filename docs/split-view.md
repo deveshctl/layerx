@@ -21,7 +21,7 @@ Press **`A`** (that's **Shift + a** — a capital A) while browsing an image. Th
 └────────────────────────────────────┘
 ```
 
-Both panes always show the **same layer** — the one selected in the layers pane on the left. Press `A` again to go back to the single tree.
+Both panes always show the **same layer** — the one selected in the layers pane on the left. The focused half gets more rows; switching focus moves that extra space with it. Press `A` again to go back to the single tree.
 
 **Layer files highlights this step; Cumulative retains earlier diff markers.**
 Press `d` to hide entries marked unchanged.

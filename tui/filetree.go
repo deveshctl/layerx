@@ -66,7 +66,9 @@ func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, of
 func renderTreePanel(in treePaneInput, title string, focused bool) string {
 	in.focused = focused
 	body, above, below := renderTreeBody(in)
-	return renderPanel(in.theme, body, title, focused, in.contentWidth, in.bodyHeight, above, below)
+	_, visible := treePaneRows(in.bodyHeight, in.showHeader, in.showFilterBar)
+	return renderPanel(in.theme, body, title, focused, in.contentWidth, in.bodyHeight, above, below,
+		scrollInfo{in.offset, len(in.files), visible})
 }
 
 type treePaneInput struct {
@@ -223,7 +225,13 @@ func renderSplitFileTree(in splitTreeInput) string {
 	// signature of renderFileTree, which is passed the same value.
 	totalContent := in.height
 
-	topRows, botRows := splitPanelRows(totalContent)
+	active := focusLayers
+	if in.topFocused {
+		active = focusTree
+	} else if in.botFocused {
+		active = focusTreeAgg
+	}
+	topRows, botRows := splitPanelRows(totalContent, active)
 
 	topBody, topAbove, topBelow := renderTreeBody(treePaneInput{
 		theme:         in.theme,
