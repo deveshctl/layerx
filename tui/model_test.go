@@ -1299,22 +1299,15 @@ func TestEnterOnDirTogglesCollapse(t *testing.T) {
 	assert.False(t, isCollapsed(um.treeCollapsed, "/etc"))
 }
 
-func TestEnterOnDirWhileSortingShowsStatus(t *testing.T) {
+func TestSortedFilesExcludeDirectories(t *testing.T) {
 	m := setupModel()
 	m.focus = focusTree
 	m = send(m, keyPress('s'))
 
 	files := m.displayTree()
-	for i, f := range files {
-		if f.IsDir {
-			m.treeCursor = i
-			break
-		}
+	for _, f := range files {
+		assert.False(t, f.IsDir, f.Path)
 	}
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	um := updated.(model)
-	assert.Contains(t, um.statusMsg, "unavailable")
 }
 
 func TestLayerChangeClearsCollapse(t *testing.T) {

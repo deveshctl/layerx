@@ -32,9 +32,14 @@ layerx ./build/app.tar
 4. Press `/` in the viewer to search its contents; use `n`/`N` for matches.
 5. Press `Esc` to clear a search, then `Esc` again to close the viewer.
 
-`Enter` expands or collapses a directory in the normal tree. Filtering,
-sorting and diff-only mode show a flat list; directory collapse is unavailable
-there. `Backspace` or `Esc` clears a confirmed tree filter.
+`Enter` expands or collapses a directory in the normal tree. `h` collapses an
+open folder or moves to its parent; `l` expands a closed folder or moves to its
+first child. Filtering and diff-only mode show flat paths. Sorting lists files
+only, largest or smallest first, without directory totals mixed in; press `s`
+again to return to the tree. `Backspace` or `Esc` clears a confirmed filter.
+
+Press `m` to hide metadata columns and give file names more room; press it
+again to restore the columns. The diff markers remain visible in both modes.
 
 Long paths shorten in the middle so the filename and extension remain visible
 where they fit. Deep indentation yields space first. This affects display only:
@@ -101,7 +106,7 @@ in `.layerx.yaml` to use your terminal background.
 | `g` / `G`   | Jump to top / bottom                                         |
 | `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
 | `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
-| `h` / `l`   | Scroll left / right (file viewer, long lines)                |
+| `h` / `l`   | Navigate folders (tree) or scroll left / right (file viewer) |
 | `Enter`     | Confirm a filter, open a file, or expand/collapse a folder    |
 | `Esc`       | Close help, clear search/filter, or close the viewer. Quits only on loading and error screens. |
 | `/`         | Filter file tree (tree) / search in viewer (viewer)          |
@@ -111,7 +116,8 @@ in `.layerx.yaml` to use your terminal background.
 | `Y`         | Copy file content to clipboard (viewer only)                 |
 | `c`         | Copy Dockerfile command to clipboard (layers panel)          |
 | `d`         | Toggle diff-only mode (hide unchanged files)                 |
-| `s`         | Cycle sort: default → largest → smallest                     |
+| `s`         | Cycle file order: tree → largest → smallest                  |
+| `m`         | Toggle file metadata columns                                 |
 | `S`         | Cycle layer size column: change → stored → stored+change     |
 | `w`         | Toggle wasted-files overlay (Enter jumps to introducing layer) |
 | `x`         | Extract focused file to disk                                 |

@@ -31,6 +31,7 @@ type keyMap struct {
 	PrevMatch    key.Binding
 	Waste        key.Binding
 	SizeColumn   key.Binding
+	TreeColumns  key.Binding
 }
 
 func defaultKeys() keyMap {
@@ -138,6 +139,10 @@ func defaultKeys() keyMap {
 		SizeColumn: key.NewBinding(
 			key.WithKeys("S"),
 			key.WithHelp("S", "size display"),
+		),
+		TreeColumns: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "file columns"),
 		),
 	}
 }

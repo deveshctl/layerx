@@ -14,7 +14,16 @@ import (
 
 const minTreeNameWidth = 16
 
-func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int) string {
+type treeDisplayOptions struct {
+	compactMeta bool
+	sortMode    sortMode
+}
+
+func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, offset int, width, height int, focused bool, filterActive bool, filterQuery string, treeMode bool, aggregated bool, collapsed map[string]bool, currentLayer int, options ...treeDisplayOptions) string {
+	opt := treeDisplayOptions{}
+	if len(options) > 0 {
+		opt = options[0]
+	}
 	contentWidth := width - 2
 
 	in := treePaneInput{
@@ -32,6 +41,7 @@ func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, of
 		collapsed:     collapsed,
 		currentLayer:  currentLayer,
 		showHeader:    true,
+		compactMeta:   opt.compactMeta,
 	}
 
 	title := "Layer files"
@@ -42,6 +52,12 @@ func renderFileTree(t Theme, st themeStyles, files []*image.FileNode, cursor, of
 		title = fmt.Sprintf("%s %d/%d", title, cursor+1, len(files))
 	} else if filterQuery != "" {
 		title = title + " 0/0"
+	}
+	if opt.sortMode != sortNone {
+		title += " · files by size"
+	}
+	if opt.compactMeta {
+		title += " · names"
 	}
 
 	return renderTreePanel(in, title, focused)
@@ -71,7 +87,8 @@ type treePaneInput struct {
 	// showHeader prepends the column header row when true. The split renderer
 	// shows it on every sub-pane so the metadata columns line up regardless
 	// of which pane has focus.
-	showHeader bool
+	showHeader  bool
+	compactMeta bool
 	// emptyMsg overrides the default "(no filesystem changes)" placeholder
 	// shown when files is empty. The aggregated sub-pane uses
 	// "(no entries at this layer)" because the cumulative tree at L0 with
@@ -88,7 +105,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 	var sb strings.Builder
 
 	if headerRows > 0 {
-		sb.WriteString(renderTreeHeader(in.styles, in.contentWidth))
+		sb.WriteString(renderTreeHeader(in.styles, in.contentWidth, in.compactMeta))
 		sb.WriteString("\n")
 		sb.WriteString(renderDivider(in.theme, in.contentWidth))
 		sb.WriteString("\n")
@@ -124,7 +141,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 		visible := in.files[in.offset:end]
 
 		for i, f := range visible {
-			line := formatFileNodeLine(in.theme, in.styles, f, in.offset+i == in.cursor, in.contentWidth, in.treeMode, in.collapsed, in.currentLayer, in.filterQuery)
+			line := formatFileNodeLine(in.theme, in.styles, f, in.offset+i == in.cursor, in.contentWidth, in.treeMode, in.collapsed, in.currentLayer, in.filterQuery, in.compactMeta)
 			sb.WriteString(line)
 			if i < len(visible)-1 {
 				sb.WriteString("\n")
@@ -160,6 +177,8 @@ type splitTreeInput struct {
 	width, height int
 	currentLayer  int
 	treeMode      bool
+	compactMeta   bool
+	sortMode      sortMode
 
 	// Top sub-pane: per-layer Δ from StackedTrees.
 	topFiles     []*image.FileNode
@@ -222,6 +241,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 		collapsed:     in.topCollapsed,
 		currentLayer:  in.currentLayer,
 		showHeader:    true,
+		compactMeta:   in.compactMeta,
 		emptyMsg:      "(no changes in this layer)",
 	})
 
@@ -241,6 +261,7 @@ func renderSplitFileTree(in splitTreeInput) string {
 		collapsed:     in.botCollapsed,
 		currentLayer:  in.currentLayer,
 		showHeader:    true,
+		compactMeta:   in.compactMeta,
 		emptyMsg:      "(no entries at this layer)",
 	})
 
@@ -262,6 +283,7 @@ func renderCompactSplitTree(in splitTreeInput) string {
 		cursor: in.topCursor, offset: in.topOffset, collapsed: in.topCollapsed,
 		contentWidth: in.width - 2, bodyHeight: in.height,
 		showHeader: true, showFilterBar: in.filterActive || in.filterQuery != "",
+		compactMeta:  in.compactMeta,
 		filterActive: in.filterActive, filterQuery: in.filterQuery,
 		treeMode: in.treeMode, currentLayer: in.currentLayer,
 	}
@@ -324,12 +346,19 @@ func buildSplitTitle(in splitTreeInput) string {
 		botPart += " 0/0"
 	}
 	if in.botFocused {
-		return botPart + "  ·  " + topPart
+		topPart, botPart = botPart, topPart
 	}
-	return topPart + "  ·  " + botPart
+	title := topPart + "  ·  " + botPart
+	if in.sortMode != sortNone {
+		title += " · files by size"
+	}
+	if in.compactMeta {
+		title += " · names"
+	}
+	return title
 }
 
-func renderTreeHeader(st themeStyles, maxWidth int) string {
+func renderTreeHeader(st themeStyles, maxWidth int, compact ...bool) string {
 	const permCol = 10
 	const uidGidCol = 8
 	const sizeCol = 8
@@ -339,8 +368,9 @@ func renderTreeHeader(st themeStyles, maxWidth int) string {
 
 	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
 	sizeMeta := diffGlyphCol + sizeCol + colGap
-	showPerms := maxWidth >= fullMeta+minNameSpace
-	showSize := maxWidth >= sizeMeta+minNameSpace
+	compactMeta := len(compact) > 0 && compact[0]
+	showPerms := !compactMeta && maxWidth >= fullMeta+minNameSpace
+	showSize := !compactMeta && maxWidth >= sizeMeta+minNameSpace
 
 	var header string
 	if showPerms {
@@ -370,7 +400,7 @@ func renderFilterBar(st themeStyles, active bool, query string, matchCount int, 
 	return renderQueryBar(st, query, false, matches, hint, maxWidth)
 }
 
-func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string) string {
+func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string, compact ...bool) string {
 	perms := image.FormatMode(f.Mode)
 	uidGid := fmt.Sprintf("%d:%d", f.UID, f.GID)
 	flat := !treeMode
@@ -385,8 +415,9 @@ func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected boo
 	const minNameSpace = minTreeNameWidth
 	fullMeta := diffGlyphCol + permCol + uidGidCol + sizeCol + colGap*3
 	sizeMeta := diffGlyphCol + sizeCol + colGap
-	showPerms := maxWidth >= fullMeta+minNameSpace
-	showSize := maxWidth >= sizeMeta+minNameSpace
+	compactMeta := len(compact) > 0 && compact[0]
+	showPerms := !compactMeta && maxWidth >= fullMeta+minNameSpace
+	showSize := !compactMeta && maxWidth >= sizeMeta+minNameSpace
 
 	var metaWidth int
 	if showPerms {
@@ -617,7 +648,7 @@ func applySortBySize(files []*image.FileNode, mode sortMode) []*image.FileNode {
 	}
 	sorted := make([]*image.FileNode, len(files))
 	copy(sorted, files)
-	sort.Slice(sorted, func(i, j int) bool {
+	sort.SliceStable(sorted, func(i, j int) bool {
 		si, sj := sorted[i].EffectiveSize, sorted[j].EffectiveSize
 		if mode == sortDesc {
 			return si > sj
@@ -625,6 +656,16 @@ func applySortBySize(files []*image.FileNode, mode sortMode) []*image.FileNode {
 		return si < sj
 	})
 	return sorted
+}
+
+func regularFiles(files []*image.FileNode) []*image.FileNode {
+	result := make([]*image.FileNode, 0, len(files))
+	for _, f := range files {
+		if !f.IsDir {
+			result = append(result, f)
+		}
+	}
+	return result
 }
 
 func nodeEffectiveSize(n *image.FileNode) int64 {
