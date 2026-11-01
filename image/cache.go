@@ -24,22 +24,24 @@ import (
 // CacheDir does not create the directory; saveCache creates digest
 // subdirectories on demand with mode 0700.
 func CacheDir() (string, error) {
+	return cacheDir(func(message string) { fmt.Fprintln(os.Stderr, "layerx: "+message) })
+}
+
+// cacheDir lets analysis route diagnostics through progress instead of writing
+// over an interactive terminal. Standalone cache commands retain stderr output.
+func cacheDir(warn func(string)) (string, error) {
 	if override := os.Getenv("LAYERX_CACHE_DIR"); override != "" {
 		expanded, expandErr := expandHome(override)
 		if expandErr != nil {
-			fmt.Fprintf(os.Stderr,
-				"layerx: ignoring LAYERX_CACHE_DIR=%q (%v); falling back to default\n",
-				override, expandErr)
+			warn(fmt.Sprintf("ignoring LAYERX_CACHE_DIR=%q (%v); falling back to default", override, expandErr))
 		} else {
 			if usable, _ := dirIsUsable(expanded); usable {
 				return expanded, nil
 			}
 			// Bad override is non-fatal but the user almost certainly wants to
 			// know — they set the env var on purpose. Fall back to the default
-			// after warning once on stderr.
-			fmt.Fprintf(os.Stderr,
-				"layerx: ignoring LAYERX_CACHE_DIR=%q (not a usable directory); falling back to default\n",
-				override)
+			// after reporting the warning to the caller.
+			warn(fmt.Sprintf("ignoring LAYERX_CACHE_DIR=%q (not a usable directory); falling back to default", override))
 		}
 	}
 	uc, err := os.UserCacheDir()

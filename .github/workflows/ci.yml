@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, 'feat/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'feat/interactive-compare']
 
 # Least-privilege default. No job in this workflow needs write scopes.
 permissions:

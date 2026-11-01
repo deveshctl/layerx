@@ -65,9 +65,12 @@ func AnalyzeWithProgress(ctx context.Context, resolver Resolver, imageRef string
 // either way. ImageRef is taken from imageRef (the current arg), never from
 // the envelope.
 func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string, opts AnalyzeOptions) (*Analysis, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cacheRoot := opts.CacheRoot
 	if cacheRoot == "" {
-		root, err := CacheDir()
+		root, err := cacheDir(func(message string) { emitCacheWarn(opts.Progress, message) })
 		if err == nil {
 			cacheRoot = root
 		}
@@ -76,6 +79,9 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	}
 
 	digest, digestErr := resolver.ImageID(ctx, imageRef)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	canCache := digestErr == nil && digest != "" && cacheRoot != ""
 
 	var (
@@ -95,11 +101,17 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	}
 
 	if !fromCache {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fresh, err := resolver.ResolveWithProgress(ctx, imageRef, opts.Progress)
 		if err != nil {
 			return nil, err
 		}
 		layers = fresh
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
 		// Re-read ImageID after the resolve. Two reasons:
 		//  1. The image may not have been local before; ResolveWithProgress
@@ -109,6 +121,9 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		//     digest disagrees with pre-resolve, we don't know which set
 		//     of layers we actually exported, so refuse to cache.
 		postDigest, postErr := resolver.ImageID(ctx, imageRef)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if cacheRoot != "" {
 			switch {
 			case postErr != nil || postDigest == "":
@@ -133,9 +148,18 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		}
 	}
 
-	stacked := Stack(layers)
-	aggregated := BuildAggregatedTrees(layers)
+	stacked, err := stackContext(ctx, layers)
+	if err != nil {
+		return nil, err
+	}
+	aggregated, err := aggregatedTreesContext(ctx, layers)
+	if err != nil {
+		return nil, err
+	}
 	assignNetDeltas(layers, stacked)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	var totalSize, uncompressedSize int64
 	var platform string
@@ -151,6 +175,9 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		if meta, err := resolver.Inspect(ctx, imageRef); err == nil && meta != nil {
 			platform = meta.Platform
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return &Analysis{
 		ImageRef:         imageRef,
