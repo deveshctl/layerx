@@ -13,6 +13,7 @@ import (
 
 	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +76,11 @@ Reads size-budget and theme from .layerx.yaml; --config selects another file.
 Flags override size budgets. CI efficiency thresholds and path rules apply
 only to ci; compare retains its efficiency/waste regression checks.
 Size budgets measure uncompressed layer tar bytes. File differences compare
-size and metadata, not file contents. Use --format json or markdown for reports.`,
+size and metadata, not file contents. Use --format json or markdown for reports.
+
+Use -i to load both images concurrently with cancellable terminal progress,
+then print the comparison report. Requires terminal input and output; cannot
+be combined with --mode, --top, or non-text --format.`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
   layerx compare --mode full app:1.4.0 app:1.5.0
@@ -89,6 +94,7 @@ size and metadata, not file contents. Use --format json or markdown for reports.
 }
 
 func init() {
+	compareCmd.Flags().BoolP("interactive", "i", false, "load both images with interactive progress (requires a terminal)")
 	compareCmd.Flags().StringVar(&flagCompareMode, "mode", compareModeCompact,
 		"report detail: compact, full, or summary")
 	compareCmd.Flags().IntVar(&flagCompareTop, "top", compareTopDefault,
@@ -138,6 +144,10 @@ func runCompareCmd(cmd *cobra.Command, args []string) error {
 
 func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	oldRef, newRef := args[0], args[1]
+	if err := validateInteractiveCompare(cmd); err != nil {
+		return err
+	}
+	interactive, _ := cmd.Flags().GetBool("interactive")
 
 	if err := validateCompareFlags(flagCompareMode, flagCompareTop); err != nil {
 		return err
@@ -172,13 +182,28 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("preparing new image %q: %w", newRef, err)
 	}
 
-	oldDigest, oldAnalysis, err := analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
-	if err != nil {
-		return fmt.Errorf("analyzing old image %q: %w", oldRef, err)
-	}
-	newDigest, newAnalysis, err := analyzeForCompare(ctx, newResolver, newRef, noCache, "new", stderr)
-	if err != nil {
-		return fmt.Errorf("analyzing new image %q: %w", newRef, err)
+	var oldDigest, newDigest string
+	var oldAnalysis, newAnalysis *image.Analysis
+	if interactive {
+		pair, runErr := tui.RunCompareAnalysis(ctx, tui.CompareConfig{
+			Inputs:  [2]image.CompareInput{{Ref: oldRef, Resolver: oldResolver}, {Ref: newRef, Resolver: newResolver}},
+			Options: image.CompareRunOptions{NoCache: noCache, Platform: activePlatformDisplay()},
+			Theme:   themeName, Input: cmd.InOrStdin(), Output: out,
+		})
+		if runErr != nil {
+			return runErr
+		}
+		oldDigest, oldAnalysis = pair[0].Digest, pair[0].Analysis
+		newDigest, newAnalysis = pair[1].Digest, pair[1].Analysis
+	} else {
+		oldDigest, oldAnalysis, err = analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
+		if err != nil {
+			return fmt.Errorf("analyzing old image %q: %w", oldRef, err)
+		}
+		newDigest, newAnalysis, err = analyzeForCompare(ctx, newResolver, newRef, noCache, "new", stderr)
+		if err != nil {
+			return fmt.Errorf("analyzing new image %q: %w", newRef, err)
+		}
 	}
 
 	if limits.Growth != nil {

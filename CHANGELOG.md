@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `compare -i` loads both images concurrently with cancellable terminal progress before showing the comparison report.
 - PR checklist and bug report and feature request forms, with guidance for private security reports.
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
