@@ -110,7 +110,10 @@ func (m compareModel) filePageSize() int {
 	if m.fileHelp {
 		extra++
 	}
-	return max(1, m.height-8-extra)
+	if m.fileIndex == nil {
+		extra++
+	}
+	return max(1, m.height-6-extra)
 }
 
 func (m *compareModel) adjustFileViewport() {
@@ -135,6 +138,7 @@ func (m compareModel) fileDiffAt(row int) image.FileDiff {
 func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
 	if msg.Code == '/' {
 		m.fileFiltering = true
+		m.adjustFileViewport()
 		return
 	}
 	if msg.Code == tea.KeyEscape {
@@ -207,7 +211,11 @@ func (m compareModel) fileBrowserView() tea.View {
 		lines = append(lines, "Building file views…")
 	}
 	if m.fileCount() == 0 {
-		lines = append(lines, "No file changes")
+		if m.fileFilter != "" {
+			lines = append(lines, "No matching paths; Esc clears filter")
+		} else {
+			lines = append(lines, "No file changes")
+		}
 	}
 	for row := m.fileOffset; row < min(m.fileCount(), m.fileOffset+m.filePageSize()); row++ {
 		d := m.fileDiffAt(row)
@@ -216,25 +224,29 @@ func (m compareModel) fileBrowserView() tea.View {
 			marker = ">"
 		}
 		kind := [4]string{"  same", "+ added", "~ changed", "- removed"}[d.DiffType]
-		line := fmt.Sprintf("%s %-7s %s  ", marker, styleWithFg([4]color.Color{m.theme.Unchanged, m.theme.Added, m.theme.Modified, m.theme.Removed}[d.DiffType]).Render(kind), signedBytes(d.SizeDelta))
-		if m.fileMetadata {
-			line += "  [" + d.ChangeReason + "]"
-			if m.fileIndex != nil {
-				line += "  " + compareFileMeta(m.fileIndex.before[d.Path]) + " → " + compareFileMeta(m.fileIndex.after[d.Path])
-			}
-		}
+		line := fmt.Sprintf("%s %s %s  ", marker, styleWithFg([4]color.Color{m.theme.Unchanged, m.theme.Added, m.theme.Modified, m.theme.Removed}[d.DiffType]).Render(compareColumn(kind, 9)), signedBytes(d.SizeDelta))
 		if m.fileSort == 0 {
 			line += "  " + strings.Repeat("  ", min(6, max(0, strings.Count(d.Path, "/")-1)))
 		} else {
 			line += "  "
 		}
 		line += strconv.Quote(d.Path)
+		if m.fileMetadata {
+			line += "  [" + d.ChangeReason + "]"
+			if m.fileIndex != nil {
+				line += "  " + compareFileMeta(m.fileIndex.before[d.Path]) + " → " + compareFileMeta(m.fileIndex.after[d.Path])
+			}
+		}
 		if row == m.fileCursor {
 			line = styleWithFg(m.theme.Selected).Background(m.theme.SelectedBg).Render(line)
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, fmt.Sprintf("%d/%d  Enter/v content  Tab/1/2 view  / filter  s order  m metadata  ↑↓/PgUp/PgDn move  ? help  q exit", min(m.fileCursor+1, m.fileCount()), m.fileCount()))
+	footer := "Enter content  / filter  q exit  ? help"
+	if m.width >= 80 {
+		footer = fmt.Sprintf("%d/%d  Enter content  / filter  s sort  m metadata  Tab views  ↑↓ move  ? help  q exit", min(m.fileCursor+1, m.fileCount()), m.fileCount())
+	}
+	lines = append(lines, footer)
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
@@ -269,6 +281,7 @@ func (m *compareModel) updateFileFilter(msg tea.KeyPressMsg) {
 	switch msg.Code {
 	case tea.KeyEnter:
 		m.fileFiltering = false
+		m.adjustFileViewport()
 		return
 	case tea.KeyEscape:
 		m.fileFiltering = false

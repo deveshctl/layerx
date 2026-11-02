@@ -28,6 +28,7 @@ type compareContentRow struct {
 type compareContent struct {
 	path, note, metadata string
 	rows                 []compareContentRow
+	maxWidth             int
 }
 
 type compareContentMsg struct {
@@ -217,7 +218,30 @@ func compareContentDiff(before, after []byte) ([]compareContentRow, error) {
 	return rows, nil
 }
 
-func (m compareModel) contentPageSize() int { return max(1, m.height-5) }
+func (m compareModel) contentPageSize() int {
+	if m.width < 80 {
+		return max(1, m.height-4)
+	}
+	return max(1, m.height-5)
+}
+
+func (m compareModel) contentColumnWidth() int { return max(0, (m.width-5)/2) }
+
+func (m *compareModel) clampContentScroll() {
+	if m.content == nil {
+		return
+	}
+	if m.content.maxWidth == 0 {
+		for _, row := range m.content.rows {
+			m.content.maxWidth = max(m.content.maxWidth, ansi.StringWidth(strconv.Quote(row.before)), ansi.StringWidth(strconv.Quote(row.after)))
+		}
+	}
+	available := max(1, m.width-3)
+	if m.width >= 80 {
+		available = max(1, m.contentColumnWidth()-5)
+	}
+	m.contentHOffset = min(m.contentHOffset, max(0, m.content.maxWidth-available))
+}
 
 func (m *compareModel) adjustContentViewport() {
 	if m.content == nil {
@@ -229,6 +253,7 @@ func (m *compareModel) adjustContentViewport() {
 		m.contentOffset = m.contentCursor - m.contentPageSize() + 1
 	}
 	m.contentOffset = max(0, m.contentOffset)
+	m.clampContentScroll()
 }
 
 func (m *compareModel) updateContentKeys(msg tea.KeyPressMsg) {
@@ -239,7 +264,7 @@ func (m *compareModel) updateContentKeys(msg tea.KeyPressMsg) {
 	case msg.Code == 'h' || msg.Code == tea.KeyLeft:
 		m.contentHOffset = max(0, m.contentHOffset-8)
 	case msg.Code == 'l' || msg.Code == tea.KeyRight:
-		m.contentHOffset = min(compareContentMaxLineBytes*4, m.contentHOffset+8)
+		m.contentHOffset += 8
 	case key.Matches(msg, m.keys.Down):
 		m.contentCursor++
 	case key.Matches(msg, m.keys.Up):
@@ -271,7 +296,7 @@ func (m compareModel) contentView() tea.View {
 		if c.note == "" {
 			wide := m.width >= 80
 			if wide {
-				lines = append(lines, "  Image A                                      │ Image B")
+				lines = append(lines, "  "+compareColumn("Image A", m.contentColumnWidth())+" │ Image B")
 			}
 			for i := m.contentOffset; i < min(len(c.rows), m.contentOffset+m.contentPageSize()); i++ {
 				r := c.rows[i]
@@ -280,7 +305,7 @@ func (m compareModel) contentView() tea.View {
 					marker = ">"
 				}
 				if wide {
-					column := max(12, (m.width-16)/2)
+					column := m.contentColumnWidth()
 					left, right := "", ""
 					if r.beforeLine > 0 {
 						left = fmt.Sprintf("%4d %s", r.beforeLine, ansi.Cut(strconv.Quote(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
@@ -288,7 +313,7 @@ func (m compareModel) contentView() tea.View {
 					if r.afterLine > 0 {
 						right = fmt.Sprintf("%4d %s", r.afterLine, ansi.Cut(strconv.Quote(r.after), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
-					lines = append(lines, fmt.Sprintf("%s %-*s │ %-*s", marker, column, ansi.Truncate(left, column, "…"), column, ansi.Truncate(right, column, "…")))
+					lines = append(lines, marker+" "+compareColumn(left, column)+" │ "+compareColumn(right, column))
 				} else {
 					if r.beforeLine > 0 && r.afterLine == 0 {
 						lines = append(lines, marker+"- "+ansi.Cut(strconv.Quote(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
@@ -315,7 +340,7 @@ func (m compareModel) contentView() tea.View {
 			}
 		}
 	}
-	lines = append(lines, "h/l or arrows scroll horizontally; Esc return")
+	lines = append(lines, fmt.Sprintf("Esc/q back  h/l scroll  ↑↓ move  col %d", m.contentHOffset+1))
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}

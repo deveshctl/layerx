@@ -187,3 +187,28 @@ func TestCompareContentHorizontalScroll(t *testing.T) {
 		assert.Zero(t, m.contentHOffset)
 	}
 }
+
+func TestCompareContentScrollBoundsAndColumnAlignment(t *testing.T) {
+	for _, width := range []int{40, 80, 111} {
+		m := compareModel{keys: defaultKeys(), theme: themeFor(""), width: width, height: 10, content: &compareContent{rows: []compareContentRow{{before: "日本語", after: strings.Repeat("x", 120) + "END", beforeLine: 1, afterLine: 1}}}}
+		for range 40 {
+			m.updateContentKeys(tea.KeyPressMsg{Code: 'l'})
+		}
+		end := m.contentHOffset
+		m.updateContentKeys(tea.KeyPressMsg{Code: 'l'})
+		assert.Equal(t, end, m.contentHOffset)
+		assert.Contains(t, ansi.Strip(m.contentView().Content), "END")
+		m.width = 400
+		m.adjustContentViewport()
+		assert.Zero(t, m.contentHOffset)
+		m.width = width
+		lines := strings.Split(ansi.Strip(m.contentView().Content), "\n")
+		if width >= 80 {
+			header := strings.SplitN(lines[3], "│", 2)
+			row := strings.SplitN(lines[4], "│", 2)
+			require.Len(t, header, 2)
+			require.Len(t, row, 2)
+			assert.Equal(t, ansi.StringWidth(header[0]), ansi.StringWidth(row[0]))
+		}
+	}
+}

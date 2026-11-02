@@ -115,6 +115,10 @@ func compareTick() tea.Cmd {
 
 func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		if m.fileView && m.fileFiltering && !m.contentOpen {
+			m.updateFileFilter(tea.KeyPressMsg{Text: msg.Content})
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.adjustViewport()
@@ -152,6 +156,7 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, m.keys.Help) {
 				if m.fileView {
 					m.fileHelp = !m.fileHelp
+					m.adjustFileViewport()
 				} else {
 					m.help = !m.help
 					m.adjustViewport()
@@ -351,7 +356,7 @@ func (m compareModel) browserView() tea.View {
 		left, right := compareLayerText(d.BeforeIndex, d.BeforeCommand), compareLayerText(d.AfterIndex, d.AfterCommand)
 		if wide {
 			column := max(12, (m.width-20)/2)
-			lines = append(lines, fmt.Sprintf("%s %-*s %-*s %s", marker, column, ansi.Truncate(left, column, "…"), column, ansi.Truncate(right, column, "…"), compareMatch(d.Match)))
+			lines = append(lines, fmt.Sprintf("%s %s %s %s", marker, compareColumn(left, column), compareColumn(right, column), compareMatch(d.Match)))
 		} else {
 			lines = append(lines, fmt.Sprintf("%s %s ↔ %s | %s | %+d B", marker, compareLayerNumber(d.BeforeIndex), compareLayerNumber(d.AfterIndex), compareMatch(d.Match), d.SizeDelta))
 		}
@@ -473,4 +478,10 @@ func (m compareModel) compareDelta(delta int64) string {
 		color = m.theme.Added
 	}
 	return styleWithFg(color).Render(signedBytes(delta))
+}
+
+// Pad by terminal cells, including wide Unicode and styled content.
+func compareColumn(text string, width int) string {
+	text = ansi.Truncate(text, max(0, width), "…")
+	return text + strings.Repeat(" ", max(0, width-ansi.StringWidth(text)))
 }

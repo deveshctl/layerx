@@ -152,3 +152,29 @@ func TestComparePathFilter(t *testing.T) {
 	assert.Zero(t, m.fileCount())
 	assert.NotPanics(t, func() { m.updateFileKeys(tea.KeyPressMsg{Code: 's'}) })
 }
+
+func TestCompareFilterPasteAndHelpViewport(t *testing.T) {
+	diffs := make([]image.FileDiff, 20)
+	for i := range diffs {
+		diffs[i] = image.FileDiff{Path: fmt.Sprintf("/path/%02d", i)}
+	}
+	m := compareModel{result: &image.CompareResult{FileDiffs: diffs}, keys: defaultKeys(), theme: themeFor(""), fileView: true, width: 40, height: 10}
+	m.fileIndex = buildCompareFileIndex(t.Context(), diffs, [2]image.CompareImage{})().(compareFileIndexMsg).index
+	for range 5 {
+		m.updateFileKeys(tea.KeyPressMsg{Code: 'j'})
+	}
+	next, _ := m.Update(tea.KeyPressMsg{Code: '?'})
+	m = next.(compareModel)
+	assert.Contains(t, ansi.Strip(m.View().Content), "/path/05")
+	next, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+	m = next.(compareModel)
+	assert.Contains(t, ansi.Strip(m.View().Content), "/path/05")
+	next, _ = m.Update(tea.PasteMsg{Content: "/path/19"})
+	m = next.(compareModel)
+	assert.Equal(t, 1, m.fileCount())
+	assert.Equal(t, "/path/19", m.fileDiffAt(0).Path)
+	m.fileFilter = "missing"
+	m.rebuildFileFilter()
+	assert.Contains(t, ansi.Strip(m.View().Content), "No matching paths")
+	assert.Contains(t, ansi.Strip(m.View().Content), "q exit")
+}
