@@ -72,6 +72,12 @@ type Extractor interface {
 	ExtractRawFromLayer(ctx context.Context, imageRef string, filePath string, layerCursor int) ([]byte, error)
 }
 
+// BoundedLayerExtractor reads a regular file without allocating beyond maxBytes
+// for that file. Comparison uses this separately from the viewer's 1 MiB cap.
+type BoundedLayerExtractor interface {
+	ExtractBoundedFromLayer(ctx context.Context, imageRef, filePath string, layerCursor int, maxBytes int64) ([]byte, error)
+}
+
 // IsBinary reports whether data appears to be binary content.
 // Trusts net/http content detection for text/* (covering UTF-8/16/32 with BOMs)
 // and only falls back to null-byte scanning when detection is inconclusive.
@@ -301,7 +307,14 @@ type blobLoader func(name string) ([]byte, error)
 // every kept blob until the function returned, which OOMed on multi-GB
 // images.
 func walkBackForFile(layerPaths []string, load blobLoader, cleanPath, displayPath string, layerCursor int) ([]byte, error) {
+	return walkBackForFileBounded(context.Background(), layerPaths, load, cleanPath, displayPath, layerCursor, MaxSaveSize)
+}
+
+func walkBackForFileBounded(ctx context.Context, layerPaths []string, load blobLoader, cleanPath, displayPath string, layerCursor int, maxBytes int64) ([]byte, error) {
 	for j := layerCursor; j >= 0; j-- {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		blob, err := load(layerPaths[j])
 		if err != nil {
 			return nil, err
@@ -309,7 +322,7 @@ func walkBackForFile(layerPaths []string, load blobLoader, cleanPath, displayPat
 		if blob == nil {
 			continue
 		}
-		data, found, err := findFileInLayer(blob, cleanPath)
+		data, found, err := findFileInLayerBounded(ctx, blob, cleanPath, maxBytes)
 		if errors.Is(err, errWhiteoutStop) {
 			return nil, fmt.Errorf("file %s was removed in layer %d", displayPath, j)
 		}
@@ -473,6 +486,10 @@ func readSingleBlobFromSpool(spool *os.File, wanted string) ([]byte, error) {
 //     caller can read. The caller must NOT fall through to older layers; the
 //     effective state at this layer is the non-regular entry.
 func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
+	return findFileInLayerBounded(context.Background(), layerBytes, filePath, MaxSaveSize)
+}
+
+func findFileInLayerBounded(ctx context.Context, layerBytes []byte, filePath string, maxBytes int64) ([]byte, bool, error) {
 	r, err := decompressIfGzip(layerBytes)
 	if err != nil {
 		return nil, false, fmt.Errorf("decompressing layer: %w", err)
@@ -502,6 +519,9 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 		foundRegular bool
 	)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			break
@@ -549,19 +569,17 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 			continue
 		}
 
-		// Bound the read so a crafted tar (header.Size inflated, or stream
-		// longer than declared) can't OOM the process. Mirrors the cap in
-		// readFullFileFromTar — fail-fast on header, then LimitReader as
-		// belt-and-braces for streams that exceed their declared size.
-		if hdr.Size > MaxSaveSize {
-			return nil, false, fmt.Errorf("file too large to extract: %d bytes (limit %d)", hdr.Size, MaxSaveSize)
+		// Bound the read so a crafted tar cannot allocate beyond the caller's
+		// file limit. Check the header first, then cap the stream read too.
+		if hdr.Size > maxBytes {
+			return nil, false, fmt.Errorf("file too large to extract: %d bytes (limit %d)", hdr.Size, maxBytes)
 		}
-		data, err := io.ReadAll(io.LimitReader(tr, MaxSaveSize+1))
+		data, err := io.ReadAll(io.LimitReader(tr, maxBytes+1))
 		if err != nil {
 			return nil, false, fmt.Errorf("reading file from layer: %w", err)
 		}
-		if int64(len(data)) > MaxSaveSize {
-			return nil, false, fmt.Errorf("file too large to extract: exceeds %d bytes", MaxSaveSize)
+		if int64(len(data)) > maxBytes {
+			return nil, false, fmt.Errorf("file too large to extract: exceeds %d bytes", maxBytes)
 		}
 		regularData = data
 		foundRegular = true
@@ -647,4 +665,23 @@ func (e *DockerExtractor) ExtractRawFromLayer(ctx context.Context, imageRef stri
 	}
 
 	return walkBackForFile(layerPaths, load, cleanPath, filePath, layerCursor)
+}
+
+func (e *DockerExtractor) ExtractBoundedFromLayer(ctx context.Context, imageRef, filePath string, layerCursor int, maxBytes int64) ([]byte, error) {
+	if layerCursor < 0 || maxBytes < 0 || maxBytes > MaxSaveSize {
+		return nil, fmt.Errorf("invalid bounded extraction request")
+	}
+	layerPaths, load, closeFn, err := e.loadLayerSource(ctx, imageRef, layerCursor+1)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+	if layerCursor >= len(layerPaths) {
+		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
+	}
+	cleanPath := cleanTarPath(filePath)
+	if cleanPath == "" {
+		return nil, fmt.Errorf("invalid file path: %s", filePath)
+	}
+	return walkBackForFileBounded(ctx, layerPaths, load, cleanPath, filePath, layerCursor, maxBytes)
 }
