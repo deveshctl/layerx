@@ -132,6 +132,8 @@ func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
 		}
 	} else if msg.Code == 'm' {
 		m.fileMetadata = !m.fileMetadata
+	} else if key.Matches(msg, m.keys.Help) {
+		m.fileHelp = !m.fileHelp
 	} else {
 		switch {
 		case key.Matches(msg, m.keys.Down):
