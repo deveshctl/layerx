@@ -114,7 +114,10 @@ func TestCompareLoadingProgramCompletes(t *testing.T) {
 	session := newCompareSession(ctx, cfg)
 	defer session.close()
 	m := compareModel{session: session, keys: defaultKeys(), theme: themeFor(""), width: 80, height: 24}
-	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(nil), tea.WithOutput(io.Discard),
+	input, output := io.Pipe()
+	defer input.Close()
+	go func() { <-session.done; _, _ = output.Write([]byte("q")); _ = output.Close() }()
+	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(io.Discard),
 		tea.WithoutRenderer(), tea.WithoutSignalHandler())
 	_, err := p.Run()
 	require.NoError(t, err)
@@ -146,4 +149,53 @@ func TestCompareProgressRendering(t *testing.T) {
 	// Tiny or not-yet-sized terminals must not panic.
 	m.width, m.height = 0, 0
 	assert.NotPanics(t, func() { m.View() })
+}
+
+func TestCompareBrowserPairsAndNavigation(t *testing.T) {
+	before := &image.Analysis{Layers: []image.Layer{
+		{Index: 0, DiffID: "a", Command: "base"},
+		{Index: 1, DiffID: "b", Command: "build"},
+		{Index: 2, Command: "only A"},
+	}}
+	after := &image.Analysis{Layers: []image.Layer{
+		{Index: 0, DiffID: "b", Command: "build"},
+		{Index: 1, DiffID: "a", Command: "base"},
+		{Index: 2, Command: "only B"},
+	}}
+	m := compareModel{result: image.CompareAnalysis(before, after), keys: defaultKeys(), theme: themeFor(""), width: 100, height: 12}
+	out := m.View().Content
+	assert.Contains(t, out, "shared DiffID")
+	assert.Contains(t, out, "#2 \"build\"")
+	assert.Contains(t, out, "— absent")
+	assert.Equal(t, 1, m.result.LayerDiffs[0].BeforeIndex)
+	m.height = 8
+	for range 30 {
+		next, _ := m.Update(tea.KeyPressMsg{Code: 'j'})
+		m = next.(compareModel)
+	}
+	assert.Equal(t, len(m.result.LayerDiffs)-1, m.cursor)
+	assert.Greater(t, m.offset, 0)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 5})
+	m = next.(compareModel)
+	for _, line := range strings.Split(m.View().Content, "\n") {
+		assert.LessOrEqual(t, ansi.StringWidth(line), 30)
+	}
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'g'})
+	m = next.(compareModel)
+	assert.Zero(t, m.cursor)
+	assert.Zero(t, m.offset)
+}
+
+func TestCompareBrowserEmptyAndAsymmetric(t *testing.T) {
+	m := compareModel{result: image.CompareAnalysis(&image.Analysis{}, &image.Analysis{}), theme: themeFor(""), width: 40, height: 10}
+	assert.Contains(t, m.View().Content, "No layers")
+	before := &image.Analysis{Layers: []image.Layer{{Command: "old"}}}
+	after := &image.Analysis{Layers: make([]image.Layer, 25)}
+	for i := range after.Layers {
+		after.Layers[i].Command = "new"
+	}
+	m.result = image.CompareAnalysis(before, after)
+	assert.Len(t, m.result.LayerDiffs, 26)
+	assert.Equal(t, "— absent", compareLayerNumber(m.result.LayerDiffs[0].BeforeIndex))
+	assert.Equal(t, "command match?", compareMatch("command"))
 }

@@ -78,8 +78,8 @@ only to ci; compare retains its efficiency/waste regression checks.
 Size budgets measure uncompressed layer tar bytes. File differences compare
 size and metadata, not file contents. Use --format json or markdown for reports.
 
-Use -i to load both images concurrently with cancellable terminal progress,
-then print the comparison report. Requires terminal input and output; cannot
+Use -i to browse paired layers and file changes, and inspect bounded text
+differences before printing the report. Requires terminal input and output; cannot
 be combined with --mode, --top, or non-text --format.`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
@@ -94,7 +94,7 @@ be combined with --mode, --top, or non-text --format.`,
 }
 
 func init() {
-	compareCmd.Flags().BoolP("interactive", "i", false, "load both images with interactive progress (requires a terminal)")
+	compareCmd.Flags().BoolP("interactive", "i", false, "browse layer and file differences (requires a terminal)")
 	compareCmd.Flags().StringVar(&flagCompareMode, "mode", compareModeCompact,
 		"report detail: compact, full, or summary")
 	compareCmd.Flags().IntVar(&flagCompareTop, "top", compareTopDefault,

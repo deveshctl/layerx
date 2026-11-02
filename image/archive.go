@@ -329,6 +329,31 @@ func (e *ArchiveExtractor) ExtractRawFromLayer(ctx context.Context, imageRef str
 	return walkBackForFile(layerPaths, load, cleanPath, filePath, layerCursor)
 }
 
+func (e *ArchiveExtractor) ExtractBoundedFromLayer(ctx context.Context, imageRef, filePath string, layerCursor int, maxBytes int64) ([]byte, error) {
+	if layerCursor < 0 || maxBytes < 0 || maxBytes > MaxSaveSize {
+		return nil, fmt.Errorf("invalid bounded extraction request")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	layerPaths, load, closeFn, err := e.loadLayerSource(layerCursor + 1)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if layerCursor >= len(layerPaths) {
+		return nil, fmt.Errorf("layer index %d out of range (have %d)", layerCursor, len(layerPaths))
+	}
+	cleanPath := cleanTarPath(filePath)
+	if cleanPath == "" {
+		return nil, fmt.Errorf("invalid file path: %s", filePath)
+	}
+	return walkBackForFileBounded(ctx, layerPaths, load, cleanPath, filePath, layerCursor, maxBytes)
+}
+
 // loadLayerSource opens the archive and returns the manifest's Layers slice
 // plus a lazy blob loader scoped to the first maxLayers entries. The caller
 // MUST defer closeFn to release the file handle.
