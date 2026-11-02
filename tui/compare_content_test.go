@@ -169,3 +169,21 @@ func TestCompareContentCloseCancelsRequestAndIgnoresResult(t *testing.T) {
 	assert.Nil(t, m.content)
 	assert.Empty(t, m.contentError)
 }
+
+func TestCompareContentHorizontalScroll(t *testing.T) {
+	for _, width := range []int{40, 100} {
+		m := compareModel{keys: defaultKeys(), theme: themeFor(""), width: width, height: 10, content: &compareContent{rows: []compareContentRow{{after: strings.Repeat("x", 100) + "TARGET", afterLine: 1}}}}
+		assert.NotContains(t, ansi.Strip(m.contentView().Content), "TARGET")
+		for range 12 {
+			m.updateContentKeys(tea.KeyPressMsg{Code: 'l'})
+		}
+		assert.Contains(t, ansi.Strip(m.contentView().Content), "TARGET")
+		for _, line := range strings.Split(m.contentView().Content, "\n") {
+			assert.LessOrEqual(t, ansi.StringWidth(line), width)
+		}
+		for range 20 {
+			m.updateContentKeys(tea.KeyPressMsg{Code: tea.KeyLeft})
+		}
+		assert.Zero(t, m.contentHOffset)
+	}
+}

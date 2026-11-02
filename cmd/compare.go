@@ -80,7 +80,7 @@ Size budgets measure uncompressed layer tar bytes. File differences compare
 size and metadata, not file contents. Use --format json or markdown for reports.
 
 Use -i to browse paired layers and file changes, and inspect bounded text
-differences before printing the report. Requires terminal input and output; cannot
+differences without printing a report on exit. Requires terminal input and output; cannot
 be combined with --mode, --top, or non-text --format.`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
@@ -225,7 +225,7 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	result := image.CompareAnalysis(oldAnalysis, newAnalysis)
-	if !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
+	if !interactive && !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
 		renderNoOp(out, oldDigest)
 		return nil
 	}
@@ -235,6 +235,12 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	report.Before = &before
 	report.Comparison = result
 	report.Passed = report.Passed && !result.IsRegression()
+	if interactive {
+		if !report.Passed {
+			return &ErrCompareRegression{}
+		}
+		return nil
+	}
 	options := terminalCompareOptions(out, themeName)
 	if format != "text" {
 		options.Color = false

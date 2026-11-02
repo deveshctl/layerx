@@ -205,10 +205,10 @@ func TestCompareBrowserShowsBudgetAndKeepsFooter(t *testing.T) {
 	m := compareModel{
 		result: image.CompareAnalysis(&image.Analysis{}, &image.Analysis{}),
 		checks: []sizebudget.Result{{Name: "image size", ActualBytes: 20, LimitBytes: 10, Limit: "10B"}},
-		keys: defaultKeys(), theme: themeFor(""), width: 80, height: 12,
+		keys:   defaultKeys(), theme: themeFor(""), width: 80, height: 12,
 	}
 	out := m.View().Content
-	assert.Contains(t, out, "Verdict: REGRESSION")
+	assert.Contains(t, ansi.Strip(out), "Verdict: REGRESSION")
 	assert.Contains(t, out, "FAIL image size")
 	next, _ := m.Update(tea.KeyPressMsg{Code: '?'})
 	m = next.(compareModel)

@@ -85,6 +85,10 @@ type compareModel struct {
 	fileMetadata   bool
 	fileHelp       bool
 	fileIndex      *compareFileIndex
+	fileFilter     string
+	fileFiltering  bool
+	fileFiltered   []int
+	contentHOffset int
 	fileCursor     int
 	fileOffset     int
 	selectedPath   string
@@ -117,6 +121,19 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.adjustFileViewport()
 		m.adjustContentViewport()
 	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+c" {
+			if m.contentCancel != nil {
+				m.contentCancel()
+			}
+			if m.session != nil {
+				m.session.cancel()
+			}
+			return m, tea.Quit
+		}
+		if m.fileView && m.fileFiltering && !m.contentOpen {
+			m.updateFileFilter(msg)
+			return m, nil
+		}
 		if m.contentOpen {
 			if msg.Code == tea.KeyEscape || key.Matches(msg, m.keys.Quit) {
 				m.closeContent()
@@ -197,9 +214,10 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compareFileIndexMsg:
 		if msg.index != nil {
 			m.fileIndex = msg.index
+			m.rebuildFileFilter()
 			if m.selectedPath != "" {
-				for row, index := range m.fileIndex.order[m.fileSort] {
-					if m.result.FileDiffs[index].Path == m.selectedPath {
+				for row := 0; row < m.fileCount(); row++ {
+					if m.fileDiffAt(row).Path == m.selectedPath {
 						m.fileCursor = row
 						break
 					}
@@ -296,9 +314,9 @@ func (m compareModel) browserView() tea.View {
 	}
 	lines := []string{
 		"Compare images",
-		"Verdict: " + verdict,
-		fmt.Sprintf("Stored %s → %s (%s)   Layers %d → %d (%+d)", image.FormatBytes(r.Before.TotalSize), image.FormatBytes(r.After.TotalSize), signedBytes(r.After.TotalSize-r.Before.TotalSize), r.Before.LayerCount, r.After.LayerCount, r.After.LayerCount-r.Before.LayerCount),
-		fmt.Sprintf("Efficiency %.1f%% → %.1f%% (%+.1f points)   Waste %s → %s (%s)", r.BeforeEfficiency.Score*100, r.AfterEfficiency.Score*100, r.AfterEfficiency.ScoreDelta*100, image.FormatBytes(r.BeforeEfficiency.WastedBytes), image.FormatBytes(r.AfterEfficiency.WastedBytes), signedBytes(r.AfterEfficiency.WastedBytesDelta)),
+		"Verdict: " + m.compareStatus(verdict),
+		fmt.Sprintf("Stored %s → %s (%s)   Layers %d → %d (%+d)", image.FormatBytes(r.Before.TotalSize), image.FormatBytes(r.After.TotalSize), m.compareDelta(r.After.TotalSize-r.Before.TotalSize), r.Before.LayerCount, r.After.LayerCount, r.After.LayerCount-r.Before.LayerCount),
+		fmt.Sprintf("Efficiency %.1f%% → %.1f%% (%+.1f points)   Waste %s → %s (%s)", r.BeforeEfficiency.Score*100, r.AfterEfficiency.Score*100, r.AfterEfficiency.ScoreDelta*100, image.FormatBytes(r.BeforeEfficiency.WastedBytes), image.FormatBytes(r.AfterEfficiency.WastedBytes), m.compareDelta(r.AfterEfficiency.WastedBytesDelta)),
 		"Pairs follow image B order; unmatched A layers follow. Crossed layer numbers are possible.",
 	}
 	for _, check := range m.checks {
@@ -309,7 +327,7 @@ func (m compareModel) browserView() tea.View {
 		lines = append(lines, fmt.Sprintf("%s %s: %s / %s (%s)", status, check.Name, sizebudget.Format(check.ActualBytes), sizebudget.Format(check.LimitBytes), check.Limit))
 	}
 	if m.checkError != "" {
-		lines = append(lines, "Size check: "+m.checkError)
+		lines = append(lines, "Size check: "+strconv.Quote(m.checkError))
 	}
 	if m.help {
 		lines = append(lines, "Tab/1/2 views; ↑↓ or j/k move; PgUp/PgDn page; Ctrl+u/d half page; g/G ends; ? help; q exits")
@@ -337,10 +355,13 @@ func (m compareModel) browserView() tea.View {
 		} else {
 			lines = append(lines, fmt.Sprintf("%s %s ↔ %s | %s | %+d B", marker, compareLayerNumber(d.BeforeIndex), compareLayerNumber(d.AfterIndex), compareMatch(d.Match), d.SizeDelta))
 		}
+		if i == m.cursor {
+			lines[len(lines)-1] = styleWithFg(m.theme.Selected).Background(m.theme.SelectedBg).Render(lines[len(lines)-1])
+		}
 	}
 	lines = append(lines, fmt.Sprintf("%d/%d  Tab/1/2 view  ↑↓ move  ? help  q exit", min(m.cursor+1, len(r.LayerDiffs)), len(r.LayerDiffs)))
 	for i := range lines {
-		lines[i] = ansi.Truncate(ansi.Strip(lines[i]), max(0, m.width), "…")
+		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
@@ -435,4 +456,21 @@ func RunCompareAnalysis(ctx context.Context, cfg CompareConfig) ([2]image.Compar
 	default:
 		return [2]image.CompareImage{}, context.Canceled
 	}
+}
+
+func (m compareModel) compareStatus(status string) string {
+	color := m.theme.Added
+	if status != "PASS" {
+		color = m.theme.Removed
+	}
+	return styleWithFg(color).Bold(true).Render(status)
+}
+func (m compareModel) compareDelta(delta int64) string {
+	color := m.theme.Unchanged
+	if delta > 0 {
+		color = m.theme.Removed
+	} else if delta < 0 {
+		color = m.theme.Added
+	}
+	return styleWithFg(color).Render(signedBytes(delta))
 }

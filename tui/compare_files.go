@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -94,10 +96,22 @@ func (m compareModel) fileCount() int {
 	if m.result == nil {
 		return 0
 	}
+	if m.fileFilter != "" {
+		return len(m.fileFiltered)
+	}
 	return len(m.result.FileDiffs)
 }
 
-func (m compareModel) filePageSize() int { return max(1, m.height-8) }
+func (m compareModel) filePageSize() int {
+	extra := 0
+	if m.fileFiltering || m.fileFilter != "" {
+		extra++
+	}
+	if m.fileHelp {
+		extra++
+	}
+	return max(1, m.height-8-extra)
+}
 
 func (m *compareModel) adjustFileViewport() {
 	m.fileCursor = min(max(0, m.fileCursor), max(0, m.fileCount()-1))
@@ -110,21 +124,34 @@ func (m *compareModel) adjustFileViewport() {
 
 func (m compareModel) fileDiffAt(row int) image.FileDiff {
 	index := row
-	if m.fileIndex != nil {
+	if m.fileFilter != "" {
+		index = m.fileFiltered[row]
+	} else if m.fileIndex != nil {
 		index = m.fileIndex.order[m.fileSort][row]
 	}
 	return m.result.FileDiffs[index]
 }
 
 func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
+	if msg.Code == '/' {
+		m.fileFiltering = true
+		return
+	}
+	if msg.Code == tea.KeyEscape {
+		m.fileFilter = ""
+		m.rebuildFileFilter()
+		m.adjustFileViewport()
+		return
+	}
 	if key.Matches(msg, m.keys.Sort) {
 		if m.fileCount() > 0 {
 			m.selectedPath = m.fileDiffAt(m.fileCursor).Path
 		}
 		m.fileSort = (m.fileSort + 1) % 3
+		m.rebuildFileFilter()
 		if m.fileIndex != nil {
-			for row, index := range m.fileIndex.order[m.fileSort] {
-				if m.result.FileDiffs[index].Path == m.selectedPath {
+			for row := 0; row < m.fileCount(); row++ {
+				if m.fileDiffAt(row).Path == m.selectedPath {
 					m.fileCursor = row
 					break
 				}
@@ -170,6 +197,9 @@ func (m compareModel) fileBrowserView() tea.View {
 		"Directory metadata is not compared.",
 		fmt.Sprintf("Order: %s   Metadata: %t", sortNames[m.fileSort], m.fileMetadata),
 	}
+	if m.fileFiltering || m.fileFilter != "" {
+		lines = append(lines, "Filter /"+strconv.Quote(m.fileFilter)+"  Enter apply; Esc clear")
+	}
 	if m.fileHelp {
 		lines = append(lines, "Enter/v inspects text; Tab/1/2 switches views; s cycles path, growth, shrink; m shows metadata; ? closes help.")
 	}
@@ -185,8 +215,8 @@ func (m compareModel) fileBrowserView() tea.View {
 		if row == m.fileCursor {
 			marker = ">"
 		}
-		kind := [4]string{"same", "added", "changed", "removed"}[d.DiffType]
-		line := fmt.Sprintf("%s %-7s %s  ", marker, kind, signedBytes(d.SizeDelta))
+		kind := [4]string{"  same", "+ added", "~ changed", "- removed"}[d.DiffType]
+		line := fmt.Sprintf("%s %-7s %s  ", marker, styleWithFg([4]color.Color{m.theme.Unchanged, m.theme.Added, m.theme.Modified, m.theme.Removed}[d.DiffType]).Render(kind), signedBytes(d.SizeDelta))
 		if m.fileMetadata {
 			line += "  [" + d.ChangeReason + "]"
 			if m.fileIndex != nil {
@@ -199,11 +229,14 @@ func (m compareModel) fileBrowserView() tea.View {
 			line += "  "
 		}
 		line += strconv.Quote(d.Path)
+		if row == m.fileCursor {
+			line = styleWithFg(m.theme.Selected).Background(m.theme.SelectedBg).Render(line)
+		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, fmt.Sprintf("%d/%d  Enter/v content  Tab/1/2 view  s order  m metadata  ↑↓/PgUp/PgDn move  ? help  q exit", min(m.fileCursor+1, m.fileCount()), m.fileCount()))
+	lines = append(lines, fmt.Sprintf("%d/%d  Enter/v content  Tab/1/2 view  / filter  s order  m metadata  ↑↓/PgUp/PgDn move  ? help  q exit", min(m.fileCursor+1, m.fileCount()), m.fileCount()))
 	for i := range lines {
-		lines[i] = ansi.Truncate(ansi.Strip(lines[i]), max(0, m.width), "…")
+		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
@@ -214,4 +247,40 @@ func compareFileMeta(n *image.FileNode) string {
 		return "— absent"
 	}
 	return fmt.Sprintf("%s uid:%d gid:%d", n.Mode, n.UID, n.GID)
+}
+
+// Rebuild only on edits or sort/index changes, never while rendering or moving.
+func (m *compareModel) rebuildFileFilter() {
+	m.fileFiltered = m.fileFiltered[:0]
+	if m.fileFilter == "" || m.result == nil {
+		return
+	}
+	for row := range m.result.FileDiffs {
+		index := row
+		if m.fileIndex != nil {
+			index = m.fileIndex.order[m.fileSort][row]
+		}
+		if strings.Contains(m.result.FileDiffs[index].Path, m.fileFilter) {
+			m.fileFiltered = append(m.fileFiltered, index)
+		}
+	}
+}
+func (m *compareModel) updateFileFilter(msg tea.KeyPressMsg) {
+	switch msg.Code {
+	case tea.KeyEnter:
+		m.fileFiltering = false
+		return
+	case tea.KeyEscape:
+		m.fileFiltering = false
+		m.fileFilter = ""
+	case tea.KeyBackspace:
+		if len(m.fileFilter) > 0 {
+			_, n := utf8.DecodeLastRuneInString(m.fileFilter)
+			m.fileFilter = m.fileFilter[:len(m.fileFilter)-n]
+		}
+	default:
+		m.fileFilter += msg.Text
+	}
+	m.rebuildFileFilter()
+	m.fileCursor, m.fileOffset = 0, 0
 }

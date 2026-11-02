@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Interactive comparisons now use theme colors, support path filtering and horizontal content scrolling, and exit without repeating the report.
 - Interactive comparisons now show the regression verdict and configured size checks while browsing, with clearer navigation help in small terminals.
 - Interactive comparison now shows image deltas, paired layers, sortable file changes, and bounded text content differences.
 - `compare -i` loads both images concurrently with cancellable terminal progress before showing the comparison report.

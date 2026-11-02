@@ -129,3 +129,26 @@ func BenchmarkCompareFileView150k(b *testing.B) {
 		_ = compareFileBenchmarkModel.View()
 	}
 }
+
+func TestComparePathFilter(t *testing.T) {
+	diffs := []image.FileDiff{{Path: "/etc/nginx.conf", SizeDelta: 1}, {Path: "/lib/libssl", SizeDelta: 4}, {Path: "/etc/hosts", SizeDelta: 2}}
+	index := buildCompareFileIndex(t.Context(), diffs, [2]image.CompareImage{})().(compareFileIndexMsg).index
+	m := compareModel{result: &image.CompareResult{FileDiffs: diffs}, fileIndex: index, keys: defaultKeys(), fileView: true}
+	next, _ := m.Update(tea.KeyPressMsg{Code: '/'})
+	m = next.(compareModel)
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'e', Text: "/etc"})
+	m = next.(compareModel)
+	assert.Equal(t, 2, m.fileCount())
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(compareModel)
+	m.updateFileKeys(tea.KeyPressMsg{Code: 's'})
+	assert.Equal(t, "/etc/hosts", m.fileDiffAt(0).Path)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = next.(compareModel)
+	assert.Equal(t, 3, m.fileCount())
+	m.fileFilter = "no matches"
+	m.rebuildFileFilter()
+	m.adjustFileViewport()
+	assert.Zero(t, m.fileCount())
+	assert.NotPanics(t, func() { m.updateFileKeys(tea.KeyPressMsg{Code: 's'}) })
+}

@@ -43,7 +43,7 @@ func (m compareModel) openContent() (tea.Model, tea.Cmd) {
 	d := m.fileDiffAt(m.fileCursor)
 	m.contentOpen = true
 	m.content, m.contentError = nil, ""
-	m.contentCursor, m.contentOffset = 0, 0
+	m.contentCursor, m.contentOffset, m.contentHOffset = 0, 0, 0
 	m.contentRequest++
 	if m.contentCancel != nil {
 		m.contentCancel()
@@ -236,6 +236,10 @@ func (m *compareModel) updateContentKeys(msg tea.KeyPressMsg) {
 		return
 	}
 	switch {
+	case msg.Code == 'h' || msg.Code == tea.KeyLeft:
+		m.contentHOffset = max(0, m.contentHOffset-8)
+	case msg.Code == 'l' || msg.Code == tea.KeyRight:
+		m.contentHOffset = min(compareContentMaxLineBytes*4, m.contentHOffset+8)
 	case key.Matches(msg, m.keys.Down):
 		m.contentCursor++
 	case key.Matches(msg, m.keys.Up):
@@ -279,30 +283,41 @@ func (m compareModel) contentView() tea.View {
 					column := max(12, (m.width-16)/2)
 					left, right := "", ""
 					if r.beforeLine > 0 {
-						left = fmt.Sprintf("%4d %s", r.beforeLine, strconv.Quote(r.before))
+						left = fmt.Sprintf("%4d %s", r.beforeLine, ansi.Cut(strconv.Quote(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
 					if r.afterLine > 0 {
-						right = fmt.Sprintf("%4d %s", r.afterLine, strconv.Quote(r.after))
+						right = fmt.Sprintf("%4d %s", r.afterLine, ansi.Cut(strconv.Quote(r.after), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
 					lines = append(lines, fmt.Sprintf("%s %-*s │ %-*s", marker, column, ansi.Truncate(left, column, "…"), column, ansi.Truncate(right, column, "…")))
 				} else {
 					if r.beforeLine > 0 && r.afterLine == 0 {
-						lines = append(lines, marker+"- "+strconv.Quote(r.before))
+						lines = append(lines, marker+"- "+ansi.Cut(strconv.Quote(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
 					if r.afterLine > 0 {
 						prefix := "+ "
 						if r.beforeLine > 0 {
 							prefix = "  "
 						}
-						lines = append(lines, marker+prefix+strconv.Quote(r.after))
+						lines = append(lines, marker+prefix+ansi.Cut(strconv.Quote(r.after), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
 				}
+				at := len(lines) - 1
+				style := styleWithFg(m.theme.Unchanged)
+				if r.beforeLine == 0 {
+					style = styleWithFg(m.theme.Added)
+				} else if r.afterLine == 0 {
+					style = styleWithFg(m.theme.Removed)
+				}
+				if i == m.contentCursor {
+					style = style.Background(m.theme.SelectedBg).Bold(true)
+				}
+				lines[at] = style.Render(lines[at])
 			}
 		}
 	}
-	lines = append(lines, "Esc return to files")
+	lines = append(lines, "h/l or arrows scroll horizontally; Esc return")
 	for i := range lines {
-		lines[i] = ansi.Truncate(ansi.Strip(lines[i]), max(0, m.width), "…")
+		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
