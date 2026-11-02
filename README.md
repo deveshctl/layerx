@@ -467,6 +467,9 @@ layerx compare ./build/prev.tar myapp:next
 
 # Show every diff entry instead of the top-N summary
 layerx compare --mode full myapp:old myapp:new
+
+# Browse paired layers, file changes, and bounded text differences
+layerx compare -i ./build/prev.tar ./build/current.tar
 ```
 
 - Reports size, efficiency, layer, file, and waste deltas in a deterministic text report with aligned columns.
@@ -474,6 +477,7 @@ layerx compare --mode full myapp:old myapp:new
 - Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>`, or `verdict: noop reason=path-equal`.
 - Exit codes: `0` no regression, `1` regression detected, `2` operational error.
 - Live progress on stderr while resolving remote images. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating.
+- Interactive mode requires terminal input and output. Both images load concurrently; press `q` or `Ctrl+C` to cancel loading. In the browser, `Tab`, `1`, and `2` switch between layer pairs and file changes; `↑`/`↓`, `j`/`k`, page keys, and `g`/`G` navigate. Press `?` for help. In file changes, `s` sorts, `m` shows metadata, and `Enter` or `v` inspects bounded text content. `Esc` returns from content inspection; `q` exits and prints the normal comparison report and verdict. Use `--mode full` for a noninteractive complete report.
 
 ---
 

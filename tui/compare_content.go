@@ -304,6 +304,6 @@ func (m compareModel) contentView() tea.View {
 	for i := range lines {
 		lines[i] = ansi.Truncate(ansi.Strip(lines[i]), max(0, m.width), "…")
 	}
-	lines = lines[:min(len(lines), max(0, m.height))]
+	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
 }

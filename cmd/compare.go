@@ -13,6 +13,7 @@ import (
 
 	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
@@ -189,6 +190,14 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 			Inputs:  [2]image.CompareInput{{Ref: oldRef, Resolver: oldResolver}, {Ref: newRef, Resolver: newResolver}},
 			Options: image.CompareRunOptions{NoCache: noCache, Platform: activePlatformDisplay()},
 			Theme:   themeName, Input: cmd.InOrStdin(), Output: out,
+			CheckSize: func(before, after *image.Analysis) ([]sizebudget.Result, error) {
+				if limits.Growth != nil {
+					if err := matchingPlatforms(before, after); err != nil {
+						return nil, err
+					}
+				}
+				return limits.Evaluate(budgetConfig, after.UncompressedSize, &before.UncompressedSize)
+			},
 		})
 		if runErr != nil {
 			return runErr
