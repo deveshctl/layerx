@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -198,4 +199,20 @@ func TestCompareBrowserEmptyAndAsymmetric(t *testing.T) {
 	assert.Len(t, m.result.LayerDiffs, 26)
 	assert.Equal(t, "— absent", compareLayerNumber(m.result.LayerDiffs[0].BeforeIndex))
 	assert.Equal(t, "command match?", compareMatch("command"))
+}
+
+func TestCompareBrowserShowsBudgetAndKeepsFooter(t *testing.T) {
+	m := compareModel{
+		result: image.CompareAnalysis(&image.Analysis{}, &image.Analysis{}),
+		checks: []sizebudget.Result{{Name: "image size", ActualBytes: 20, LimitBytes: 10, Limit: "10B"}},
+		keys: defaultKeys(), theme: themeFor(""), width: 80, height: 12,
+	}
+	out := m.View().Content
+	assert.Contains(t, out, "Verdict: REGRESSION")
+	assert.Contains(t, out, "FAIL image size")
+	next, _ := m.Update(tea.KeyPressMsg{Code: '?'})
+	m = next.(compareModel)
+	assert.Contains(t, m.View().Content, "Ctrl+u/d")
+	m.height = 3
+	assert.Contains(t, m.View().Content, "q exit")
 }

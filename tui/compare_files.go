@@ -132,8 +132,6 @@ func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
 		}
 	} else if msg.Code == 'm' {
 		m.fileMetadata = !m.fileMetadata
-	} else if key.Matches(msg, m.keys.Help) {
-		m.fileHelp = !m.fileHelp
 	} else {
 		switch {
 		case key.Matches(msg, m.keys.Down):
@@ -205,7 +203,7 @@ func (m compareModel) fileBrowserView() tea.View {
 	for i := range lines {
 		lines[i] = ansi.Truncate(ansi.Strip(lines[i]), max(0, m.width), "…")
 	}
-	lines = lines[:min(len(lines), max(0, m.height))]
+	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
 }
 

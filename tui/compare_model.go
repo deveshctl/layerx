@@ -13,17 +13,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 )
 
 // CompareConfig supplies streams explicitly so the comparison UI never writes
 // progress to a process-global stderr. After loading, the caller receives the
 // analyses for the comparison report.
 type CompareConfig struct {
-	Inputs  [2]image.CompareInput
-	Options image.CompareRunOptions
-	Theme   string
-	Input   io.Reader
-	Output  io.Writer
+	Inputs    [2]image.CompareInput
+	Options   image.CompareRunOptions
+	Theme     string
+	Input     io.Reader
+	Output    io.Writer
+	CheckSize func(before, after *image.Analysis) ([]sizebudget.Result, error)
 }
 
 // compareSession owns synchronization outside the value-based Bubble Tea model.
@@ -73,6 +75,10 @@ type compareModel struct {
 	width, height  int
 	frame          int
 	result         *image.CompareResult
+	checks         []sizebudget.Result
+	checkSize      func(before, after *image.Analysis) ([]sizebudget.Result, error)
+	checkError     string
+	help           bool
 	cursor, offset int
 	fileView       bool
 	fileSort       int
@@ -126,6 +132,15 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if m.result != nil {
+			if key.Matches(msg, m.keys.Help) {
+				if m.fileView {
+					m.fileHelp = !m.fileHelp
+				} else {
+					m.help = !m.help
+					m.adjustViewport()
+				}
+				return m, nil
+			}
 			if key.Matches(msg, m.keys.Switch) {
 				m.fileView = !m.fileView
 				return m, nil
@@ -170,6 +185,13 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.result = image.CompareAnalysis(m.session.results[0].Analysis, m.session.results[1].Analysis)
+		if m.checkSize != nil {
+			var err error
+			m.checks, err = m.checkSize(m.session.results[0].Analysis, m.session.results[1].Analysis)
+			if err != nil {
+				m.checkError = err.Error()
+			}
+		}
 		m.adjustViewport()
 		return m, buildCompareFileIndex(m.session.ctx, m.result.FileDiffs, m.session.results)
 	case compareFileIndexMsg:
@@ -235,7 +257,16 @@ func (m compareModel) View() tea.View {
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
 }
 
-func (m compareModel) pageSize() int { return max(1, m.height-7) }
+func (m compareModel) pageSize() int {
+	extra := len(m.checks)
+	if m.checkError != "" {
+		extra++
+	}
+	if m.help {
+		extra++
+	}
+	return max(1, m.height-7-extra)
+}
 
 func (m *compareModel) adjustViewport() {
 	if m.result == nil {
@@ -251,11 +282,37 @@ func (m *compareModel) adjustViewport() {
 
 func (m compareModel) browserView() tea.View {
 	r := m.result
+	verdict := "PASS"
+	if r.IsRegression() {
+		verdict = "REGRESSION"
+	}
+	for _, check := range m.checks {
+		if !check.Passed {
+			verdict = "REGRESSION"
+		}
+	}
+	if m.checkError != "" {
+		verdict = "CHECK ERROR"
+	}
 	lines := []string{
 		"Compare images",
+		"Verdict: " + verdict,
 		fmt.Sprintf("Stored %s → %s (%s)   Layers %d → %d (%+d)", image.FormatBytes(r.Before.TotalSize), image.FormatBytes(r.After.TotalSize), signedBytes(r.After.TotalSize-r.Before.TotalSize), r.Before.LayerCount, r.After.LayerCount, r.After.LayerCount-r.Before.LayerCount),
 		fmt.Sprintf("Efficiency %.1f%% → %.1f%% (%+.1f points)   Waste %s → %s (%s)", r.BeforeEfficiency.Score*100, r.AfterEfficiency.Score*100, r.AfterEfficiency.ScoreDelta*100, image.FormatBytes(r.BeforeEfficiency.WastedBytes), image.FormatBytes(r.AfterEfficiency.WastedBytes), signedBytes(r.AfterEfficiency.WastedBytesDelta)),
 		"Pairs follow image B order; unmatched A layers follow. Crossed layer numbers are possible.",
+	}
+	for _, check := range m.checks {
+		status := "PASS"
+		if !check.Passed {
+			status = "FAIL"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s: %s / %s (%s)", status, check.Name, sizebudget.Format(check.ActualBytes), sizebudget.Format(check.LimitBytes), check.Limit))
+	}
+	if m.checkError != "" {
+		lines = append(lines, "Size check: "+m.checkError)
+	}
+	if m.help {
+		lines = append(lines, "Tab/1/2 views; ↑↓ or j/k move; PgUp/PgDn page; Ctrl+u/d half page; g/G ends; ? help; q exits")
 	}
 	wide := m.width >= 72
 	if wide {
@@ -281,11 +338,11 @@ func (m compareModel) browserView() tea.View {
 			lines = append(lines, fmt.Sprintf("%s %s ↔ %s | %s | %+d B", marker, compareLayerNumber(d.BeforeIndex), compareLayerNumber(d.AfterIndex), compareMatch(d.Match), d.SizeDelta))
 		}
 	}
-	lines = append(lines, fmt.Sprintf("%d/%d  Tab/1/2 view  ↑↓/j k move  PgUp/PgDn page  g/G ends  q exit", min(m.cursor+1, len(r.LayerDiffs)), len(r.LayerDiffs)))
+	lines = append(lines, fmt.Sprintf("%d/%d  Tab/1/2 view  ↑↓ move  ? help  q exit", min(m.cursor+1, len(r.LayerDiffs)), len(r.LayerDiffs)))
 	for i := range lines {
 		lines[i] = ansi.Truncate(ansi.Strip(lines[i]), max(0, m.width), "…")
 	}
-	lines = lines[:min(len(lines), max(0, m.height))]
+	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
 }
 
@@ -321,6 +378,19 @@ func signedBytes(n int64) string {
 	return "-" + image.FormatBytes(-n)
 }
 
+func fitCompareLines(lines []string, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	if len(lines) <= height {
+		return lines
+	}
+	if height == 1 {
+		return lines[len(lines)-1:]
+	}
+	return append(lines[:height-1:height-1], lines[len(lines)-1])
+}
+
 func compareProgressText(p image.CompareSideProgress) string {
 	if p.Ready {
 		return "ready"
@@ -349,7 +419,7 @@ func compareProgressText(p image.CompareSideProgress) string {
 func RunCompareAnalysis(ctx context.Context, cfg CompareConfig) ([2]image.CompareImage, error) {
 	session := newCompareSession(ctx, cfg)
 	defer session.close()
-	m := compareModel{session: session, keys: defaultKeys(), theme: themeFor(cfg.Theme), width: 80, height: 24}
+	m := compareModel{session: session, keys: defaultKeys(), theme: themeFor(cfg.Theme), width: 80, height: 24, checkSize: cfg.CheckSize}
 	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(cfg.Input), tea.WithOutput(cfg.Output))
 	if _, err := p.Run(); err != nil {
 		return [2]image.CompareImage{}, err
