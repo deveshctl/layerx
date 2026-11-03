@@ -103,6 +103,17 @@ content changes can be absent. Layer hashes still reveal changed layer
 streams. File and directory byte changes are investigation leads, not proof
 that a particular Dockerfile instruction caused all growth.
 
+Use `layerx compare -i OLD NEW` in a terminal to browse paired layers and
+filter or sort file changes, with the regression verdict and configured size
+checks shown in the layer view. Press `Enter` on a file change to inspect text
+differences. Inspection accepts regular UTF-8 text files up to 5 MiB per side,
+with at most 1,500 lines and 4,096 bytes per line; links and binary files are
+not shown. Same-size content changes are still not detected by the file list.
+Press `?` for navigation help, `Esc` to return from content inspection, and
+`q` to leave the browser. Exiting preserves the comparison exit code without
+printing a report. Interactive mode cannot be combined with `--mode`, `--top`,
+or JSON/Markdown output.
+
 The default compact report ranks changes by absolute byte impact and omits
 shared layer rows. It includes directory summaries when there are many file
 changes. Use `--top 20` to increase the compact detail, `--mode full` for all
