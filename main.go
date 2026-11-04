@@ -30,7 +30,7 @@ func main() {
 		}
 	}
 	cmd.SetVersionInfo(version, commit, date)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	err := cmd.ExecuteContext(ctx)
 	if code := exitCodeFor(err); code != 0 {

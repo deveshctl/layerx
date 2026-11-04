@@ -272,10 +272,8 @@ func validateCompareFlags(mode string, top int) error {
 
 // analyzeForCompare runs the analyze pipeline for ref with progress events
 // drained to stderr (prefixed with side="old"/"new" so the user can tell which
-// image is currently resolving). Returns the post-resolve image digest used
-// for no-op detection. Post-analyze ImageID errors are surfaced as warnings
-// on stderr (the analysis succeeded; the digest is only used for the no-op
-// shortcut, so a missing digest is not fatal).
+// image is currently resolving). Returns the analyzed snapshot's digest for
+// no-op detection. Digest lookup warnings are delivered through progress.
 func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string, noCache bool, side string, stderr io.Writer) (string, *image.Analysis, error) {
 	progress := make(chan image.ProgressEvent, 32)
 	var wg sync.WaitGroup
@@ -295,10 +293,7 @@ func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string,
 	if err != nil {
 		return "", nil, err
 	}
-	digest, idErr := resolver.ImageID(ctx, ref)
-	if idErr != nil {
-		fmt.Fprintf(stderr, "warning: could not resolve digest for %q after analyze: %v\n", ref, idErr)
-	}
+	digest := analysis.Digest
 	if digest != "" {
 		fmt.Fprintf(stderr, "[%s] resolved %s\n", side, shortDigest(digest))
 	}

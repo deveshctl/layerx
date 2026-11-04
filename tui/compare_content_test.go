@@ -87,10 +87,27 @@ func TestCompareContentRejectsUnsupportedPayloads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) { assert.ErrorContains(t, validateCompareContent(tc.data), tc.want) })
 	}
-	_, err := compareContentDiff([]byte(strings.Repeat("x\n", compareContentMaxLines)), nil)
+	_, err := compareContentDiff([]byte(strings.Repeat("x\n", compareContentMaxLines+1)), nil)
 	assert.ErrorContains(t, err, "lines")
 	_, err = compareContentDiff([]byte(strings.Repeat("x", compareContentMaxLineBytes+1)), nil)
 	assert.ErrorContains(t, err, "line exceeds")
+}
+
+func TestCompareContentLineLimit(t *testing.T) {
+	for _, count := range []int{1499, 1500, 1501} {
+		for _, trailingNewline := range []bool{false, true} {
+			data := strings.Repeat("x\n", count)
+			if !trailingNewline {
+				data = strings.TrimSuffix(data, "\n")
+			}
+			_, err := compareContentLines([]byte(data))
+			if count > compareContentMaxLines {
+				assert.ErrorContains(t, err, "lines")
+			} else {
+				assert.NoError(t, err, "lines=%d trailing newline=%t", count, trailingNewline)
+			}
+		}
+	}
 }
 
 func TestCompareContentMetadataAndModalLifecycle(t *testing.T) {

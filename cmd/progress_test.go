@@ -87,7 +87,7 @@ func TestStderrProgress_FlushesOnPhaseChange(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	require.Len(t, lines, 3, "got: %q", out)
 	assert.Contains(t, lines[0], "pulling")
-	assert.Contains(t, lines[1], "pulled")     // flushed before phase change
+	assert.Contains(t, lines[1], "pulled") // flushed before phase change
 	assert.Contains(t, lines[2], "exporting")
 }
 

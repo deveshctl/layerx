@@ -37,7 +37,8 @@ type jsonExport struct {
 //
 // 1.0.2 — adds uncompressedLayerBytes and the observed measuredPlatform.
 // 1.0.1 — added optional "platform" field (omitempty); existing consumers
-//         that don't read it are unaffected, so this is a patch bump.
+//
+//	that don't read it are unaffected, so this is a patch bump.
 const jsonSchemaVersion = "1.0.2"
 
 type jsonEfficiency struct {

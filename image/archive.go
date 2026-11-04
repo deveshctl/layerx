@@ -206,6 +206,11 @@ func (r *ArchiveResolver) ImageID(ctx context.Context, imageRef string) (string,
 	if err != nil {
 		return "", &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
+	for _, layerPath := range metadata.manifest.Layers {
+		if _, ok := metadata.headers[layerPath]; !ok {
+			return "", &ErrInvalidArchive{Path: r.path, Cause: fmt.Errorf("layer %s is referenced in the manifest but absent from the archive", layerPath)}
+		}
+	}
 	cfg := metadata.manifest.Config
 	// OCI layout: blobs/sha256/<hex>. Path *is* the content digest, no need
 	// to re-hash.

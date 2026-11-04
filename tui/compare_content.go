@@ -160,9 +160,11 @@ func compareContentLines(data []byte) ([]string, error) {
 		return nil, fmt.Errorf("file exceeds 5 MiB")
 	}
 	lineCount, lineBytes := 1, 0
-	for _, ch := range data {
+	for i, ch := range data {
 		if ch == '\n' {
-			lineCount++
+			if i < len(data)-1 {
+				lineCount++
+			}
 			lineBytes = 0
 		} else {
 			lineBytes++

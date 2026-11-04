@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -273,4 +274,68 @@ func TestStackContextCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	_, err = aggregatedTreesContext(ctx, []Layer{{Tree: NewFileTree()}})
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type replacingArchiveResolver struct {
+	*ArchiveResolver
+	replacement []byte
+	initialID   string
+	idCalls     int
+}
+
+func (r *replacingArchiveResolver) ImageID(ctx context.Context, ref string) (string, error) {
+	r.idCalls++
+	if r.idCalls == 1 && r.initialID != "" {
+		return r.initialID, nil
+	}
+	return r.ArchiveResolver.ImageID(ctx, ref)
+}
+
+func (r *replacingArchiveResolver) ResolveWithProgress(ctx context.Context, ref string, progress chan<- ProgressEvent) ([]Layer, error) {
+	layers, err := r.ArchiveResolver.ResolveWithProgress(ctx, ref, progress)
+	if err == nil {
+		err = os.WriteFile(r.path, r.replacement, 0600)
+	}
+	return layers, err
+}
+
+func TestAnalyzePairKeepsExportedIdentityWhenArchiveChanges(t *testing.T) {
+	archive := func(command, content string) string {
+		manifest, err := json.Marshal([]dockerManifest{{Config: "config.json", Layers: []string{"layer.tar"}}})
+		require.NoError(t, err)
+		return writeArchive(t, map[string][]byte{
+			"manifest.json": manifest,
+			"config.json":   buildConfig(t, []string{command}),
+			"layer.tar":     buildSimpleLayerTar(t, map[string][]byte{"file": []byte(content)}),
+		})
+	}
+	for _, hideChange := range []bool{false, true} {
+		original := archive("old", "old\n")
+		replacement := archive("new", "BAD\n")
+		oldID, err := NewArchiveResolver(original).ImageID(t.Context(), original)
+		require.NoError(t, err)
+		newID, err := NewArchiveResolver(replacement).ImageID(t.Context(), replacement)
+		require.NoError(t, err)
+		data, err := os.ReadFile(replacement)
+		require.NoError(t, err)
+		resolver := &replacingArchiveResolver{ArchiveResolver: NewArchiveResolver(original), replacement: data}
+		if hideChange {
+			// Even matching pre/post lookups must not authenticate a different export.
+			resolver.initialID = newID
+		}
+		cache := t.TempDir()
+		pair, err := AnalyzePair(t.Context(), [2]CompareInput{
+			{Ref: original, Resolver: resolver},
+			{Ref: replacement, Resolver: NewArchiveResolver(replacement)},
+		}, CompareRunOptions{NoCache: true, CacheRoot: cache})
+		require.NoError(t, err)
+		assert.Equal(t, oldID, pair[0].Digest)
+		assert.Equal(t, oldID, pair[0].Analysis.Digest)
+		assert.Equal(t, newID, pair[1].Digest)
+		assert.Equal(t, "old", pair[0].Analysis.Layers[0].Command)
+		cached, ok, err := loadCache(cache, newID)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, "new", cached[0].Command, "the old export must not poison the replacement cache")
+	}
 }

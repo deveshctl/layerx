@@ -133,9 +133,9 @@ func buildEngineResolver(engineName, host string, plat *ocispec.Platform) (image
 }
 
 // dockerHost resolves the endpoint for --engine docker. Precedence:
-//   1. DOCKER_HOST env (kept in step with the docker CLI itself)
-//   2. Active Docker context (~/.docker/config.json + contexts/meta/…)
-//   3. "" → moby client falls back to the platform default socket
+//  1. DOCKER_HOST env (kept in step with the docker CLI itself)
+//  2. Active Docker context (~/.docker/config.json + contexts/meta/…)
+//  3. "" → moby client falls back to the platform default socket
 //
 // The engine.Resolver captures 1 and 2 already; we return its Endpoint.Host
 // verbatim. Errors (malformed config, missing named context) propagate so
@@ -149,10 +149,10 @@ func dockerHost() (string, error) {
 }
 
 // podmanHost resolves the endpoint for --engine podman. Precedence:
-//   1. CONTAINER_HOST / DOCKER_HOST env (either is respected)
-//   2. CONTAINER_CONNECTION env, otherwise active Podman connection
-//   3. Rootless / rootful socket probe on Linux
-//   4. ErrPodmanSocketNotSet (non-Linux without any of the above)
+//  1. CONTAINER_HOST / DOCKER_HOST env (either is respected)
+//  2. CONTAINER_CONNECTION env, otherwise active Podman connection
+//  3. Rootless / rootful socket probe on Linux
+//  4. ErrPodmanSocketNotSet (non-Linux without any of the above)
 //
 // The Linux socket probe remains a legitimate last resort: many first-time
 // Podman users on Linux have `systemctl --user enable podman.socket`
@@ -183,12 +183,12 @@ func podmanHost() (string, error) {
 // with the engine actually chosen — otherwise a Podman connection
 // selected here would surface downstream errors as "docker" and mislead
 // the user's troubleshooting. Precedence:
-//   1. Docker resolver (env or active context) — Docker has been the
-//      default since layerx v1.4.0, so it's still tried first
-//   2. Podman resolver (env or active connection)
-//   3. Docker socket probe
-//   4. Podman socket probe (Linux)
-//   5. ErrNoEngineFound listing everything we tried
+//  1. Docker resolver (env or active context) — Docker has been the
+//     default since layerx v1.4.0, so it's still tried first
+//  2. Podman resolver (env or active connection)
+//  3. Docker socket probe
+//  4. Podman socket probe (Linux)
+//  5. ErrNoEngineFound listing everything we tried
 //
 // A returned engineName of "docker" with an empty host means "let the
 // moby client's FromEnv resolve it via DOCKER_HOST or the platform

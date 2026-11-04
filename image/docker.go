@@ -747,8 +747,10 @@ func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest docke
 	}
 
 	layers := make([]Layer, len(manifest.Layers))
+	imageID := fmt.Sprintf("sha256:%x", sha256.Sum256(configData))
 	for i, layerPath := range manifest.Layers {
 		layers[i] = Layer{
+			imageID:  imageID,
 			Index:    i,
 			ID:       extractShortID(layerPath),
 			Size:     headers[layerPath],

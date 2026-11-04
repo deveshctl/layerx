@@ -7,6 +7,8 @@ import (
 )
 
 type Analysis struct {
+	// Digest identifies the analyzed export or cache entry, not a later tag lookup.
+	Digest           string
 	ImageRef         string
 	Layers           []Layer
 	StackedTrees     []*FileTree // per-layer delta view: filesystem changes introduced by each layer only.
@@ -85,8 +87,9 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	canCache := digestErr == nil && digest != "" && cacheRoot != ""
 
 	var (
-		layers    []Layer
-		fromCache bool
+		layers         []Layer
+		fromCache      bool
+		analyzedDigest string
 	)
 	if canCache && !opts.NoCache {
 		cached, ok, loadErr := loadCacheWithPlatform(cacheRoot, digest, opts.Platform)
@@ -96,6 +99,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		if ok {
 			layers = cached
 			fromCache = true
+			analyzedDigest = digest
 			emitProgress(opts.Progress, ProgressEvent{Phase: PhaseCacheLoad})
 		}
 	}
@@ -124,24 +128,23 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if len(layers) > 0 && layers[0].imageID != "" {
+			analyzedDigest = layers[0].imageID
+		} else if digestErr == nil && postErr == nil && digest == postDigest {
+			analyzedDigest = digest
+		}
 		if cacheRoot != "" {
 			switch {
 			case postErr != nil || postDigest == "":
 				// Cannot verify; skip cache write. Surface the gap so users
 				// know cold cost will repeat.
 				emitCacheWarn(opts.Progress, "cache write skipped: post-resolve image digest unavailable")
-			case digestErr != nil:
-				// Pre-resolve digest was unknown (image was not local); use
-				// the post-resolve digest as the authoritative cache key.
-				if err := saveCacheWithPlatform(cacheRoot, postDigest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
-					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
-				}
-			case postDigest != digest:
-				// Tag flipped underneath us. Refuse to cache either way.
+			case (analyzedDigest != "" && analyzedDigest != postDigest) || (digestErr == nil && postDigest != digest):
+				// A later tag lookup must not authenticate a different export.
 				emitCacheWarn(opts.Progress,
 					"cache write skipped: image digest changed during analysis (concurrent pull?)")
 			default:
-				if err := saveCacheWithPlatform(cacheRoot, digest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
+				if err := saveCacheWithPlatform(cacheRoot, postDigest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
 			}
@@ -180,6 +183,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		return nil, err
 	}
 	return &Analysis{
+		Digest:           analyzedDigest,
 		ImageRef:         imageRef,
 		Layers:           layers,
 		StackedTrees:     stacked,

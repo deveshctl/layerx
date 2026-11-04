@@ -119,15 +119,6 @@ func analyzeCompareSide(ctx context.Context, input CompareInput, opts CompareRun
 	if err := ctx.Err(); err != nil {
 		return CompareImage{}, err
 	}
-	digest, err := input.Resolver.ImageID(ctx, input.Ref)
-	if ctx.Err() != nil {
-		return CompareImage{}, ctx.Err()
-	}
-	if err != nil {
-		opts.Progress.update(side, ProgressEvent{Phase: PhaseCacheWarn,
-			Message: fmt.Sprintf("could not resolve digest for %q: %v", input.Ref, err)}, false)
-		digest = ""
-	}
 	opts.Progress.update(side, ProgressEvent{}, true)
-	return CompareImage{Analysis: analysis, Digest: digest}, nil
+	return CompareImage{Analysis: analysis, Digest: analysis.Digest}, nil
 }
