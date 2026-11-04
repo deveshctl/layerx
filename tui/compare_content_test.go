@@ -58,11 +58,11 @@ func TestCompareContentBoundedAndPinned(t *testing.T) {
 	before, after := &image.FileNode{Size: int64(len(data[0]))}, &image.FileNode{Size: int64(len(data[1]))}
 	content, err := loadCompareContent(t.Context(), d, before, after, inputs, results)
 	require.Empty(t, err)
-	require.Len(t, content.rows, 4)
+	require.Len(t, content.rows, 3)
 	assert.Equal(t, "same", content.rows[0].before)
 	assert.Equal(t, "old", content.rows[1].before)
-	assert.Zero(t, content.rows[1].afterLine)
-	assert.Equal(t, "new", content.rows[2].after)
+	assert.Equal(t, "new", content.rows[1].after)
+	assert.Equal(t, "end", content.rows[2].after)
 	for side := range inputs {
 		assert.Equal(t, "sha256:pinned", inputs[side].Resolver.(*compareContentResolver).extractor.gotRef)
 	}

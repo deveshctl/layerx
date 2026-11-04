@@ -165,6 +165,9 @@ func TestCompareFilterPasteAndHelpViewport(t *testing.T) {
 	}
 	next, _ := m.Update(tea.KeyPressMsg{Code: '?'})
 	m = next.(compareModel)
+	assert.True(t, m.guideOpen)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = next.(compareModel)
 	assert.Contains(t, ansi.Strip(m.View().Content), "/path/05")
 	next, _ = m.Update(tea.KeyPressMsg{Code: '/'})
 	m = next.(compareModel)
@@ -176,5 +179,5 @@ func TestCompareFilterPasteAndHelpViewport(t *testing.T) {
 	m.fileFilter = "missing"
 	m.rebuildFileFilter()
 	assert.Contains(t, ansi.Strip(m.View().Content), "No matching paths")
-	assert.Contains(t, ansi.Strip(m.View().Content), "q exit")
+	assert.Contains(t, ansi.Strip(m.View().Content), "Ctrl+C")
 }

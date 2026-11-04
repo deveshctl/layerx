@@ -13,12 +13,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 )
 
 // File diffs are immutable after CompareAnalysis. Each permutation stores only
 // indices; the path is the stable selection ID across all three views.
 type compareFileIndex struct {
 	order         [3][]int
+	directories   []compareDirectory
 	before, after map[string]*image.FileNode
 }
 
@@ -29,7 +31,7 @@ func buildCompareFileIndex(ctx context.Context, diffs []image.FileDiff, results 
 		if ctx.Err() != nil {
 			return compareFileIndexMsg{}
 		}
-		index := &compareFileIndex{}
+		index := &compareFileIndex{directories: compareDirectories(ctx, diffs)}
 		wanted := make(map[string]struct{}, len(diffs))
 		for _, d := range diffs {
 			wanted[d.Path] = struct{}{}
@@ -96,7 +98,7 @@ func (m compareModel) fileCount() int {
 	if m.result == nil {
 		return 0
 	}
-	if m.fileFilter != "" {
+	if m.fileFilter != "" || m.fileDirectory != "" {
 		return len(m.fileFiltered)
 	}
 	return len(m.result.FileDiffs)
@@ -104,6 +106,9 @@ func (m compareModel) fileCount() int {
 
 func (m compareModel) filePageSize() int {
 	extra := 0
+	if m.fileDirectory != "" {
+		extra++
+	}
 	if m.fileFiltering || m.fileFilter != "" {
 		extra++
 	}
@@ -113,7 +118,8 @@ func (m compareModel) filePageSize() int {
 	if m.fileIndex == nil {
 		extra++
 	}
-	return max(1, m.height-6-extra)
+	_, height := m.compareSize()
+	return max(1, height-7-extra)
 }
 
 func (m *compareModel) adjustFileViewport() {
@@ -127,7 +133,7 @@ func (m *compareModel) adjustFileViewport() {
 
 func (m compareModel) fileDiffAt(row int) image.FileDiff {
 	index := row
-	if m.fileFilter != "" {
+	if m.fileFilter != "" || m.fileDirectory != "" {
 		index = m.fileFiltered[row]
 	} else if m.fileIndex != nil {
 		index = m.fileIndex.order[m.fileSort][row]
@@ -143,6 +149,7 @@ func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
 	}
 	if msg.Code == tea.KeyEscape {
 		m.fileFilter = ""
+		m.fileDirectory = ""
 		m.rebuildFileFilter()
 		m.adjustFileViewport()
 		return
@@ -195,11 +202,14 @@ func (m compareModel) fileBrowserView() tea.View {
 	sortNames := [3]string{"path", "growth", "shrink"}
 	sum := m.result.FileSummary
 	lines := []string{
-		"File changes",
-		fmt.Sprintf("Added %d   Removed %d   Modified %d   +%s / -%s", sum.AddedCount, sum.RemovedCount, sum.ModifiedCount, image.FormatBytes(sum.BytesAdded), image.FormatBytes(sum.BytesRemoved)),
+		"File changes · s changes ranking · 1 opens layer sizes",
+		fmt.Sprintf("Added %d   Removed %d   Modified %d   +%s / -%s", sum.AddedCount, sum.RemovedCount, sum.ModifiedCount, sizebudget.Format(sum.BytesAdded), sizebudget.Format(sum.BytesRemoved)),
 		"Sizes and metadata only; same-size content changes may be absent.",
 		"Directory metadata is not compared.",
 		fmt.Sprintf("Order: %s   Metadata: %t", sortNames[m.fileSort], m.fileMetadata),
+	}
+	if m.fileDirectory != "" {
+		lines = append(lines, "Directory: "+strconv.Quote(m.fileDirectory)+" · Esc shows all files")
 	}
 	if m.fileFiltering || m.fileFilter != "" {
 		lines = append(lines, "Filter /"+strconv.Quote(m.fileFilter)+"  Enter apply; Esc clear")
@@ -211,7 +221,7 @@ func (m compareModel) fileBrowserView() tea.View {
 		lines = append(lines, "Building file views…")
 	}
 	if m.fileCount() == 0 {
-		if m.fileFilter != "" {
+		if m.fileFilter != "" || m.fileDirectory != "" {
 			lines = append(lines, "No matching paths; Esc clears filter")
 		} else {
 			lines = append(lines, "No file changes")
@@ -224,7 +234,7 @@ func (m compareModel) fileBrowserView() tea.View {
 			marker = ">"
 		}
 		kind := [4]string{"  same", "+ added", "~ changed", "- removed"}[d.DiffType]
-		line := fmt.Sprintf("%s %s %s  ", marker, styleWithFg([4]color.Color{m.theme.Unchanged, m.theme.Added, m.theme.Modified, m.theme.Removed}[d.DiffType]).Render(compareColumn(kind, 9)), signedBytes(d.SizeDelta))
+		line := fmt.Sprintf("%s %s %s  ", marker, styleWithFg([4]color.Color{m.theme.Unchanged, m.theme.Added, m.theme.Modified, m.theme.Removed}[d.DiffType]).Render(compareColumn(kind, 9)), compareColumn(m.compareDelta(d.SizeDelta), 12))
 		if m.fileSort == 0 {
 			line += "  " + strings.Repeat("  ", min(6, max(0, strings.Count(d.Path, "/")-1)))
 		} else {
@@ -242,9 +252,17 @@ func (m compareModel) fileBrowserView() tea.View {
 		}
 		lines = append(lines, line)
 	}
-	footer := "Enter content  / filter  q exit  ? help"
+	footer := "q exit  Enter details  / filter  ? guide"
 	if m.width >= 80 {
-		footer = fmt.Sprintf("%d/%d  Enter content  / filter  s sort  m metadata  Tab views  ↑↓ move  ? help  q exit", min(m.fileCursor+1, m.fileCount()), m.fileCount())
+		footer = fmt.Sprintf("%d/%d  Enter details  / filter  s sort  m metadata  Tab views  ↑↓ move  ? help  q exit", min(m.fileCursor+1, m.fileCount()), m.fileCount())
+	}
+	if m.fileCount() > 0 {
+		d := m.fileDiffAt(m.fileCursor)
+		reason := d.ChangeReason
+		if reason == "" {
+			reason = [4]string{"unchanged", "added", "modified", "removed"}[d.DiffType]
+		}
+		lines = append(lines, fmt.Sprintf("Selected · %s → %s · %s", sizebudget.Format(d.BeforeSize), sizebudget.Format(d.AfterSize), reason))
 	}
 	lines = append(lines, footer)
 	for i := range lines {
@@ -264,7 +282,7 @@ func compareFileMeta(n *image.FileNode) string {
 // Rebuild only on edits or sort/index changes, never while rendering or moving.
 func (m *compareModel) rebuildFileFilter() {
 	m.fileFiltered = m.fileFiltered[:0]
-	if m.fileFilter == "" || m.result == nil {
+	if (m.fileFilter == "" && m.fileDirectory == "") || m.result == nil {
 		return
 	}
 	for row := range m.result.FileDiffs {
@@ -272,7 +290,7 @@ func (m *compareModel) rebuildFileFilter() {
 		if m.fileIndex != nil {
 			index = m.fileIndex.order[m.fileSort][row]
 		}
-		if strings.Contains(m.result.FileDiffs[index].Path, m.fileFilter) {
+		if (m.fileDirectory == "" || compareDirectoryPath(m.result.FileDiffs[index].Path) == m.fileDirectory) && strings.Contains(m.result.FileDiffs[index].Path, m.fileFilter) {
 			m.fileFiltered = append(m.fileFiltered, index)
 		}
 	}

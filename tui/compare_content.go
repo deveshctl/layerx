@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 )
 
 const (
@@ -29,6 +30,7 @@ type compareContent struct {
 	path, note, metadata string
 	rows                 []compareContentRow
 	maxWidth             int
+	maxNarrowWidth       int
 }
 
 type compareContentMsg struct {
@@ -73,7 +75,7 @@ func (m *compareModel) closeContent() {
 
 func loadCompareContent(ctx context.Context, d image.FileDiff, before, after *image.FileNode, inputs [2]image.CompareInput, results [2]image.CompareImage) (*compareContent, string) {
 	content := &compareContent{path: d.Path}
-	content.metadata = "A " + compareFileMeta(before) + " → B " + compareFileMeta(after)
+	content.metadata = compareInspectionMeta(before, results[0].Analysis, "Before") + "\n" + compareInspectionMeta(after, results[1].Analysis, "After")
 	if (d.DiffType != image.Added && before == nil) || (d.DiffType != image.Removed && after == nil) {
 		return nil, "file metadata is unavailable"
 	}
@@ -93,7 +95,8 @@ func loadCompareContent(ctx context.Context, d image.FileDiff, before, after *im
 			continue
 		}
 		if node.Size > compareContentMaxBytes {
-			return nil, fmt.Sprintf("Image %c: file exceeds 5 MiB", 'A'+side)
+			content.note = fmt.Sprintf("Image %c exceeds the 5 MiB text limit. Size and metadata are shown below.", 'A'+side)
+			return content, ""
 		}
 		resolver := inputs[side].Resolver
 		source, ok := resolver.(image.ExtractorSource)
@@ -124,7 +127,8 @@ func loadCompareContent(ctx context.Context, d image.FileDiff, before, after *im
 			return nil, fmt.Sprintf("Image %c: image changed during extraction", 'A'+side)
 		}
 		if err := validateCompareContent(bytes); err != nil {
-			return nil, fmt.Sprintf("Image %c: %v", 'A'+side, err)
+			content.note = fmt.Sprintf("Image %c: %v. Size and metadata remain available below.", 'A'+side, err)
+			return content, ""
 		}
 		data[side] = bytes
 	}
@@ -143,10 +147,13 @@ func validateCompareContent(data []byte) error {
 	if len(data) > compareContentMaxBytes {
 		return fmt.Errorf("file exceeds 5 MiB")
 	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return fmt.Errorf("binary content cannot be shown")
+	}
 	if !utf8.Valid(data) {
 		return fmt.Errorf("invalid UTF-8 text")
 	}
-	if image.IsBinary(data) || bytes.IndexByte(data, 0) >= 0 {
+	if image.IsBinary(data) {
 		return fmt.Errorf("binary content cannot be shown")
 	}
 	return nil
@@ -217,17 +224,49 @@ func compareContentDiff(before, after []byte) ([]compareContentRow, error) {
 			j++
 		}
 	}
-	return rows, nil
+	// Pair adjacent removed/added runs so replacements read across one row.
+	aligned := make([]compareContentRow, 0, len(rows))
+	for i := 0; i < len(rows); {
+		if rows[i].beforeLine > 0 && rows[i].afterLine > 0 {
+			aligned = append(aligned, rows[i])
+			i++
+			continue
+		}
+		var left, right []compareContentRow
+		for i < len(rows) && (rows[i].beforeLine == 0 || rows[i].afterLine == 0) {
+			if rows[i].beforeLine > 0 {
+				left = append(left, rows[i])
+			} else {
+				right = append(right, rows[i])
+			}
+			i++
+		}
+		for j := 0; j < max(len(left), len(right)); j++ {
+			var row compareContentRow
+			if j < len(left) {
+				row.before, row.beforeLine = left[j].before, left[j].beforeLine
+			}
+			if j < len(right) {
+				row.after, row.afterLine = right[j].after, right[j].afterLine
+			}
+			aligned = append(aligned, row)
+		}
+	}
+	return aligned, nil
 }
 
 func (m compareModel) contentPageSize() int {
-	if m.width < 80 {
-		return max(1, m.height-4)
+	width, height := m.compareSize()
+	if width < 80 {
+		return max(1, height-4)
 	}
-	return max(1, m.height-5)
+	return max(1, height-5)
 }
 
-func (m compareModel) contentColumnWidth() int { return max(0, (m.width-5)/2) }
+func (m compareModel) contentColumnWidth() int {
+	width, _ := m.compareSize()
+	return max(0, (width-5)/2)
+}
 
 func (m *compareModel) clampContentScroll() {
 	if m.content == nil {
@@ -235,14 +274,20 @@ func (m *compareModel) clampContentScroll() {
 	}
 	if m.content.maxWidth == 0 {
 		for _, row := range m.content.rows {
-			m.content.maxWidth = max(m.content.maxWidth, ansi.StringWidth(strconv.Quote(row.before)), ansi.StringWidth(strconv.Quote(row.after)))
+			m.content.maxWidth = max(m.content.maxWidth, ansi.StringWidth(compareTextLine(row.before)), ansi.StringWidth(compareTextLine(row.after)))
+			m.content.maxNarrowWidth = max(m.content.maxNarrowWidth, ansi.StringWidth(compareNarrowText(row)))
 		}
 	}
-	available := max(1, m.width-3)
-	if m.width >= 80 {
+	width, _ := m.compareSize()
+	available := max(1, width-3)
+	if width >= 80 {
 		available = max(1, m.contentColumnWidth()-5)
 	}
-	m.contentHOffset = min(m.contentHOffset, max(0, m.content.maxWidth-available))
+	maxWidth := m.content.maxWidth
+	if width < 80 {
+		maxWidth = max(maxWidth, m.content.maxNarrowWidth)
+	}
+	m.contentHOffset = min(m.contentHOffset, max(0, maxWidth-available))
 }
 
 func (m *compareModel) adjustContentViewport() {
@@ -275,6 +320,10 @@ func (m *compareModel) updateContentKeys(msg tea.KeyPressMsg) {
 		m.contentCursor += m.contentPageSize()
 	case key.Matches(msg, m.keys.PageUp):
 		m.contentCursor -= m.contentPageSize()
+	case key.Matches(msg, m.keys.HalfPageDown):
+		m.contentCursor += max(1, m.contentPageSize()/2)
+	case key.Matches(msg, m.keys.HalfPageUp):
+		m.contentCursor -= max(1, m.contentPageSize()/2)
 	case key.Matches(msg, m.keys.Top):
 		m.contentCursor = 0
 	case key.Matches(msg, m.keys.Bottom):
@@ -284,16 +333,17 @@ func (m *compareModel) updateContentKeys(msg tea.KeyPressMsg) {
 }
 
 func (m compareModel) contentView() tea.View {
-	lines := []string{"Content inspection", "Loading…", "Esc closes; q closes; ↑↓ and PgUp/PgDn move together"}
+	lines := []string{"Content inspection", "Loading…", "Red − removed · Green + added · ↑↓ move · PgUp/PgDn page"}
 	if m.contentError != "" {
 		lines[1] = strconv.Quote(m.contentError)
 	}
 	if c := m.content; c != nil {
-		lines[0] = "Content: " + strconv.Quote(c.path)
+		lines[0] = "File: " + strconv.Quote(c.path)
 		lines[1] = "Up to 5 MiB per side; text lines are bounded."
 		if c.note != "" {
 			lines[1] = c.note
-			lines = append(lines, c.metadata)
+			lines[2] = "Size, permissions, ownership and provenance"
+			lines = append(lines, strings.Split(c.metadata, "\n")...)
 		}
 		if c.note == "" {
 			wide := m.width >= 80
@@ -310,23 +360,27 @@ func (m compareModel) contentView() tea.View {
 					column := m.contentColumnWidth()
 					left, right := "", ""
 					if r.beforeLine > 0 {
-						left = fmt.Sprintf("%4d %s", r.beforeLine, ansi.Cut(strconv.Quote(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
+						left = fmt.Sprintf("%4d %s", r.beforeLine, ansi.Cut(compareTextLine(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
 					if r.afterLine > 0 {
-						right = fmt.Sprintf("%4d %s", r.afterLine, ansi.Cut(strconv.Quote(r.after), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
+						right = fmt.Sprintf("%4d %s", r.afterLine, ansi.Cut(compareTextLine(r.after), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
 					}
-					lines = append(lines, marker+" "+compareColumn(left, column)+" │ "+compareColumn(right, column))
+					left, right = compareColumn(left, column), compareColumn(right, column)
+					if r.before != r.after || r.beforeLine == 0 || r.afterLine == 0 {
+						left = styleWithFg(m.theme.Removed).Render(left)
+						right = styleWithFg(m.theme.Added).Render(right)
+					}
+					lines = append(lines, marker+" "+left+" │ "+right)
 				} else {
-					if r.beforeLine > 0 && r.afterLine == 0 {
-						lines = append(lines, marker+"- "+ansi.Cut(strconv.Quote(r.before), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
+					prefix := "  "
+					if r.beforeLine == 0 {
+						prefix = "+ "
+					} else if r.afterLine == 0 {
+						prefix = "- "
+					} else if r.before != r.after {
+						prefix = "~ "
 					}
-					if r.afterLine > 0 {
-						prefix := "+ "
-						if r.beforeLine > 0 {
-							prefix = "  "
-						}
-						lines = append(lines, marker+prefix+ansi.Cut(strconv.Quote(r.after), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*4))
-					}
+					lines = append(lines, marker+prefix+ansi.Cut(compareNarrowText(r), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*8))
 				}
 				at := len(lines) - 1
 				style := styleWithFg(m.theme.Unchanged)
@@ -335,17 +389,72 @@ func (m compareModel) contentView() tea.View {
 				} else if r.afterLine == 0 {
 					style = styleWithFg(m.theme.Removed)
 				}
-				if i == m.contentCursor {
-					style = style.Background(m.theme.SelectedBg).Bold(true)
-				}
+
 				lines[at] = style.Render(lines[at])
 			}
 		}
 	}
-	lines = append(lines, fmt.Sprintf("Esc/q back  h/l scroll  ↑↓ move  col %d", m.contentHOffset+1))
+	footer := fmt.Sprintf("Esc/q back  h/l scroll  ↑↓ move  col %d", m.contentHOffset+1)
+	if m.content != nil && m.content.note != "" {
+		footer = "Esc/q back to files  ? guide"
+		if m.contentOriginRow() >= 0 {
+			footer += "  l origin layer"
+		}
+	}
+	lines = append(lines, footer)
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
 	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
+}
+
+func (m compareModel) contentOriginRow() int {
+	if m.content == nil || m.fileIndex == nil || m.result == nil {
+		return -1
+	}
+	n := m.fileIndex.after[m.content.path]
+	before := n == nil
+	if before {
+		n = m.fileIndex.before[m.content.path]
+	}
+	if n == nil {
+		return -1
+	}
+	for row, d := range m.result.LayerDiffs {
+		if (!before && d.AfterIndex == n.IntroducedInLayer) || (before && d.BeforeIndex == n.IntroducedInLayer) {
+			return row
+		}
+	}
+	return -1
+}
+
+func compareInspectionMeta(n *image.FileNode, a *image.Analysis, label string) string {
+	if n == nil {
+		return label + ": absent"
+	}
+	text := fmt.Sprintf("%s: %s · %s", label, sizebudget.Format(n.Size), compareFileMeta(n))
+	if n.Linkname != "" {
+		text += " · target " + strconv.Quote(n.Linkname)
+	}
+	if a != nil && n.IntroducedInLayer >= 0 && n.IntroducedInLayer < len(a.Layers) {
+		text += fmt.Sprintf("\n  Origin layer #%d: %s", n.IntroducedInLayer+1, strconv.Quote(a.Layers[n.IntroducedInLayer].Command))
+	}
+	return text
+}
+
+// Escape terminal controls without surrounding every ordinary text line in quotes.
+func compareTextLine(text string) string {
+	quoted := strconv.Quote(text)
+	return quoted[1 : len(quoted)-1]
+}
+
+func compareNarrowText(row compareContentRow) string {
+	if row.beforeLine > 0 && row.afterLine > 0 && row.before != row.after {
+		return compareTextLine(row.before) + " → " + compareTextLine(row.after)
+	}
+	if row.afterLine > 0 {
+		return compareTextLine(row.after)
+	}
+	return compareTextLine(row.before)
 }

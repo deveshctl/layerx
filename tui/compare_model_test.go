@@ -214,5 +214,22 @@ func TestCompareBrowserShowsBudgetAndKeepsFooter(t *testing.T) {
 	m = next.(compareModel)
 	assert.Contains(t, m.View().Content, "Ctrl+u/d")
 	m.height = 3
-	assert.Contains(t, m.View().Content, "q exit")
+	assert.Contains(t, m.View().Content, "back")
+}
+
+func TestCompareFrameKeepsIdentityAndSelectionVisible(t *testing.T) {
+	for _, width := range []int{40, 80, 120} {
+		m := compareModel{result: image.CompareAnalysis(&image.Analysis{ImageRef: "old:1"}, &image.Analysis{ImageRef: "new:2", Layers: make([]image.Layer, 30)}), keys: defaultKeys(), theme: themeFor(""), width: width, height: 24}
+		next, _ := m.Update(tea.KeyPressMsg{Code: 'G'})
+		m = next.(compareModel)
+		out := ansi.Strip(m.View().Content)
+		assert.Contains(t, out, "layerx")
+		assert.Contains(t, out, "old:1")
+		assert.Contains(t, out, "new:2")
+		assert.Contains(t, out, "#30")
+		assert.Len(t, strings.Split(out, "\n"), 24)
+		for _, line := range strings.Split(out, "\n") {
+			assert.LessOrEqual(t, ansi.StringWidth(line), width)
+		}
+	}
 }

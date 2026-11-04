@@ -477,7 +477,7 @@ layerx compare -i ./build/prev.tar ./build/current.tar
 - Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>`, or `verdict: noop reason=path-equal`.
 - Exit codes: `0` no regression, `1` regression detected, `2` operational error.
 - Live progress on stderr while resolving remote images. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating.
-- Interactive mode requires terminal input and output. Both images load concurrently; press `q` or `Ctrl+C` to cancel loading. In the browser, `Tab`, `1`, and `2` switch between layer pairs and file changes; `↑`/`↓`, `j`/`k`, page keys, and `g`/`G` navigate. Press `?` for help. In file changes, `/` filters paths (Enter applies, Esc clears), `s` sorts, `m` shows metadata, and `Enter` or `v` inspects bounded text content. `h`/`l` or left/right arrows scroll content horizontally. `Esc` returns from content inspection; `q` exits without printing another report, preserving the regression exit code. Use `--mode full` for a noninteractive complete report.
+- Interactive mode opens an overview of size, waste, budgets and directory hotspots. `Enter` on a directory investigates its changed files; `Esc` clears that scope. Use `1` for layers, `2` for all files, `3` for the overview, or `Tab` to cycle. File changes rank by growth; `/` searches, `s` changes ranking, `m` shows metadata, and `Enter` opens text or metadata details. Press `?` for help. `q` exits without another report, preserving the regression exit code; `q`/`Ctrl+C` cancel loading. Requires terminal input and output.
 
 ---
 
