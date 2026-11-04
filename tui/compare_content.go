@@ -137,7 +137,8 @@ func loadCompareContent(ctx context.Context, d image.FileDiff, before, after *im
 	}
 	rows, err := compareContentDiff(data[0], data[1])
 	if err != nil {
-		return nil, err.Error()
+		content.note = "Text preview unavailable: " + err.Error() + ". Size and metadata remain available below."
+		return content, ""
 	}
 	content.rows = rows
 	return content, ""
@@ -333,7 +334,7 @@ func (m *compareModel) updateContentKeys(msg tea.KeyPressMsg) {
 }
 
 func (m compareModel) contentView() tea.View {
-	lines := []string{"Content inspection", "Loading…", "Red − removed · Green + added · ↑↓ move · PgUp/PgDn page"}
+	lines := []string{"Content inspection", "Loading…", "Before − removed · After + added · ↑↓ move · PgUp/PgDn page"}
 	if m.contentError != "" {
 		lines[1] = strconv.Quote(m.contentError)
 	}
@@ -380,7 +381,11 @@ func (m compareModel) contentView() tea.View {
 					} else if r.before != r.after {
 						prefix = "~ "
 					}
-					lines = append(lines, marker+prefix+ansi.Cut(compareNarrowText(r), m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*8))
+					text := compareNarrowText(r)
+					if r.beforeLine > 0 && r.afterLine > 0 && r.before != r.after {
+						text = styleWithFg(m.theme.Removed).Render(compareTextLine(r.before)) + " → " + styleWithFg(m.theme.Added).Render(compareTextLine(r.after))
+					}
+					lines = append(lines, marker+prefix+ansi.Cut(text, m.contentHOffset, m.contentHOffset+compareContentMaxLineBytes*8))
 				}
 				at := len(lines) - 1
 				style := styleWithFg(m.theme.Unchanged)
@@ -406,7 +411,7 @@ func (m compareModel) contentView() tea.View {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
-	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
+	return m.finalCompareView(strings.Join(lines, "\n"))
 }
 
 func (m compareModel) contentOriginRow() int {

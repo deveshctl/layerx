@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 
 ### Changed
+- Make comparison help clearer and scrollable, honor theme and background settings throughout, and preserve compact shortcuts, diff colors and file metadata.
 - Redesign interactive comparisons with LayerX styling, a guided overview, directory hotspots, growth-ranked files, useful binary metadata and stable side-by-side text diffs.
 - File browsing now offers folder navigation keys, a files-only size list, and a wider names view.
 - Speed up image analysis and archive inspection, especially for larger images and slower filesystems.

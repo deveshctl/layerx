@@ -20,12 +20,13 @@ import (
 // progress to a process-global stderr. After loading, the caller receives the
 // analyses for the comparison report.
 type CompareConfig struct {
-	Inputs    [2]image.CompareInput
-	Options   image.CompareRunOptions
-	Theme     string
-	Input     io.Reader
-	Output    io.Writer
-	CheckSize func(before, after *image.Analysis) ([]sizebudget.Result, error)
+	Inputs        [2]image.CompareInput
+	Options       image.CompareRunOptions
+	Theme         string
+	TransparentBg bool
+	Input         io.Reader
+	Output        io.Writer
+	CheckSize     func(before, after *image.Analysis) ([]sizebudget.Result, error)
 }
 
 // compareSession owns synchronization outside the value-based Bubble Tea model.
@@ -71,6 +72,7 @@ type compareModel struct {
 	inFrame                          bool
 	overview                         bool
 	guideOpen                        bool
+	guideOffset                      int
 	directoryCursor, directoryOffset int
 	session                          *compareSession
 	keys                             keyMap
@@ -130,6 +132,7 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.adjustOverview()
 		m.adjustFileViewport()
 		m.adjustContentViewport()
+		m.adjustCompareGuide()
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			if m.contentCancel != nil {
@@ -147,11 +150,14 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.guideOpen {
 			if msg.Code == tea.KeyEscape || msg.Code == '?' || key.Matches(msg, m.keys.Quit) {
 				m.guideOpen = false
+			} else {
+				m.updateCompareGuide(msg)
 			}
 			return m, nil
 		}
 		if msg.Code == '?' && m.result != nil {
 			m.guideOpen = true
+			m.guideOffset = 0
 			return m, nil
 		}
 		if m.contentOpen {
@@ -392,7 +398,11 @@ func (m compareModel) View() tea.View {
 	brand += styleWithFg(m.theme.HeaderDim).Background(m.theme.StatusBg).Render(strings.Repeat(" ", max(0, outer.width-2-ansi.StringWidth(brand))))
 	lines = append([]string{" " + brand + " "}, lines...)
 	lines = append(lines, " "+outer.compareFooter(outer.width-2)+" ")
-	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
+	return m.finalCompareView(strings.Join(lines, "\n"))
+}
+
+func (m compareModel) finalCompareView(content string) tea.View {
+	return finalizeViewNoMouse(tea.NewView(styleWithFg(m.theme.FileName).Render(content)), m.theme.MainBg)
 }
 
 func compareImageRef(ref string, width int) string {
@@ -441,7 +451,7 @@ func (m compareModel) compareBodyView() tea.View {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = lines[:min(len(lines), max(0, m.height))]
-	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
+	return m.finalCompareView(strings.Join(lines, "\n"))
 }
 
 func (m compareModel) pageSize() int {
@@ -543,7 +553,7 @@ func (m compareModel) browserView() tea.View {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
-	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
+	return m.finalCompareView(strings.Join(lines, "\n"))
 }
 
 func compareLayerNumber(index int) string {
@@ -620,6 +630,9 @@ func RunCompareAnalysis(ctx context.Context, cfg CompareConfig) ([2]image.Compar
 	session := newCompareSession(ctx, cfg)
 	defer session.close()
 	m := compareModel{session: session, keys: defaultKeys(), theme: themeFor(cfg.Theme), width: 80, height: 24, overview: true, fileSort: 1, checkSize: cfg.CheckSize}
+	if cfg.TransparentBg {
+		m.theme.MainBg = nil
+	}
 	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(cfg.Input), tea.WithOutput(cfg.Output))
 	if _, err := p.Run(); err != nil {
 		return [2]image.CompareImage{}, err
@@ -668,10 +681,11 @@ func (m compareModel) compareFooter(width int) string {
 		hints = []statusHint{{"q", "cancel"}, {"Ctrl+C", "cancel"}}
 		right = "Loading images"
 	case m.guideOpen:
-		hints = []statusHint{{"Esc", "back"}, {"?", "close guide"}, {"q", "back"}}
-		right = "Guide"
+		hints = []statusHint{{"Esc", "back"}, {"?", "close guide"}, {"↑↓", "scroll"}, {"PgUp/PgDn", "page"}}
+		_, height := m.compareSize()
+		right = fmt.Sprintf("%d/%d guide", min(m.guideOffset+max(1, height-1), len(m.compareGuideLines())), len(m.compareGuideLines()))
 	case m.contentOpen:
-		hints = []statusHint{{"Esc", "files"}, {"q", "files"}, {"?", "guide"}}
+		hints = []statusHint{{"Esc", "files"}, {"?", "guide"}}
 		if m.content == nil {
 			right = "Loading file"
 		} else if m.content.note != "" {
@@ -715,6 +729,26 @@ func (m compareModel) compareFooter(width int) string {
 		default:
 			hints = []statusHint{{"q", "exit"}, {"?", "guide"}}
 		}
+	}
+	// Prefer fewer fully labeled actions over a dense row of unexplained keys.
+	// This also keeps separators visible in compact comparison footers.
+	budget := width - min(ansi.StringWidth(right), max(width*2/3, 0)) - 1
+	for len(hints) > 2 {
+		cells := 1 + (len(hints)-1)*3
+		for _, h := range hints {
+			cells += ansi.StringWidth(h.key) + 1 + ansi.StringWidth(h.desc)
+		}
+		if cells <= budget {
+			break
+		}
+		drop := len(hints) - 1
+		for drop >= 0 && (hints[drop].key == "q" || hints[drop].key == "?" || hints[drop].key == "Esc" || hints[drop].key == "Ctrl+C") {
+			drop--
+		}
+		if drop < 0 {
+			break
+		}
+		hints = append(hints[:drop:drop], hints[drop+1:]...)
 	}
 	return renderStatusLine(newThemeStyles(m.theme), hints, right, width)
 }

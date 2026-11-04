@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
@@ -168,7 +169,7 @@ func (m compareModel) overviewView() tea.View {
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
-	return finalizeViewNoMouse(tea.NewView(strings.Join(fitCompareLines(lines, m.height), "\n")), m.theme.MainBg)
+	return m.finalCompareView(strings.Join(fitCompareLines(lines, m.height), "\n"))
 }
 
 func compareMagnitude(n int64) uint64 {
@@ -178,12 +179,88 @@ func compareMagnitude(n int64) uint64 {
 	return uint64(n)
 }
 
-func (m compareModel) compareGuideView() tea.View {
-	lines := []string{"Your comparison guide", "", "3 Overview  Find directory growth, waste and failed budgets.", "Enter on a directory narrows the file list; Esc clears that scope.", "2 Files     s ranks growth/shrink/path; / searches; m shows metadata.", "Enter inspects text or shows metadata for binary, large and linked files.", "1 Layers    Compare build steps and their stored-byte changes.", "Shared DiffID = identical layer; command match? = best-effort pairing.", "", "↑↓ / j k move · PgUp/PgDn page · Ctrl+u/d half page · g/G ends", "Text: h/l scroll horizontally; Esc returns to files.", "Metadata: l opens the origin layer; Esc returns to files.", "", "Limits: size/metadata comparison does not detect every same-size content change.", "Layer waste measures overwritten/deleted bytes, not every cleanup opportunity.", "", "Esc / ? / q back to comparison"}
-	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
+func (m compareModel) compareGuideLines() []string {
+	st := newHelpStyles(m.theme)
+	sections := []helpSection{
+		{title: "Start here", entries: []helpEntry{
+			{"3 Overview", "Find growth, waste and failed size checks."},
+			{"Enter", "Open the selected directory's files."},
+			{"2 Files", "Browse all changes; Enter opens details."},
+			{"1 Layers", "Compare build steps and stored bytes."},
+		}},
+		{title: "Find and inspect", entries: []helpEntry{
+			{"/", "Search paths, such as /usr/lib."},
+			{"s / m", "Change ranking / show file metadata."},
+			{"h / l", "Scroll text left / right."},
+			{"l", "From metadata, open the origin layer."},
+		}},
+		{title: "Move faster", entries: []helpEntry{
+			{"Tab", "Cycle Overview, Layers and Files."},
+			{"↑↓ / j k", "Move; PgUp/PgDn page; g/G jump to ends."},
+			{"Ctrl+u/d", "Move half a page."},
+			{"Esc", "Go back, or clear a file filter."},
+			{"q / Ctrl+C", "q goes back or exits; Ctrl+C always exits."},
+		}},
 	}
-	return finalizeViewNoMouse(tea.NewView(strings.Join(fitCompareLines(lines, m.height), "\n")), m.theme.MainBg)
+	width, _ := m.compareSize()
+	intro := st.title.Render("Your comparison guide") + "\n" + st.desc.Render("Start with the overview. Follow the largest changes.") + "\n\n"
+	body := renderHelpSectionsVertical(sections, st)
+	if width >= 130 {
+		left := strings.Split(ansi.Wrap(renderHelpSectionsVertical(sections[:2], st), width/2-2, ""), "\n")
+		right := strings.Split(ansi.Wrap(renderHelpSection(sections[2], st), width-width/2-2, ""), "\n")
+		rows := make([]string, max(len(left), len(right)))
+		for i := range rows {
+			a, b := "", ""
+			if i < len(left) {
+				a = left[i]
+			}
+			if i < len(right) {
+				b = right[i]
+			}
+			rows[i] = compareColumn(a, width/2) + b
+		}
+		body = strings.Join(rows, "\n")
+	}
+	limits := "\n\n" + st.section.Render(" Know the limits") + "\n" + st.desc.Render(" Same-size content changes may be absent: sizes and metadata are compared.\n Shared DiffID means identical layers; command matching is best effort.\n Layer waste counts overwritten/deleted bytes, not every cleanup opportunity.")
+	return strings.Split(ansi.Wrap(intro+body+limits, max(1, width), ""), "\n")
+}
+
+func (m *compareModel) adjustCompareGuide() {
+	_, height := m.compareSize()
+	m.guideOffset = min(max(0, m.guideOffset), max(0, len(m.compareGuideLines())-max(1, height-1)))
+}
+
+func (m *compareModel) updateCompareGuide(msg tea.KeyPressMsg) {
+	_, height := m.compareSize()
+	page := max(1, height-1)
+	switch {
+	case key.Matches(msg, m.keys.Down):
+		m.guideOffset++
+	case key.Matches(msg, m.keys.Up):
+		m.guideOffset--
+	case key.Matches(msg, m.keys.PageDown):
+		m.guideOffset += page
+	case key.Matches(msg, m.keys.PageUp):
+		m.guideOffset -= page
+	case key.Matches(msg, m.keys.HalfPageDown):
+		m.guideOffset += max(1, page/2)
+	case key.Matches(msg, m.keys.HalfPageUp):
+		m.guideOffset -= max(1, page/2)
+	case key.Matches(msg, m.keys.Top):
+		m.guideOffset = 0
+	case key.Matches(msg, m.keys.Bottom):
+		m.guideOffset = len(m.compareGuideLines())
+	}
+	m.adjustCompareGuide()
+}
+
+func (m compareModel) compareGuideView() tea.View {
+	lines := m.compareGuideLines()
+	_, height := m.compareSize()
+	offset := min(m.guideOffset, max(0, len(lines)-max(1, height-1)))
+	end := min(len(lines), offset+max(1, height-1))
+	lines = append(lines[offset:end:end], ansi.Truncate("Esc back  ↑↓ scroll  PgUp/PgDn page", max(0, m.width), "…"))
+	return m.finalCompareView(strings.Join(fitCompareLines(lines, m.height), "\n"))
 }
 
 func compareDirectoryPath(file string) string {

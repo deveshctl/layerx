@@ -229,3 +229,25 @@ func TestCompareContentScrollBoundsAndColumnAlignment(t *testing.T) {
 		}
 	}
 }
+
+func TestCompareLimitedTextRetainsMetadata(t *testing.T) {
+	for _, data := range []string{strings.Repeat("line\n", 1501), strings.Repeat("x", 4097)} {
+		extractor := &compareContentExtractor{data: []byte(data)}
+		inputs := [2]image.CompareInput{{Ref: "pinned", Resolver: &compareContentResolver{digest: "pinned", extractor: extractor}}}
+		results := [2]image.CompareImage{{Digest: "pinned", Analysis: &image.Analysis{Layers: []image.Layer{{}}}}}
+		content, err := loadCompareContent(t.Context(), image.FileDiff{Path: "/large.log", DiffType: image.Removed}, &image.FileNode{Size: int64(len(data)), UID: 1000}, nil, inputs, results)
+		require.Empty(t, err)
+		require.NotNil(t, content)
+		assert.Contains(t, content.note, "Text preview unavailable")
+		assert.Contains(t, content.metadata, "uid:1000")
+	}
+}
+
+func TestCompareNarrowReplacementColors(t *testing.T) {
+	theme := themeFor("")
+	m := compareModel{theme: theme, width: 68, height: 17, content: &compareContent{rows: []compareContentRow{{before: "old value", after: "new value", beforeLine: 1, afterLine: 1}}}}
+	out := m.contentView().Content
+	assert.Contains(t, ansi.Strip(out), "old value → new value")
+	assert.Contains(t, out, styleWithFg(theme.Removed).Render("old value"))
+	assert.Contains(t, out, styleWithFg(theme.Added).Render("new value"))
+}

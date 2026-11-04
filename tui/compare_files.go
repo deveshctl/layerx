@@ -269,7 +269,7 @@ func (m compareModel) fileBrowserView() tea.View {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
 	lines = fitCompareLines(lines, m.height)
-	return finalizeViewNoMouse(tea.NewView(strings.Join(lines, "\n")), m.theme.MainBg)
+	return m.finalCompareView(strings.Join(lines, "\n"))
 }
 
 func compareFileMeta(n *image.FileNode) string {

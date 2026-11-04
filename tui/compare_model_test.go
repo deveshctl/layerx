@@ -212,7 +212,7 @@ func TestCompareBrowserShowsBudgetAndKeepsFooter(t *testing.T) {
 	assert.Contains(t, out, "FAIL image size")
 	next, _ := m.Update(tea.KeyPressMsg{Code: '?'})
 	m = next.(compareModel)
-	assert.Contains(t, m.View().Content, "Ctrl+u/d")
+	assert.Contains(t, m.View().Content, "Start here")
 	m.height = 3
 	assert.Contains(t, m.View().Content, "back")
 }

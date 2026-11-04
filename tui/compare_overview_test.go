@@ -100,3 +100,81 @@ func TestCompareSeparatesHeaderPanelAndFooter(t *testing.T) {
 	assert.Contains(t, lines[23], "│")
 	assert.Contains(t, lines[23], "0/0 areas")
 }
+
+func TestCompareGuideAllTextReachableInSmallTerminals(t *testing.T) {
+	for _, width := range []int{40, 72, 80, 120} {
+		m := compareModel{overview: true, result: &image.CompareResult{}, keys: defaultKeys(), theme: themeFor(""), width: width, height: 24}
+		next, _ := m.Update(tea.KeyPressMsg{Code: '?'})
+		m = next.(compareModel)
+		var seen strings.Builder
+		for range len(m.compareGuideLines()) {
+			seen.WriteString(ansi.Strip(m.View().Content))
+			next, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			m = next.(compareModel)
+		}
+		for _, line := range m.compareGuideLines() {
+			assert.Contains(t, seen.String(), strings.TrimSpace(ansi.Strip(line)))
+		}
+		if len(m.compareGuideLines()) > 16 {
+			assert.Greater(t, m.guideOffset, 0)
+		}
+		next, _ = m.Update(tea.KeyPressMsg{Code: 'g'})
+		m = next.(compareModel)
+		assert.Zero(t, m.guideOffset)
+		next, _ = m.Update(tea.KeyPressMsg{Code: 'G'})
+		m = next.(compareModel)
+		assert.Contains(t, ansi.Strip(m.View().Content), "opportunity.")
+		next, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 60})
+		m = next.(compareModel)
+		assert.Zero(t, m.guideOffset)
+		next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+		assert.False(t, next.(compareModel).guideOpen)
+	}
+}
+
+func TestCompareCompactFooterKeepsLabelsAndSeparators(t *testing.T) {
+	m := compareModel{result: &image.CompareResult{}, contentOpen: true, content: &compareContent{rows: []compareContentRow{{after: "text", afterLine: 1}}}, theme: themeFor(""), width: 72, height: 24}
+	footer := ansi.Strip(m.compareFooter(70))
+	assert.Contains(t, footer, "Esc files")
+	assert.Contains(t, footer, "│")
+	assert.Contains(t, footer, "? guide")
+	assert.LessOrEqual(t, ansi.StringWidth(footer), 70)
+	m.contentOpen = false
+	m.fileView = true
+	m.fileFiltering = true
+	assert.Contains(t, ansi.Strip(m.compareFooter(38)), "Ctrl+C")
+}
+
+func TestComparisonUsesEveryBuiltInThemeAcrossViews(t *testing.T) {
+	for _, name := range []string{"tokyo-night", "catppuccin-mocha", "kanagawa", "gruvbox-dark", "rose-pine", "dracula", "oxocarbon", "cyberdream"} {
+		for _, size := range [][2]int{{40, 16}, {72, 24}, {80, 24}, {140, 36}} {
+			theme := themeFor(name)
+			result := image.CompareAnalysis(&image.Analysis{ImageRef: "before"}, &image.Analysis{ImageRef: "after"})
+			for _, view := range []string{"overview", "layers", "files", "text", "metadata", "guide"} {
+				m := compareModel{result: result, fileIndex: &compareFileIndex{}, keys: defaultKeys(), theme: theme, width: size[0], height: size[1]}
+				m.overview = view == "overview"
+				m.fileView = view == "files"
+				m.guideOpen = view == "guide"
+				if view == "text" || view == "metadata" {
+					m.contentOpen = true
+					m.content = &compareContent{path: "/app/file", rows: []compareContentRow{{before: "before", after: "after", beforeLine: 1, afterLine: 1}}}
+				}
+				if view == "metadata" {
+					m.content.note = "Binary file"
+					m.content.metadata = "After: 42 B"
+				}
+				out := m.View()
+				assert.Equal(t, theme.MainBg, out.BackgroundColor, "theme=%s view=%s", name, view)
+				assert.Contains(t, out.Content, renderBrand(theme))
+				prefix := strings.Split(styleWithFg(theme.FileName).Render("BODY"), "BODY")[0]
+				assert.Contains(t, out.Content, prefix, "body should use theme foreground: %s %s", name, view)
+				for _, line := range strings.Split(out.Content, "\n") {
+					assert.LessOrEqual(t, ansi.StringWidth(line), size[0])
+				}
+				assert.LessOrEqual(t, len(strings.Split(out.Content, "\n")), size[1])
+				m.theme.MainBg = nil
+				assert.Nil(t, m.View().BackgroundColor, "transparent theme=%s view=%s", name, view)
+			}
+		}
+	}
+}

@@ -190,6 +190,7 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 			Inputs:  [2]image.CompareInput{{Ref: oldRef, Resolver: oldResolver}, {Ref: newRef, Resolver: newResolver}},
 			Options: image.CompareRunOptions{NoCache: noCache, Platform: activePlatformDisplay()},
 			Theme:   themeName, Input: cmd.InOrStdin(), Output: out,
+			TransparentBg: cfg.TransparentBackground,
 			CheckSize: func(before, after *image.Analysis) ([]sizebudget.Result, error) {
 				if limits.Growth != nil {
 					if err := matchingPlatforms(before, after); err != nil {
