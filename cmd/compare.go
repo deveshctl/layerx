@@ -13,6 +13,8 @@ import (
 
 	"github.com/deveshctl/layerx/config"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
+	"github.com/deveshctl/layerx/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +77,22 @@ Reads size-budget and theme from .layerx.yaml; --config selects another file.
 Flags override size budgets. CI efficiency thresholds and path rules apply
 only to ci; compare retains its efficiency/waste regression checks.
 Size budgets measure uncompressed layer tar bytes. File differences compare
-size and metadata, not file contents. Use --format json or markdown for reports.`,
+size and metadata, not file contents. Use --format json or markdown for reports.
+
+Use -i to browse paired layers and file changes, and inspect bounded text
+differences. Interactive mode does not emit a report or a machine-parseable
+final verdict line. Requires terminal input and output; cannot be combined
+with --mode, --top, or non-text --format.
+
+Interactive keys:
+  1/2/3, Tab       layers, files, overview; cycle views
+  arrows, j/k      move; PgUp/PgDn page; Ctrl+u/d half page; g/G ends
+  Enter, v         inspect files (Enter investigates overview directories)
+  /, s, m          filter paths, change file ranking, toggle metadata
+  h/l, left/right  scroll text; l opens the origin layer in metadata details
+  ?                open/close the comparison guide
+  Esc              go back or clear file scope/filter
+  q, Ctrl+C        go back or exit; Ctrl+C always exits (both cancel loading)`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
   layerx compare --mode full app:1.4.0 app:1.5.0
@@ -89,6 +106,7 @@ size and metadata, not file contents. Use --format json or markdown for reports.
 }
 
 func init() {
+	compareCmd.Flags().BoolP("interactive", "i", false, "browse layer and file differences (requires a terminal)")
 	compareCmd.Flags().StringVar(&flagCompareMode, "mode", compareModeCompact,
 		"report detail: compact, full, or summary")
 	compareCmd.Flags().IntVar(&flagCompareTop, "top", compareTopDefault,
@@ -138,6 +156,10 @@ func runCompareCmd(cmd *cobra.Command, args []string) error {
 
 func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	oldRef, newRef := args[0], args[1]
+	if err := validateInteractiveCompare(cmd); err != nil {
+		return err
+	}
+	interactive, _ := cmd.Flags().GetBool("interactive")
 
 	if err := validateCompareFlags(flagCompareMode, flagCompareTop); err != nil {
 		return err
@@ -172,13 +194,37 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("preparing new image %q: %w", newRef, err)
 	}
 
-	oldDigest, oldAnalysis, err := analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
-	if err != nil {
-		return fmt.Errorf("analyzing old image %q: %w", oldRef, err)
-	}
-	newDigest, newAnalysis, err := analyzeForCompare(ctx, newResolver, newRef, noCache, "new", stderr)
-	if err != nil {
-		return fmt.Errorf("analyzing new image %q: %w", newRef, err)
+	var oldDigest, newDigest string
+	var oldAnalysis, newAnalysis *image.Analysis
+	if interactive {
+		pair, runErr := tui.RunCompareAnalysis(ctx, tui.CompareConfig{
+			Inputs:  [2]image.CompareInput{{Ref: oldRef, Resolver: oldResolver}, {Ref: newRef, Resolver: newResolver}},
+			Options: image.CompareRunOptions{NoCache: noCache, Platform: activePlatformDisplay()},
+			Theme:   themeName, Input: cmd.InOrStdin(), Output: out,
+			TransparentBg: cfg.TransparentBackground,
+			CheckSize: func(before, after *image.Analysis) ([]sizebudget.Result, error) {
+				if limits.Growth != nil {
+					if err := matchingPlatforms(before, after); err != nil {
+						return nil, err
+					}
+				}
+				return limits.Evaluate(budgetConfig, after.UncompressedSize, &before.UncompressedSize)
+			},
+		})
+		if runErr != nil {
+			return runErr
+		}
+		oldDigest, oldAnalysis = pair[0].Digest, pair[0].Analysis
+		newDigest, newAnalysis = pair[1].Digest, pair[1].Analysis
+	} else {
+		oldDigest, oldAnalysis, err = analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
+		if err != nil {
+			return fmt.Errorf("analyzing old image %q: %w", oldRef, err)
+		}
+		newDigest, newAnalysis, err = analyzeForCompare(ctx, newResolver, newRef, noCache, "new", stderr)
+		if err != nil {
+			return fmt.Errorf("analyzing new image %q: %w", newRef, err)
+		}
 	}
 
 	if limits.Growth != nil {
@@ -191,7 +237,7 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	result := image.CompareAnalysis(oldAnalysis, newAnalysis)
-	if !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
+	if !interactive && !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
 		renderNoOp(out, oldDigest)
 		return nil
 	}
@@ -201,6 +247,12 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	report.Before = &before
 	report.Comparison = result
 	report.Passed = report.Passed && !result.IsRegression()
+	if interactive {
+		if !report.Passed {
+			return &ErrCompareRegression{}
+		}
+		return nil
+	}
 	options := terminalCompareOptions(out, themeName)
 	if format != "text" {
 		options.Color = false
@@ -232,10 +284,8 @@ func validateCompareFlags(mode string, top int) error {
 
 // analyzeForCompare runs the analyze pipeline for ref with progress events
 // drained to stderr (prefixed with side="old"/"new" so the user can tell which
-// image is currently resolving). Returns the post-resolve image digest used
-// for no-op detection. Post-analyze ImageID errors are surfaced as warnings
-// on stderr (the analysis succeeded; the digest is only used for the no-op
-// shortcut, so a missing digest is not fatal).
+// image is currently resolving). Returns the analyzed snapshot's digest for
+// no-op detection. Digest lookup warnings are delivered through progress.
 func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string, noCache bool, side string, stderr io.Writer) (string, *image.Analysis, error) {
 	progress := make(chan image.ProgressEvent, 32)
 	var wg sync.WaitGroup
@@ -255,10 +305,7 @@ func analyzeForCompare(ctx context.Context, resolver image.Resolver, ref string,
 	if err != nil {
 		return "", nil, err
 	}
-	digest, idErr := resolver.ImageID(ctx, ref)
-	if idErr != nil {
-		fmt.Fprintf(stderr, "warning: could not resolve digest for %q after analyze: %v\n", ref, idErr)
-	}
+	digest := analysis.Digest
 	if digest != "" {
 		fmt.Fprintf(stderr, "[%s] resolved %s\n", side, shortDigest(digest))
 	}

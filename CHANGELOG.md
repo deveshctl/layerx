@@ -8,14 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Interactive image comparison (`compare -i`) with cancellable loading, regression and size-budget results, paired layers, sortable and filterable file changes, and bounded text differences.
 - PR checklist and bug report and feature request forms, with guidance for private security reports.
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
 ### Fixed
+- Fix shifted comparison help keys and text line endings, reduce extraction memory use, and improve Windows cache and JSON export reliability.
+- Keep comparison content tied to the analyzed image, accept 1,500-line text files, reject incomplete archives with cached analyses, and restore the terminal on hangup.
 - Reject empty YAML size limits instead of silently skipping their checks.
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 
 ### Changed
+- Make comparison help clearer and scrollable, honor theme and background settings throughout, and preserve compact shortcuts, diff colors and file metadata.
+- Redesign interactive comparisons with LayerX styling, a guided overview, directory hotspots, growth-ranked files, useful binary metadata and stable side-by-side text diffs.
 - File browsing now offers folder navigation keys, a files-only size list, and a wider names view.
 - Speed up image analysis and archive inspection, especially for larger images and slower filesystems.
 - Remove unused review tooling and correct contributor release guidance.

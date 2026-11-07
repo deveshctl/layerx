@@ -103,6 +103,35 @@ content changes can be absent. Layer hashes still reveal changed layer
 streams. File and directory byte changes are investigation leads, not proof
 that a particular Dockerfile instruction caused all growth.
 
+Use `layerx compare -i OLD NEW` in a terminal. The overview shows image
+identities, size/waste changes, budget results and directory hotspots. Select
+a directory and press `Enter` to investigate its changed files. Directories
+are grouped into the first two path components (for example `/usr/lib`);
+root-level files form their own group. Totals cover changed files only, not
+whole directory sizes. `Esc` clears the directory scope.
+
+Press `1` for layer pairs, `2` for all changed files, or `3` for the overview;
+`Tab` cycles through these views. Files initially rank by growth. `/` searches
+paths, `s` cycles path/growth/shrink ranking, `m` shows metadata, and `Enter`
+opens file details. Binary files, links and files above the text limit retain
+size, ownership and available origin-layer information without requiring a
+text diff. Press `l` from a metadata-only detail view to jump to its origin
+layer. The origin layer is provenance, not proof of the cause of growth.
+
+Text inspection accepts regular UTF-8 files up to 5 MiB per side, with at most
+1,500 lines and 4,096 bytes per line. Replaced lines align side by side; narrow
+terminals use a compact view. CRLF and CR line endings are normalized to LF
+for the preview; the 5 MiB limit applies to the original bytes. Layers are
+streamed during extraction rather than buffered in memory.
+Diff colours remain stable while navigating.
+Same-size content changes are not detected by the file list. PASS means the
+regression checks and configured budgets pass, not that every file is identical.
+
+Press `?` for contextual help, `Esc` to return from file details, and `q` to
+leave the browser. Exiting preserves the comparison exit code without printing
+a report. Interactive mode cannot be combined with `--mode`, `--top`, or
+JSON/Markdown output.
+
 The default compact report ranks changes by absolute byte impact and omits
 shared layer rows. It includes directory summaries when there are many file
 changes. Use `--top 20` to increase the compact detail, `--mode full` for all

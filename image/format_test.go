@@ -94,4 +94,3 @@ func TestFormatMode(t *testing.T) {
 		})
 	}
 }
-

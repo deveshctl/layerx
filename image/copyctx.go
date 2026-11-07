@@ -6,6 +6,19 @@ import (
 	"io"
 )
 
+// contextReader checks cancellation even while tar.Reader skips large entries.
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
+}
+
 func copyCtx(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
 	buf := make([]byte, 32*1024)
 	var written int64

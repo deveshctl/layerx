@@ -696,9 +696,9 @@ func TestWalkBackForFile_LazyLoaderStopsAtFirstHit(t *testing.T) {
 		"layer2/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/a.txt": "v2"}),
 	}
 	loadCalls := make(map[string]int)
-	loader := func(name string) ([]byte, error) {
+	loader := func(name string) (io.Reader, error) {
 		loadCalls[name]++
-		return blobs[name], nil
+		return bytes.NewReader(blobs[name]), nil
 	}
 
 	data, err := walkBackForFile(layerPaths, loader, target, "/"+target, 2)
@@ -729,9 +729,9 @@ func TestWalkBackForFile_LoadsOnlyVisitedLayers(t *testing.T) {
 		"layer3/layer.tar": buildLayerTarFromMap(t, map[string]string{"tmp/a.txt": "v3"}),
 	}
 	loadOrder := []string{}
-	loader := func(name string) ([]byte, error) {
+	loader := func(name string) (io.Reader, error) {
 		loadOrder = append(loadOrder, name)
-		return blobs[name], nil
+		return bytes.NewReader(blobs[name]), nil
 	}
 
 	data, err := walkBackForFile(layerPaths, loader, target, "/"+target, 2)
@@ -741,10 +741,10 @@ func TestWalkBackForFile_LoadsOnlyVisitedLayers(t *testing.T) {
 		"loader must be called for layer2 (skip) then layer1 (hit) only")
 }
 
-// readSingleBlobFromSpool must reject a blob whose tar header declares a
+// openLayerBlobFromSpool must reject a blob whose tar header declares a
 // size above MaxLayerBlobSize. Without the cap the prior io.ReadAll would
 // OOM on a malformed manifest claiming a single blob is multi-PB.
-func TestReadSingleBlobFromSpool_OversizedHeaderRejected(t *testing.T) {
+func TestOpenLayerBlobFromSpool_OversizedHeaderRejected(t *testing.T) {
 	// Build an outer tar where one blob's header.Size lies far above
 	// MaxLayerBlobSize. The body is a few bytes; the cap fires off the
 	// header alone before any allocation.
@@ -757,7 +757,7 @@ func TestReadSingleBlobFromSpool_OversizedHeaderRejected(t *testing.T) {
 		Typeflag: tar.TypeReg,
 	}
 	require.NoError(t, tw.WriteHeader(hdr))
-	// Write a tiny body — readSingleBlobFromSpool checks the header before
+	// Write a tiny body — openLayerBlobFromSpool checks the header before
 	// it ever reads bytes, so the body length doesn't matter here.
 	_, err := tw.Write([]byte("x"))
 	// tar.Writer rejects body shorter than declared Size at Close time, so
@@ -773,7 +773,7 @@ func TestReadSingleBlobFromSpool_OversizedHeaderRejected(t *testing.T) {
 	_, err = tmp.Write(outer.Bytes())
 	require.NoError(t, err)
 
-	_, err = readSingleBlobFromSpool(tmp, "huge/layer.tar")
+	_, err = openLayerBlobFromSpool(t.Context(), tmp, "huge/layer.tar")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too large")
 }

@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -75,9 +76,18 @@ func TestDockerExtractor_PlatformParity(t *testing.T) {
 			if tc.armLayers == 0 {
 				tc.armLayers = 1
 			}
+			count := 1
+			if tc.wantArch == "arm64" {
+				count = tc.armLayers
+			}
+			commands := make([]string, count)
+			for i := range commands {
+				commands[i] = "ADD " + tc.wantArch
+			}
+			configID := fmt.Sprintf("sha256:%x", sha256.Sum256(buildConfigWithPlatform(t, "linux", tc.wantArch, "", commands)))
 			ref := "fixture:test"
 			if tc.imageID != "" {
-				ref = tc.imageID
+				ref = configID
 			}
 			scoped := buildPlatformExtractionArchive(t, tc.armLayers, tc.wantArch)
 			unscoped := buildPlatformExtractionArchive(t, tc.armLayers, "amd64", "arm64")
@@ -103,7 +113,7 @@ func TestDockerExtractor_PlatformParity(t *testing.T) {
 				case "/images/json":
 					fmt.Fprint(w, `[{"Id":"sha256:fixture"}]`)
 				case "/images/" + ref + "/json":
-					fmt.Fprintf(w, `{"Id":"sha256:%s","Os":"linux","Architecture":%q}`, strings.Repeat("a", 64), tc.wantArch)
+					fmt.Fprintf(w, `{"Id":%q,"Os":"linux","Architecture":%q}`, configID, tc.wantArch)
 				case "/images/create":
 					assert.Equal(t, "linux/"+tc.pin, req.URL.Query().Get("platform"))
 					fmt.Fprintln(w, `{"status":"Download complete"}`)
@@ -148,10 +158,6 @@ func TestDockerExtractor_PlatformParity(t *testing.T) {
 			analysis, err := AnalyzeWithOptions(ctx, resolver, ref, analysisOpts)
 			require.NoError(t, err)
 			layers := analysis.Layers
-			count := 1
-			if tc.wantArch == "arm64" {
-				count = tc.armLayers
-			}
 			require.Len(t, layers, count)
 			assert.Equal(t, "ADD "+tc.wantArch, layers[count-1].Command)
 			extractor := resolver.(ExtractorSource).NewExtractor()

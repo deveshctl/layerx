@@ -2123,10 +2123,8 @@ func (m model) leftPanelWidth() int {
 }
 
 func (m model) renderHeader() string {
-	glyph := m.styles.accentBg.Render("◆")
-	brand := m.styles.accentBg.Bold(true).Render(" layerx")
 	sep := m.styles.headerSep.Render(" │ ")
-	prefix := glyph + brand + sep
+	prefix := renderBrand(m.theme) + sep
 	platform := ""
 	// Append the active platform after the image name when --platform is
 	// set. Multi-platform images otherwise give no visual cue which variant

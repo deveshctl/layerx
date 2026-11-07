@@ -747,8 +747,10 @@ func parseLayersFromManifest(ctx context.Context, spool *os.File, manifest docke
 	}
 
 	layers := make([]Layer, len(manifest.Layers))
+	imageID := fmt.Sprintf("sha256:%x", sha256.Sum256(configData))
 	for i, layerPath := range manifest.Layers {
 		layers[i] = Layer{
+			imageID:  imageID,
 			Index:    i,
 			ID:       extractShortID(layerPath),
 			Size:     headers[layerPath],
@@ -998,19 +1000,8 @@ func readEntryFromSpool(spool *os.File, name string) ([]byte, error) {
 	}
 }
 
-// decompressIfGzip returns a reader that decompresses gzip data, or wraps raw
-// bytes directly. Docker 25+ OCI format stores layer blobs as gzip-compressed tar.
-// Callers must Close the returned reader.
-func decompressIfGzip(data []byte) (io.ReadCloser, error) {
-	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
-		return gzip.NewReader(bytes.NewReader(data))
-	}
-	return io.NopCloser(bytes.NewReader(data)), nil
-}
-
-// decompressIfGzipStream is the streaming variant of decompressIfGzip. It
-// peeks the first 2 bytes via a bufio.Reader and gzip-wraps the rest if the
-// gzip magic is present, otherwise returns the buffered reader unchanged.
+// decompressIfGzipStream peeks the first 2 bytes and gzip-wraps the stream if
+// the gzip magic is present, otherwise returns the buffered reader unchanged.
 // Callers must Close the returned reader.
 //
 // Use this for layer blobs that may be arbitrarily large (multi-GB ML model
