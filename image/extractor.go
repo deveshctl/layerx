@@ -2,6 +2,7 @@ package image
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -285,13 +286,12 @@ func readFullFileFromTar(r io.Reader) ([]byte, error) {
 	}
 }
 
-// blobLoader returns the bytes of a single layer blob by name. Implementations
-// read on-demand from the underlying archive (spool file or on-disk archive)
-// so peak heap is one blob, not the sum of every blob up to the layer cursor.
+// blobLoader opens a layer stream backed by the source archive. Consume it
+// before loading another layer; the caller owns the archive's lifetime.
 // A blob that does not exist returns (nil, nil) — walkBackForFile treats
 // "missing blob" the same as "blob whose tar contains nothing for the path"
 // and continues the walk-back.
-type blobLoader func(name string) ([]byte, error)
+type blobLoader func(name string) (io.Reader, error)
 
 // walkBackForFile walks layerPaths from layerCursor toward 0 looking for
 // cleanPath as a regular file. The first layer that contains it returns
@@ -300,12 +300,7 @@ type blobLoader func(name string) ([]byte, error)
 // (no leading slash). Shared by DockerExtractor and ArchiveExtractor — the
 // only difference between the two is how they obtain layerPaths and blobs.
 //
-// load is invoked lazily, once per layer index visited, so the largest blob
-// resident in memory at any moment is the single blob currently being
-// scanned. This is the load-bearing memory bound for images with many large
-// layers (e.g. ML model images): the prior eager-load implementation pinned
-// every kept blob until the function returned, which OOMed on multi-GB
-// images.
+// Layers are streamed lazily; only the requested file is buffered in memory.
 func walkBackForFile(layerPaths []string, load blobLoader, cleanPath, displayPath string, layerCursor int) ([]byte, error) {
 	return walkBackForFileBounded(context.Background(), layerPaths, load, cleanPath, displayPath, layerCursor, MaxSaveSize)
 }
@@ -322,7 +317,7 @@ func walkBackForFileBounded(ctx context.Context, layerPaths []string, load blobL
 		if blob == nil {
 			continue
 		}
-		data, found, err := findFileInLayerBounded(ctx, blob, cleanPath, maxBytes)
+		data, found, err := findFileInLayerStream(ctx, blob, cleanPath, maxBytes)
 		if errors.Is(err, errWhiteoutStop) {
 			return nil, fmt.Errorf("file %s was removed in layer %d", displayPath, j)
 		}
@@ -357,11 +352,7 @@ var errPathNotRegular = errors.New("path exists but is not a regular file")
 //   - load        : a blobLoader that reads one blob at a time from the spool
 //   - closeFn     : releases and removes the spool; the caller MUST defer it
 //
-// Memory bound: peak heap during a walk-back is one blob — the largest blob
-// the walk happens to read — plus the manifest. The prior implementation
-// pre-read every blob up to the layer cursor into a map, which OOMed on
-// multi-GB ML-model images and on TUI key-mash sequences that fired
-// concurrent extracts.
+// Layers are read from the spool as streams; only matching file data is buffered.
 //
 // maxLayers must be > 0; it bounds which manifest entries are eligible for
 // load. A request for an entry outside that prefix returns (nil, nil) —
@@ -416,7 +407,7 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		keep[p] = struct{}{}
 	}
 
-	load = func(name string) ([]byte, error) {
+	load = func(name string) (io.Reader, error) {
 		if _, ok := keep[name]; !ok {
 			return nil, nil
 		}
@@ -427,27 +418,18 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		if size > MaxLayerBlobSize {
 			return nil, fmt.Errorf("layer blob %s too large: %d bytes (limit %d)", name, size, MaxLayerBlobSize)
 		}
-		return readSingleBlobFromSpool(spool, name)
+		return openLayerBlobFromSpool(ctx, spool, name)
 	}
 	return layerPaths, load, cleanup, nil
 }
 
-// readSingleBlobFromSpool walks the spooled outer tar from the beginning and
-// returns the bytes of the entry whose name equals wanted, or (nil, nil) if
-// the spool does not contain that entry. Other entries are streamed past
-// without buffering.
-//
-// The blob is bounded by MaxLayerBlobSize. A blob whose tar header declares
-// a size above the cap fails fast; an io.LimitReader on the body catches
-// streams whose declared size understates the actual length. The cap is
-// generous (16 GiB) — legitimate ML / dataset layers can exceed 1 GiB —
-// while still preventing runaway allocation from a malformed or hostile
-// archive.
-func readSingleBlobFromSpool(spool *os.File, wanted string) ([]byte, error) {
+// openLayerBlobFromSpool returns a stream limited to the matching tar entry,
+// or nil if absent. It never buffers the blob. Consume it before seeking spool.
+func openLayerBlobFromSpool(ctx context.Context, spool *os.File, wanted string) (io.Reader, error) {
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek spool: %w", err)
 	}
-	tr := tar.NewReader(spool)
+	tr := tar.NewReader(contextReader{ctx: ctx, reader: spool})
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -462,14 +444,7 @@ func readSingleBlobFromSpool(spool *os.File, wanted string) ([]byte, error) {
 		if hdr.Size > MaxLayerBlobSize {
 			return nil, fmt.Errorf("layer blob %s too large: %d bytes (limit %d)", wanted, hdr.Size, MaxLayerBlobSize)
 		}
-		data, err := io.ReadAll(io.LimitReader(tr, MaxLayerBlobSize+1))
-		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", wanted, err)
-		}
-		if int64(len(data)) > MaxLayerBlobSize {
-			return nil, fmt.Errorf("layer blob %s too large: stream exceeds %d bytes", wanted, MaxLayerBlobSize)
-		}
-		return data, nil
+		return tr, nil
 	}
 }
 
@@ -490,7 +465,11 @@ func findFileInLayer(layerBytes []byte, filePath string) ([]byte, bool, error) {
 }
 
 func findFileInLayerBounded(ctx context.Context, layerBytes []byte, filePath string, maxBytes int64) ([]byte, bool, error) {
-	r, err := decompressIfGzip(layerBytes)
+	return findFileInLayerStream(ctx, bytes.NewReader(layerBytes), filePath, maxBytes)
+}
+
+func findFileInLayerStream(ctx context.Context, layer io.Reader, filePath string, maxBytes int64) ([]byte, bool, error) {
+	r, err := decompressIfGzipStream(contextReader{ctx: ctx, reader: layer})
 	if err != nil {
 		return nil, false, fmt.Errorf("decompressing layer: %w", err)
 	}
@@ -504,7 +483,8 @@ func findFileInLayerBounded(ctx context.Context, layerBytes []byte, filePath str
 	// the per-entry MaxSaveSize check below only bounds reads of the matched
 	// file, not the walk itself. MaxLayerBlobSize matches the ceiling used
 	// when loading layer blobs from a spooled image archive.
-	tr := tar.NewReader(io.LimitReader(r, MaxLayerBlobSize+1))
+	limited := &io.LimitedReader{R: contextReader{ctx: ctx, reader: r}, N: MaxLayerBlobSize + 1}
+	tr := tar.NewReader(limited)
 
 	// Walk the full layer once. A regular entry for filePath in the same
 	// layer wins over an earlier-positioned whiteout for the same path —
@@ -523,6 +503,9 @@ func findFileInLayerBounded(ctx context.Context, layerBytes []byte, filePath str
 			return nil, false, err
 		}
 		hdr, err := tr.Next()
+		if limited.N == 0 {
+			return nil, false, fmt.Errorf("layer exceeds %d decompressed bytes", MaxLayerBlobSize)
+		}
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -583,6 +566,14 @@ func findFileInLayerBounded(ctx context.Context, layerBytes []byte, filePath str
 		}
 		regularData = data
 		foundRegular = true
+	}
+	// Tar EOF can precede the end of the blob. Drain through the gzip trailer
+	// to detect corrupt checksums, truncated outer entries, and oversized padding.
+	if _, err := io.Copy(io.Discard, limited); err != nil {
+		return nil, false, fmt.Errorf("reading layer trailer: %w", err)
+	}
+	if limited.N == 0 {
+		return nil, false, fmt.Errorf("layer exceeds %d decompressed bytes", MaxLayerBlobSize)
 	}
 
 	if foundRegular {

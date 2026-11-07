@@ -80,8 +80,19 @@ Size budgets measure uncompressed layer tar bytes. File differences compare
 size and metadata, not file contents. Use --format json or markdown for reports.
 
 Use -i to browse paired layers and file changes, and inspect bounded text
-differences without printing a report on exit. Requires terminal input and output; cannot
-be combined with --mode, --top, or non-text --format.`,
+differences. Interactive mode does not emit a report or a machine-parseable
+final verdict line. Requires terminal input and output; cannot be combined
+with --mode, --top, or non-text --format.
+
+Interactive keys:
+  1/2/3, Tab       layers, files, overview; cycle views
+  arrows, j/k      move; PgUp/PgDn page; Ctrl+u/d half page; g/G ends
+  Enter, v         inspect files (Enter investigates overview directories)
+  /, s, m          filter paths, change file ranking, toggle metadata
+  h/l, left/right  scroll text; l opens the origin layer in metadata details
+  ?                open/close the comparison guide
+  Esc              go back or clear file scope/filter
+  q, Ctrl+C        go back or exit; Ctrl+C always exits (both cancel loading)`,
 	Example: `  layerx compare app:1.4.0 app:1.5.0
   layerx compare ./build/previous.tar ./build/current.tar
   layerx compare --mode full app:1.4.0 app:1.5.0

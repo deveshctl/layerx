@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -292,7 +293,7 @@ func (e *ArchiveExtractor) ExtractFromLayer(ctx context.Context, imageRef string
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, load, closeFn, err := e.loadLayerSource(layerCursor + 1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(ctx, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +318,7 @@ func (e *ArchiveExtractor) ExtractRawFromLayer(ctx context.Context, imageRef str
 	if layerCursor < 0 {
 		return nil, fmt.Errorf("invalid layer index %d", layerCursor)
 	}
-	layerPaths, load, closeFn, err := e.loadLayerSource(layerCursor + 1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(ctx, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +342,7 @@ func (e *ArchiveExtractor) ExtractBoundedFromLayer(ctx context.Context, imageRef
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	layerPaths, load, closeFn, err := e.loadLayerSource(layerCursor + 1)
+	layerPaths, load, closeFn, err := e.loadLayerSource(ctx, layerCursor+1)
 	if err != nil {
 		return nil, err
 	}
@@ -363,12 +364,11 @@ func (e *ArchiveExtractor) ExtractBoundedFromLayer(ctx context.Context, imageRef
 // plus a lazy blob loader scoped to the first maxLayers entries. The caller
 // MUST defer closeFn to release the file handle.
 //
-// Memory bound mirrors DockerExtractor.loadLayerSource: peak heap is one
-// blob (the largest one walkBackForFile happens to read), not the sum of
-// every blob up to layerCursor. maxLayers must be > 0 — Extract / ExtractRaw
+// Layers are streamed, so peak heap is bounded by the requested file rather
+// than the layer size. maxLayers must be > 0 — Extract / ExtractRaw
 // discover the layer count via layerCount() first so they never need an
 // "all layers" sentinel.
-func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, load blobLoader, closeFn func(), err error) {
+func (e *ArchiveExtractor) loadLayerSource(ctx context.Context, maxLayers int) (layerPaths []string, load blobLoader, closeFn func(), err error) {
 	if maxLayers <= 0 {
 		return nil, nil, nil, fmt.Errorf("loadLayerSource: maxLayers must be > 0, got %d", maxLayers)
 	}
@@ -392,7 +392,7 @@ func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, 
 		keep[p] = struct{}{}
 	}
 
-	load = func(name string) ([]byte, error) {
+	load = func(name string) (io.Reader, error) {
 		if _, ok := keep[name]; !ok {
 			return nil, nil
 		}
@@ -403,7 +403,7 @@ func (e *ArchiveExtractor) loadLayerSource(maxLayers int) (layerPaths []string, 
 		if size > MaxLayerBlobSize {
 			return nil, &ErrInvalidArchive{Path: e.path, Cause: fmt.Errorf("layer blob %s too large: %d bytes (limit %d)", name, size, MaxLayerBlobSize)}
 		}
-		data, err := readSingleBlobFromSpool(f, name)
+		data, err := openLayerBlobFromSpool(ctx, f, name)
 		if err != nil {
 			return nil, &ErrInvalidArchive{Path: e.path, Cause: err}
 		}

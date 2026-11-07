@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -107,6 +108,24 @@ func TestCompareContentLineLimit(t *testing.T) {
 				assert.NoError(t, err, "lines=%d trailing newline=%t", count, trailingNewline)
 			}
 		}
+	}
+}
+
+func TestCompareContentLineEndings(t *testing.T) {
+	for _, ending := range []string{"\n", "\r\n", "\r"} {
+		t.Run(strconv.Quote(ending), func(t *testing.T) {
+			rows, err := compareContentDiff([]byte("same"+ending+"end"+ending), []byte("same\nend\n"))
+			require.NoError(t, err)
+			for _, row := range rows {
+				assert.Equal(t, row.before, row.after)
+				assert.NotZero(t, row.beforeLine)
+				assert.NotZero(t, row.afterLine)
+			}
+			_, err = compareContentLines([]byte(strings.Repeat("x", compareContentMaxLineBytes) + ending))
+			assert.NoError(t, err)
+			_, err = compareContentLines([]byte(strings.Repeat("x"+ending, compareContentMaxLines+1)))
+			assert.ErrorContains(t, err, "lines")
+		})
 	}
 }
 

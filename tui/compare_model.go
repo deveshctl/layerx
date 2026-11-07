@@ -148,14 +148,14 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.guideOpen {
-			if msg.Code == tea.KeyEscape || msg.Code == '?' || key.Matches(msg, m.keys.Quit) {
+			if msg.Code == tea.KeyEscape || key.Matches(msg, m.keys.Help, m.keys.Quit) {
 				m.guideOpen = false
 			} else {
 				m.updateCompareGuide(msg)
 			}
 			return m, nil
 		}
-		if msg.Code == '?' && m.result != nil {
+		if key.Matches(msg, m.keys.Help) && m.result != nil {
 			m.guideOpen = true
 			m.guideOffset = 0
 			return m, nil

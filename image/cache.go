@@ -653,7 +653,7 @@ func isCacheGobName(name string) bool {
 // Entries are returned sorted oldest-first by mtime. Predictable order
 // keeps the renderer test-stable and matches PruneCache's eviction order.
 func ListCache(root string) ([]CacheEntry, []string, error) {
-	dirs, err := os.ReadDir(root)
+	dirs, err := readCacheRoot(root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []CacheEntry{}, nil, nil
@@ -687,6 +687,24 @@ func ListCache(root string) ([]CacheEntry, []string, error) {
 	return out, nil, nil
 }
 
+// Opening first distinguishes a missing root from a regular file on Windows,
+// where os.ReadDir can report both cases as ERROR_PATH_NOT_FOUND.
+func readCacheRoot(root string) ([]os.DirEntry, error) {
+	f, err := os.Open(root)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("cache root %q is not a directory", root)
+	}
+	return f.ReadDir(-1)
+}
+
 // PruneCache applies opts and returns what it did. Best-effort: a
 // RemoveAll failure is recorded in Warnings and skipped, never returned
 // as the function's err. The function's err is reserved for "could not
@@ -706,7 +724,7 @@ func PruneCache(root string, opts PruneOptions) (PruneResult, error) {
 		now = opts.Now
 	}
 
-	dirs, err := os.ReadDir(root)
+	dirs, err := readCacheRoot(root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return PruneResult{}, nil

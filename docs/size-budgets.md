@@ -120,7 +120,10 @@ layer. The origin layer is provenance, not proof of the cause of growth.
 
 Text inspection accepts regular UTF-8 files up to 5 MiB per side, with at most
 1,500 lines and 4,096 bytes per line. Replaced lines align side by side; narrow
-terminals use a compact view. Diff colours remain stable while navigating.
+terminals use a compact view. CRLF and CR line endings are normalized to LF
+for the preview; the 5 MiB limit applies to the original bytes. Layers are
+streamed during extraction rather than buffered in memory.
+Diff colours remain stable while navigating.
 Same-size content changes are not detected by the file list. PASS means the
 regression checks and configured budgets pass, not that every file is identical.
 

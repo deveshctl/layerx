@@ -22,6 +22,17 @@ type compareTestResolver struct {
 	block   bool
 }
 
+func TestCompareGuideShiftedHelpKey(t *testing.T) {
+	m := compareModel{result: &image.CompareResult{}, keys: defaultKeys(), fileView: true}
+	msg := tea.KeyPressMsg{Code: '/', ShiftedCode: '?', Text: "?", Mod: tea.ModShift}
+	for _, open := range []bool{true, false} {
+		next, _ := m.Update(msg)
+		m = next.(compareModel)
+		assert.Equal(t, open, m.guideOpen)
+		assert.False(t, m.fileFiltering)
+	}
+}
+
 func (r *compareTestResolver) ImageID(context.Context, string) (string, error) { return "", nil }
 func (r *compareTestResolver) Inspect(context.Context, string) (*image.ImageMeta, error) {
 	return &image.ImageMeta{}, nil

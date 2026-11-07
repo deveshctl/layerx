@@ -167,10 +167,14 @@ func compareContentLines(data []byte) ([]string, error) {
 	if len(data) > compareContentMaxBytes {
 		return nil, fmt.Errorf("file exceeds 5 MiB")
 	}
+	// Normalize CRLF and legacy CR endings for display, after the raw byte cap.
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 	lineCount, lineBytes := 1, 0
-	for i, ch := range data {
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
 		if ch == '\n' {
-			if i < len(data)-1 {
+			if i < len(text)-1 {
 				lineCount++
 			}
 			lineBytes = 0
@@ -184,7 +188,7 @@ func compareContentLines(data []byte) ([]string, error) {
 			return nil, fmt.Errorf("content line exceeds %d bytes", compareContentMaxLineBytes)
 		}
 	}
-	return strings.Split(string(data), "\n"), nil
+	return strings.Split(text, "\n"), nil
 }
 
 // A bounded LCS aligns equal lines, including changes separated by unchanged

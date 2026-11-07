@@ -205,7 +205,7 @@ func writeJSONAtomic(targetPath string, data []byte) error {
 		os.Remove(tmp)
 		return cleanDiskWriteErr(targetPath, err)
 	}
-	if err := os.Rename(tmp, targetPath); err != nil {
+	if err := renameJSON(tmp, targetPath); err != nil {
 		os.Remove(tmp)
 		return cleanDiskWriteErr(targetPath, err)
 	}

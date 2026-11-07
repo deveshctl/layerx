@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
 ### Fixed
+- Fix shifted comparison help keys and text line endings, reduce extraction memory use, and improve Windows cache and JSON export reliability.
 - Keep comparison content tied to the analyzed image, accept 1,500-line text files, reject incomplete archives with cached analyses, and restore the terminal on hangup.
 - Reject empty YAML size limits instead of silently skipping their checks.
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.

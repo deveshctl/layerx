@@ -474,7 +474,7 @@ layerx compare -i ./build/prev.tar ./build/current.tar
 
 - Reports size, efficiency, layer, file, and waste deltas in a deterministic text report with aligned columns.
 - Default compact mode shows the largest deltas per section with `... and N more` counters; `--mode full` prints everything; `--mode summary` keeps the header, any warnings and the verdict.
-- Last line is always machine-parseable: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>`, or `verdict: noop reason=path-equal`.
+- Text reports end with a machine-parseable line: `verdict: ok`, `verdict: regression reason=efficiency,waste`, `verdict: noop digest=<sha256>`, or `verdict: noop reason=path-equal`. Interactive mode (`-i`) emits no final report or verdict line.
 - Exit codes: `0` no regression, `1` regression detected, `2` operational error.
 - Live progress on stderr while resolving remote images. Pipe `2>/dev/null` to silence; stdout stays grep-clean for CI gating.
 - Interactive mode opens an overview of size, waste, budgets and directory hotspots. `Enter` on a directory investigates its changed files; `Esc` clears that scope. Use `1` for layers, `2` for all files, `3` for the overview, or `Tab` to cycle. File changes rank by growth; `/` searches, `s` changes ranking, `m` shows metadata, and `Enter` opens text or metadata details. Press `?` for help. `q` exits without another report, preserving the regression exit code; `q`/`Ctrl+C` cancel loading. Requires terminal input and output.
