@@ -182,10 +182,10 @@ func TestLoadFrom_RejectsUnknownTopLevelKey(t *testing.T) {
 // have surfaced as a misleading "parsing" error.
 func TestLoadFrom_EmptyFile_UsesDefaults(t *testing.T) {
 	cases := map[string]string{
-		"empty":             "",
-		"whitespace_only":   "   \n\n\t\n",
-		"comments_only":     "# just a comment\n# another\n",
-		"comments_and_ws":   "\n# placeholder\n\n",
+		"empty":           "",
+		"whitespace_only": "   \n\n\t\n",
+		"comments_only":   "# just a comment\n# another\n",
+		"comments_and_ws": "\n# placeholder\n\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

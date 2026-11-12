@@ -250,18 +250,18 @@ path-rules:
 // compareCmd one in cmd/compare_test.go.
 func TestCICmd_NoArgs_ShowsUsage(t *testing.T) {
 	cases := []struct {
-		name        string
-		args        []string
+		name         string
+		args         []string
 		wantSynopsis string // first line on stderr
 	}{
 		{
-			name:        "zero_args",
-			args:        []string{"ci"},
+			name:         "zero_args",
+			args:         []string{"ci"},
 			wantSynopsis: "expected 1 image or archive, got 0",
 		},
 		{
-			name:        "too_many_args",
-			args:        []string{"ci", "a", "b"},
+			name:         "too_many_args",
+			args:         []string{"ci", "a", "b"},
 			wantSynopsis: "expected 1 image or archive, got 2",
 		},
 	}

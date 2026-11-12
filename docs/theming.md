@@ -24,13 +24,16 @@ Three ways to set the theme, in precedence order (highest to lowest):
 | `theme:` in `.layerx.yaml` | `theme: dracula` | All runs in that directory |
 | Built-in default | No action needed | Fallback when neither of the above is set |
 
-The built-in default is `tokyo-night`.
+The built-in default is `tokyo-night`. Interactive comparisons use the same
+theme setting for their guide, image context, panels, file changes and footer.
+They also honor `transparent_background` from configuration.
 
 ### `--theme` flag
 
 ```bash
 layerx --theme dracula nginx:latest
 layerx --theme gruvbox-dark ./build/app.tar
+layerx compare -i --theme dracula app:before app:after
 ```
 
 Passing an unrecognised name exits immediately with a clear error listing the
