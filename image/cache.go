@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/deveshctl/layerx/internal/atomicfile"
 )
 
 // CacheDir returns the directory where layerx persists analysis caches.
@@ -491,7 +493,7 @@ func saveCacheWithPlatform(root, digest, platform, imageRef string, layers []Lay
 		file = "layers-" + slug + ".gob"
 	}
 	finalPath := filepath.Join(dir, file)
-	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
+	if renameErr := atomicfile.Rename(tmpPath, finalPath); renameErr != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming cache file: %w", renameErr)
 	}
@@ -530,7 +532,7 @@ func writeMetaSidecar(dir, imageRef string) {
 	if writeErr := os.WriteFile(tmpPath, body, 0o600); writeErr != nil {
 		return
 	}
-	if renameErr := os.Rename(tmpPath, filepath.Join(dir, "meta.json")); renameErr != nil {
+	if renameErr := atomicfile.Rename(tmpPath, filepath.Join(dir, "meta.json")); renameErr != nil {
 		_ = os.Remove(tmpPath)
 	}
 }

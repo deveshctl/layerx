@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/atomicfile"
 )
 
 // jsonExport is the on-disk shape of `layerx --json`. SchemaVersion is the
@@ -205,7 +206,7 @@ func writeJSONAtomic(targetPath string, data []byte) error {
 		os.Remove(tmp)
 		return cleanDiskWriteErr(targetPath, err)
 	}
-	if err := renameJSON(tmp, targetPath); err != nil {
+	if err := atomicfile.Rename(tmp, targetPath); err != nil {
 		os.Remove(tmp)
 		return cleanDiskWriteErr(targetPath, err)
 	}

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix shifted comparison help keys and text line endings, reduce extraction memory use, and improve Windows cache and JSON export reliability.
 - Keep comparison content tied to the analyzed image, accept 1,500-line text files, reject incomplete archives with cached analyses, and restore the terminal on hangup.
 - Keep large interactive comparisons responsive, reuse Docker exports for file previews, and make long paths and preview failures easier to inspect.
+- Avoid intermittent comparison cache warnings when both images share a digest on Windows.
 - Reject empty YAML size limits instead of silently skipping their checks.
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
 

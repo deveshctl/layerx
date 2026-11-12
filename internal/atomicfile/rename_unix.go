@@ -1,9 +1,9 @@
 //go:build !windows
 
-package cmd
+package atomicfile
 
 import "os"
 
-func renameJSON(oldPath, newPath string) error {
+func Rename(oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
 }

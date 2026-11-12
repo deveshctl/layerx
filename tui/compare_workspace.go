@@ -80,11 +80,14 @@ func (m compareModel) workspaceView() tea.View {
 			for row := 0; row < 3; row++ {
 				parts := make([]string, 3)
 				for i := range parts {
-					text := quiet.Render(labels[i])
-					if row == 1 {
+					var text string
+					switch row {
+					case 1:
 						text = strong.Render(values[i])
-					} else if row == 2 {
+					case 2:
 						text = quiet.Render(beforeAfter[i])
+					default:
+						text = quiet.Render(labels[i])
 					}
 					parts[i] = compareColumn(text, cell)
 				}
