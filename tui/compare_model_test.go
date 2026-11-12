@@ -109,7 +109,7 @@ func TestRunCompareAnalysisCancelledBeforeProgram(t *testing.T) {
 	cancel()
 	results, err := RunCompareAnalysis(ctx, cfg)
 	require.Error(t, err)
-	assert.Equal(t, [2]image.CompareImage{}, results)
+	assert.Equal(t, CompareOutcome{}, results)
 	for _, resolver := range resolvers {
 		select {
 		case <-resolver.started:

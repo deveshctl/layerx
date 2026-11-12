@@ -19,7 +19,7 @@ import (
 // File diffs are immutable after CompareAnalysis. Each permutation stores only
 // indices; the path is the stable selection ID across all three views.
 type compareFileIndex struct {
-	order         [3][]int
+	order         [4][]int
 	directories   []compareDirectory
 	before, after map[string]*image.FileNode
 }
@@ -56,6 +56,9 @@ func buildCompareFileIndex(ctx context.Context, diffs []image.FileDiff, results 
 		}
 		sort.SliceStable(index.order[2], func(i, j int) bool {
 			return diffs[index.order[2][i]].SizeDelta < diffs[index.order[2][j]].SizeDelta
+		})
+		sort.SliceStable(index.order[3], func(i, j int) bool {
+			return compareMagnitude(diffs[index.order[3][i]].SizeDelta) > compareMagnitude(diffs[index.order[3][j]].SizeDelta)
 		})
 		if ctx.Err() != nil {
 			return compareFileIndexMsg{}
@@ -158,7 +161,7 @@ func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
 		if m.fileCount() > 0 {
 			m.selectedPath = m.fileDiffAt(m.fileCursor).Path
 		}
-		m.fileSort = (m.fileSort + 1) % 3
+		m.fileSort = (m.fileSort + 1) % 4
 		m.rebuildFileFilter()
 		if m.fileIndex != nil {
 			for row := 0; row < m.fileCount(); row++ {
@@ -199,14 +202,14 @@ func (m *compareModel) updateFileKeys(msg tea.KeyPressMsg) {
 }
 
 func (m compareModel) fileBrowserView() tea.View {
-	sortNames := [3]string{"path", "growth", "shrink"}
+	sortNames := [4]string{"path", "growth", "shrink", "largest changes"}
 	sum := m.result.FileSummary
 	lines := []string{
 		"File changes · s changes ranking · 1 opens layer sizes",
 		fmt.Sprintf("Added %d   Removed %d   Modified %d   +%s / -%s", sum.AddedCount, sum.RemovedCount, sum.ModifiedCount, sizebudget.Format(sum.BytesAdded), sizebudget.Format(sum.BytesRemoved)),
 		"Sizes and metadata only; same-size content changes may be absent.",
 		"Directory metadata is not compared.",
-		fmt.Sprintf("Order: %s   Metadata: %t", sortNames[m.fileSort], m.fileMetadata),
+		fmt.Sprintf("Order: %s · Enter details · d text diff", sortNames[m.fileSort]),
 	}
 	if m.fileDirectory != "" {
 		lines = append(lines, "Directory: "+strconv.Quote(m.fileDirectory)+" · Esc shows all files")
@@ -215,7 +218,7 @@ func (m compareModel) fileBrowserView() tea.View {
 		lines = append(lines, "Filter /"+strconv.Quote(m.fileFilter)+"  Enter apply; Esc clear")
 	}
 	if m.fileHelp {
-		lines = append(lines, "Enter/v inspects text; Tab/1/2 switches views; s cycles path, growth, shrink; m shows metadata; ? closes help.")
+		lines = append(lines, "Enter details; d/v inspects text; Tab/1/2 switches views; s cycles ranking; m shows metadata; ? closes help.")
 	}
 	if m.fileIndex == nil {
 		lines = append(lines, "Building file views…")
@@ -240,7 +243,7 @@ func (m compareModel) fileBrowserView() tea.View {
 		} else {
 			line += "  "
 		}
-		line += strconv.Quote(d.Path)
+		line += truncateMid(strconv.Quote(d.Path), max(0, m.width-ansi.StringWidth(line)))
 		if m.fileMetadata {
 			line += "  [" + d.ChangeReason + "]"
 			if m.fileIndex != nil {

@@ -185,13 +185,15 @@ func (m compareModel) compareGuideLines() []string {
 		{title: "Start here", entries: []helpEntry{
 			{"3 Overview", "Find growth, waste and failed size checks."},
 			{"Enter", "Open the selected directory's files."},
-			{"2 Files", "Browse all changes; Enter opens details."},
-			{"1 Layers", "Compare build steps and stored bytes."},
+			{"2 Files", "Browse changes; Enter shows details; d opens a text diff."},
+			{"1 Layers", "Compare build steps and uncompressed layer bytes."},
 		}},
 		{title: "Find and inspect", entries: []helpEntry{
 			{"/", "Search paths, such as /usr/lib."},
 			{"s / m", "Change ranking / show file metadata."},
+			{"1–4", "Inside a file: Diff / Before / After / Details."},
 			{"h / l", "Scroll text left / right."},
+			{"n / N", "In a text diff, jump to the next / previous change."},
 			{"l", "From metadata, open the origin layer."},
 		}},
 		{title: "Move faster", entries: []helpEntry{
@@ -221,7 +223,7 @@ func (m compareModel) compareGuideLines() []string {
 		}
 		body = strings.Join(rows, "\n")
 	}
-	limits := "\n\n" + st.section.Render(" Know the limits") + "\n" + st.desc.Render(" Same-size content changes may be absent: sizes and metadata are compared.\n Shared DiffID means identical layers; command matching is best effort.\n Layer waste counts overwritten/deleted bytes, not every cleanup opportunity.")
+	limits := "\n\n" + st.section.Render(" Know the limits") + "\n" + st.desc.Render(" Same-size content changes may be absent: sizes and metadata are compared.\n Text: UTF-8, up to 5 MiB per side, 1,500 lines, 4,096 bytes per line.\n Unsupported content keeps scrollable metadata; no partial diff is shown.\n Shared DiffID means identical layers; command matching is best effort.\n Layer waste counts overwritten/deleted bytes, not every cleanup opportunity.")
 	return strings.Split(ansi.Wrap(intro+body+limits, max(1, width), ""), "\n")
 }
 

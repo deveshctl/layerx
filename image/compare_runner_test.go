@@ -339,3 +339,23 @@ func TestAnalyzePairKeepsExportedIdentityWhenArchiveChanges(t *testing.T) {
 		assert.Equal(t, "new", cached[0].Command, "the old export must not poison the replacement cache")
 	}
 }
+func TestCompareFilesystemMatchesFullAnalysis(t *testing.T) {
+	layers := []Layer{
+		{Tree: makeTree(makeFile("payload", "/payload", 100), makeDir("cache", "/cache", makeFile("old", "/cache/old", 30)))},
+		{Tree: makeTree(&FileNode{Name: "alias", Path: "/alias", IsHardlink: true, Linkname: "payload"})},
+		{Tree: makeTree(makeFile("payload", "/payload", 200), makeDir("cache", "/cache", makeFile(".wh..wh..opq", "/cache/.wh..wh..opq", 0)))},
+		{},
+		{Tree: makeTree(makeFile(".wh.payload", "/.wh.payload", 0), makeFile("cache", "/cache", 70))},
+		{Tree: makeTree(makeFile("payload", "/payload", 80), makeDir("cache", "/cache", makeFile("fresh", "/cache/fresh", 42)))},
+	}
+	full, err := AnalyzeWithOptions(t.Context(), &mockResolver{layers: append([]Layer(nil), layers...)}, "image", AnalyzeOptions{CacheRoot: t.TempDir()})
+	require.NoError(t, err)
+	lean, err := AnalyzeWithOptions(t.Context(), &mockResolver{layers: layers}, "image", AnalyzeOptions{CacheRoot: t.TempDir(), compareOnly: true})
+	require.NoError(t, err)
+	require.Len(t, lean.StackedTrees, 1)
+	require.Empty(t, lean.AggregatedTrees)
+	assert.Equal(t, full.Layers, lean.Layers)
+	assert.Equal(t, EfficiencyFromAnalysis(full), EfficiencyFromAnalysis(lean))
+	assert.Equal(t, collectLiveFiles(finalStacked(full)), collectLiveFiles(finalStacked(lean)))
+	assert.Equal(t, CompareAnalysis(full, full), CompareAnalysis(full, lean))
+}

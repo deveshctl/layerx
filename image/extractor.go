@@ -363,50 +363,20 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 		return nil, nil, nil, fmt.Errorf("loadLayerSource: maxLayers must be > 0, got %d", maxLayers)
 	}
 
-	var opts []client.ImageSaveOption
-	if e.saveOpts != nil {
-		opts = e.saveOpts(ctx, imageRef)
-	}
-	rc, err := e.cli.ImageSave(ctx, []string{imageRef}, opts...)
+	spool, cleanup, err := e.spoolImage(ctx, imageRef)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
+		return nil, nil, nil, err
 	}
-	defer rc.Close()
-
-	spool, err := os.CreateTemp("", "layerx-extract-*.tar")
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating temp spool: %w", err)
-	}
-	spoolPath := spool.Name()
-
-	// closeFn is the unified teardown so partial-failure paths below can call
-	// it once and return (nil, nil, nil, err) without leaking.
-	cleanup := func() {
-		_ = spool.Close()
-		_ = os.Remove(spoolPath)
-	}
-
-	if _, err := spoolFromDaemon(ctx, spool, rc); err != nil {
-		cleanup()
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, nil, nil, err
-		}
-		return nil, nil, nil, fmt.Errorf("spooling image archive: %w", err)
-	}
-
-	metadata, err := readImageArchiveMetadata(spool)
+	metadata, err := readImageArchiveMetadataContext(ctx, spool, nil)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
 	}
 	layerPaths = metadata.manifest.Layers
-
-	keepCount := min(maxLayers, len(layerPaths))
-	keep := make(map[string]struct{}, keepCount)
-	for _, p := range layerPaths[:keepCount] {
-		keep[p] = struct{}{}
+	keep := make(map[string]struct{}, min(maxLayers, len(layerPaths)))
+	for _, path := range layerPaths[:min(maxLayers, len(layerPaths))] {
+		keep[path] = struct{}{}
 	}
-
 	load = func(name string) (io.Reader, error) {
 		if _, ok := keep[name]; !ok {
 			return nil, nil
@@ -423,13 +393,47 @@ func (e *DockerExtractor) loadLayerSource(ctx context.Context, imageRef string, 
 	return layerPaths, load, cleanup, nil
 }
 
+func (e *DockerExtractor) spoolImage(ctx context.Context, imageRef string) (*os.File, func(), error) {
+	var opts []client.ImageSaveOption
+	if e.saveOpts != nil {
+		opts = e.saveOpts(ctx, imageRef)
+	}
+	rc, err := e.cli.ImageSave(ctx, []string{imageRef}, opts...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
+	}
+	defer rc.Close()
+
+	spool, err := os.CreateTemp("", "layerx-extract-*.tar")
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating temp spool: %w", err)
+	}
+	spoolPath := spool.Name()
+
+	// closeFn is the unified teardown so partial-failure paths below can call
+	// it once and return (nil, nil, nil, err) without leaking.
+	cleanup := func() {
+		_ = spool.Close()
+		_ = os.Remove(spoolPath)
+	}
+
+	if _, err := spoolFromDaemon(ctx, spool, rc); err != nil {
+		cleanup()
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, err
+		}
+		return nil, nil, fmt.Errorf("spooling image archive: %w", err)
+	}
+	return spool, cleanup, nil
+}
+
 // openLayerBlobFromSpool returns a stream limited to the matching tar entry,
 // or nil if absent. It never buffers the blob. Consume it before seeking spool.
 func openLayerBlobFromSpool(ctx context.Context, spool *os.File, wanted string) (io.Reader, error) {
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek spool: %w", err)
 	}
-	tr := tar.NewReader(contextReader{ctx: ctx, reader: spool})
+	tr := tar.NewReader(archiveReadSeeker{File: spool, ctx: ctx})
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {

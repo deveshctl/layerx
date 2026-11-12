@@ -73,7 +73,7 @@ func (r *ArchiveResolver) ResolveWithProgress(ctx context.Context, imageRef stri
 	}
 	defer f.Close()
 
-	metadata, err := readImageArchiveMetadata(f)
+	metadata, err := readImageArchiveMetadataContext(ctx, f, nil)
 	if err != nil {
 		return nil, &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
@@ -203,7 +203,7 @@ func (r *ArchiveResolver) ImageID(ctx context.Context, imageRef string) (string,
 	}
 	defer f.Close()
 
-	metadata, err := readImageArchiveMetadata(f)
+	metadata, err := readImageArchiveMetadataContext(ctx, f, nil)
 	if err != nil {
 		return "", &ErrInvalidArchive{Path: r.path, Cause: err}
 	}
@@ -378,7 +378,7 @@ func (e *ArchiveExtractor) loadLayerSource(ctx context.Context, maxLayers int) (
 	}
 	cleanup := func() { _ = f.Close() }
 
-	metadata, err := readImageArchiveMetadata(f)
+	metadata, err := readImageArchiveMetadataContext(ctx, f, nil)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, &ErrInvalidArchive{Path: e.path, Cause: err}

@@ -110,7 +110,7 @@ func analyzeCompareSide(ctx context.Context, input CompareInput, opts CompareRun
 		defer close(progress)
 		return AnalyzeWithOptions(ctx, input.Resolver, input.Ref, AnalyzeOptions{
 			NoCache: opts.NoCache, CacheRoot: opts.CacheRoot,
-			Platform: opts.Platform, Progress: progress,
+			Platform: opts.Platform, Progress: progress, compareOnly: true,
 		})
 	}()
 	if err != nil {

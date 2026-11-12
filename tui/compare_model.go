@@ -17,8 +17,7 @@ import (
 )
 
 // CompareConfig supplies streams explicitly so the comparison UI never writes
-// progress to a process-global stderr. After loading, the caller receives the
-// analyses for the comparison report.
+// progress to a process-global stderr.
 type CompareConfig struct {
 	Inputs        [2]image.CompareInput
 	Options       image.CompareRunOptions
@@ -29,25 +28,49 @@ type CompareConfig struct {
 	CheckSize     func(before, after *image.Analysis) ([]sizebudget.Result, error)
 }
 
+type CompareOutcome struct {
+	Result     *image.CompareResult
+	Checks     []sizebudget.Result
+	CheckError error
+}
+
+type comparePreviewResolver struct {
+	image.Resolver
+	extractor image.CompareExtractor
+}
+
+func (r comparePreviewResolver) NewExtractor() image.Extractor { return r.extractor }
+
 // compareSession owns synchronization outside the value-based Bubble Tea model.
 // start is also called during cleanup: if the program exits before Init's
 // command executes, the cancelled runner still completes and is joined safely.
 type compareSession struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	once    sync.Once
-	done    chan struct{}
-	inputs  [2]image.CompareInput
-	opts    image.CompareRunOptions
-	results [2]image.CompareImage
-	err     error
+	ctx       context.Context
+	cancel    context.CancelFunc
+	once      sync.Once
+	done      chan struct{}
+	inputs    [2]image.CompareInput
+	opts      image.CompareRunOptions
+	results   [2]image.CompareImage
+	err       error
+	checkSize func(before, after *image.Analysis) ([]sizebudget.Result, error)
+	outcome   CompareOutcome
+	previews  [2]image.CompareInput
 }
 
 func newCompareSession(ctx context.Context, cfg CompareConfig) *compareSession {
 	ctx, cancel := context.WithCancel(ctx)
 	opts := cfg.Options
 	opts.Progress = &image.CompareProgress{}
-	return &compareSession{ctx: ctx, cancel: cancel, done: make(chan struct{}), inputs: cfg.Inputs, opts: opts}
+	s := &compareSession{ctx: ctx, cancel: cancel, done: make(chan struct{}), inputs: cfg.Inputs, opts: opts, checkSize: cfg.CheckSize, previews: cfg.Inputs}
+	for side, input := range s.previews {
+		if source, ok := input.Resolver.(interface {
+			NewCompareExtractor(string) image.CompareExtractor
+		}); ok {
+			s.previews[side].Resolver = comparePreviewResolver{input.Resolver, source.NewCompareExtractor(input.Ref)}
+		}
+	}
+	return s
 }
 
 func (s *compareSession) start() {
@@ -55,6 +78,17 @@ func (s *compareSession) start() {
 		go func() {
 			defer close(s.done)
 			s.results, s.err = image.AnalyzePair(s.ctx, s.inputs, s.opts)
+			if s.err != nil {
+				return
+			}
+			before, after := s.results[0].Analysis, s.results[1].Analysis
+			s.outcome.Result, s.err = image.CompareAnalysisContext(s.ctx, before, after)
+			if s.err != nil {
+				return
+			}
+			if s.checkSize != nil {
+				s.outcome.Checks, s.outcome.CheckError = s.checkSize(before, after)
+			}
 		}()
 	})
 }
@@ -63,6 +97,18 @@ func (s *compareSession) close() {
 	s.cancel()
 	s.start()
 	<-s.done
+	for _, preview := range s.previews {
+		if resolver, ok := preview.Resolver.(comparePreviewResolver); ok {
+			_ = resolver.extractor.Close()
+		}
+	}
+}
+
+func (s *compareSession) previewInputs() [2]image.CompareInput {
+	if s.previews[0].Resolver != nil || s.previews[1].Resolver != nil {
+		return s.previews
+	}
+	return s.inputs
 }
 
 type compareLoadedMsg struct{}
@@ -82,7 +128,6 @@ type compareModel struct {
 	frame                            int
 	result                           *image.CompareResult
 	checks                           []sizebudget.Result
-	checkSize                        func(before, after *image.Analysis) ([]sizebudget.Result, error)
 	checkError                       string
 	help                             bool
 	cursor, offset                   int
@@ -100,6 +145,7 @@ type compareModel struct {
 	fileOffset                       int
 	selectedPath                     string
 	contentOpen                      bool
+	contentMode                      compareContentMode
 	content                          *compareContent
 	contentError                     string
 	contentCursor                    int
@@ -161,6 +207,9 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.contentOpen {
+			if msg.Code >= '1' && msg.Code <= '4' {
+				return m.openContentMode(compareContentMode(msg.Code - '1'))
+			}
 			if msg.Code == 'l' && m.content != nil && m.content.note != "" {
 				if row := m.contentOriginRow(); row >= 0 {
 					m.closeContent()
@@ -250,7 +299,10 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.fileView {
-				if msg.Code == tea.KeyEnter || msg.Code == 'v' {
+				if msg.Code == tea.KeyEnter {
+					return m.openContentMode(compareModeDetails)
+				}
+				if msg.Code == 'v' || msg.Code == 'd' {
 					return m.openContent()
 				}
 				m.updateFileKeys(msg)
@@ -280,13 +332,9 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.session.err != nil {
 			return m, tea.Quit
 		}
-		m.result = image.CompareAnalysis(m.session.results[0].Analysis, m.session.results[1].Analysis)
-		if m.checkSize != nil {
-			var err error
-			m.checks, err = m.checkSize(m.session.results[0].Analysis, m.session.results[1].Analysis)
-			if err != nil {
-				m.checkError = err.Error()
-			}
+		m.result, m.checks = m.session.outcome.Result, m.session.outcome.Checks
+		if err := m.session.outcome.CheckError; err != nil {
+			m.checkError = err.Error()
 		}
 		m.adjustViewport()
 		return m, buildCompareFileIndex(m.session.ctx, m.result.FileDiffs, m.session.results)
@@ -312,6 +360,9 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.contentCancel = nil
 			}
 			m.content, m.contentError = msg.content, msg.err
+			if m.content != nil && msg.err != "" {
+				m.content.note = "Text inspection unavailable: " + compareTextLine(msg.err) + ". File details are still available."
+			}
 			m.adjustContentViewport()
 		}
 	case compareTickMsg:
@@ -327,6 +378,15 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // compareSize reserves the same chrome space for rendering and navigation.
 func (m compareModel) compareSize() (int, int) {
+	if !m.inFrame && m.usesCompareWorkspace() {
+		if m.contentOpen || m.guideOpen {
+			return m.width - 4, m.height - 9
+		}
+		if m.height < 28 {
+			return m.width - 4, m.height - 11
+		}
+		return m.width - 4, m.height - 13
+	}
 	if !m.inFrame && m.width >= 40 && m.height >= 16 {
 		return m.width - 4, m.height - 7
 	}
@@ -334,6 +394,12 @@ func (m compareModel) compareSize() (int, int) {
 }
 
 func (m compareModel) View() tea.View {
+	if m.result == nil && m.session != nil && m.width >= 80 && m.height >= 20 {
+		return m.workspaceLoadingView()
+	}
+	if m.usesCompareWorkspace() {
+		return m.workspaceView()
+	}
 	width, height := m.compareSize()
 	if width == m.width {
 		v := m.compareBodyView()
@@ -479,7 +545,7 @@ func (m *compareModel) adjustViewport() {
 }
 
 func (m compareModel) comparisonVerdict() string {
-	verdict := "PASS"
+	verdict := "Checks passed"
 	if m.result != nil && m.result.IsRegression() {
 		verdict = "REGRESSION"
 	}
@@ -500,7 +566,7 @@ func (m compareModel) browserView() tea.View {
 	lines := []string{
 		"Compare images",
 		"Verdict: " + m.compareStatus(verdict),
-		fmt.Sprintf("Stored %s → %s (%s)   Layers %d → %d (%+d)", sizebudget.Format(r.Before.TotalSize), sizebudget.Format(r.After.TotalSize), m.compareDelta(r.After.TotalSize-r.Before.TotalSize), r.Before.LayerCount, r.After.LayerCount, r.After.LayerCount-r.Before.LayerCount),
+		fmt.Sprintf("Layer tar %s → %s (%s)   Layers %d → %d (%+d)", sizebudget.Format(r.Before.UncompressedSize), sizebudget.Format(r.After.UncompressedSize), m.compareDelta(r.After.UncompressedSize-r.Before.UncompressedSize), r.Before.LayerCount, r.After.LayerCount, r.After.LayerCount-r.Before.LayerCount),
 		fmt.Sprintf("Efficiency %.1f%% → %.1f%% (%+.1f points)   Waste %s → %s (%s)", r.BeforeEfficiency.Score*100, r.AfterEfficiency.Score*100, r.AfterEfficiency.ScoreDelta*100, sizebudget.Format(r.BeforeEfficiency.WastedBytes), sizebudget.Format(r.AfterEfficiency.WastedBytes), m.compareDelta(r.AfterEfficiency.WastedBytesDelta)),
 		"Press 2 to investigate files; 3 returns to the overview; ? explains layer matching.",
 	}
@@ -520,7 +586,7 @@ func (m compareModel) browserView() tea.View {
 	wide := m.width >= 72
 	if wide {
 		column := max(12, (m.width-36)/2)
-		lines = append(lines, fmt.Sprintf("  %-*s %-*s Match", column, "Image A", column, "Image B")+"        Δ stored")
+		lines = append(lines, fmt.Sprintf("  %-*s %-*s Match", column, "Image A", column, "Image B")+"        Δ layer tar")
 	} else {
 		lines = append(lines, "  A ↔ B  | match | size delta")
 	}
@@ -626,33 +692,33 @@ func compareProgressText(p image.CompareSideProgress) string {
 // RunCompareAnalysis cancels and joins analysis even if terminal setup fails or
 // the program exits before its first command runs. The parent context controls
 // the program; the child work context can be cancelled independently by keys.
-func RunCompareAnalysis(ctx context.Context, cfg CompareConfig) ([2]image.CompareImage, error) {
+func RunCompareAnalysis(ctx context.Context, cfg CompareConfig) (CompareOutcome, error) {
 	session := newCompareSession(ctx, cfg)
 	defer session.close()
-	m := compareModel{session: session, keys: defaultKeys(), theme: themeFor(cfg.Theme), width: 80, height: 24, overview: true, fileSort: 1, checkSize: cfg.CheckSize}
+	m := compareModel{session: session, keys: defaultKeys(), theme: themeFor(cfg.Theme), width: 80, height: 24, overview: true, fileSort: 3}
 	if cfg.TransparentBg {
 		m.theme.MainBg = nil
 	}
 	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(cfg.Input), tea.WithOutput(cfg.Output))
 	if _, err := p.Run(); err != nil {
-		return [2]image.CompareImage{}, err
+		return CompareOutcome{}, err
 	}
 	if err := session.ctx.Err(); err != nil {
-		return [2]image.CompareImage{}, err
+		return CompareOutcome{}, err
 	}
 	// The normal completion message is published only after done is closed.
 	// Joining also covers external Quit messages without that completion message.
 	select {
 	case <-session.done:
-		return session.results, session.err
+		return session.outcome, session.err
 	default:
-		return [2]image.CompareImage{}, context.Canceled
+		return CompareOutcome{}, context.Canceled
 	}
 }
 
 func (m compareModel) compareStatus(status string) string {
 	color := m.theme.Added
-	if status != "PASS" {
+	if status != "PASS" && status != "Checks passed" {
 		color = m.theme.Removed
 	}
 	return styleWithFg(color).Bold(true).Render(status)
@@ -685,16 +751,26 @@ func (m compareModel) compareFooter(width int) string {
 		_, height := m.compareSize()
 		right = fmt.Sprintf("%d/%d guide", min(m.guideOffset+max(1, height-1), len(m.compareGuideLines())), len(m.compareGuideLines()))
 	case m.contentOpen:
-		hints = []statusHint{{"Esc", "files"}, {"?", "guide"}}
+		hints = []statusHint{{"Esc", "files"}, {"1/2/3/4", "views"}, {"?", "guide"}}
 		if m.content == nil {
 			right = "Loading file"
+			if m.contentError != "" {
+				right = "Preview unavailable"
+			}
 		} else if m.content.note != "" {
-			right = "Metadata"
+			right = fmt.Sprintf("%d/%d details", min(m.contentCursor+1, m.contentRowCount()), m.contentRowCount())
+			if m.contentError != "" {
+				right = "Preview unavailable"
+			}
+			hints = append(hints, statusHint{"↑↓", "scroll"})
 			if m.contentOriginRow() >= 0 {
 				hints = append(hints, statusHint{"l", "origin layer"})
 			}
 		} else {
 			hints = append(hints, statusHint{"↑↓", "move"}, statusHint{"h/l", "scroll"}, statusHint{"PgUp/PgDn", "page"})
+			if m.contentMode == compareModeDiff {
+				hints = append(hints, statusHint{"n/N", "changes"})
+			}
 			right = fmt.Sprintf("%d/%d · col %d", min(m.contentCursor+1, len(m.content.rows)), len(m.content.rows), m.contentHOffset+1)
 		}
 	case m.overview:
@@ -708,7 +784,7 @@ func (m compareModel) compareFooter(width int) string {
 		hints = []statusHint{{"Enter", "apply"}, {"Esc", "clear"}, {"Ctrl+C", "exit"}}
 		right = "Editing path filter"
 	case m.fileView:
-		hints = append(hints, statusHint{"Enter", "details"}, statusHint{"/", "filter"}, statusHint{"s", "rank"}, statusHint{"m", "metadata"}, statusHint{"Tab", "views"})
+		hints = append(hints, statusHint{"Enter", "details"}, statusHint{"d", "text diff"}, statusHint{"/", "filter"}, statusHint{"s", "rank"}, statusHint{"m", "metadata"}, statusHint{"Tab", "views"})
 		if m.fileDirectory != "" || m.fileFilter != "" {
 			hints = append(hints, statusHint{"Esc", "all files"})
 		}

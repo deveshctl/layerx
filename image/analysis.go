@@ -16,6 +16,7 @@ type Analysis struct {
 	TotalSize        int64       // stored layer blobs; retained for export compatibility
 	UncompressedSize int64
 	Platform         string
+	efficiency       *EfficiencyResult // Precomputed for comparison-only analyses.
 }
 
 // AnalyzeOptions controls the analyze pipeline. Zero value is valid: caching
@@ -37,7 +38,8 @@ type AnalyzeOptions struct {
 	// appended to the cache key so that analyses for different platforms of
 	// the same image digest never share a cache entry. Empty = no platform
 	// pin; the behaviour is identical to before this field was added.
-	Platform string
+	Platform    string
+	compareOnly bool
 }
 
 func Analyze(ctx context.Context, resolver Resolver, imageRef string) (*Analysis, error) {
@@ -151,15 +153,29 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		}
 	}
 
-	stacked, err := stackContext(ctx, layers)
-	if err != nil {
-		return nil, err
+	var stacked, aggregated []*FileTree
+	var efficiency *EfficiencyResult
+	if opts.compareOnly {
+		final, score, err := compareFilesystem(ctx, layers)
+		if err != nil {
+			return nil, err
+		}
+		if final != nil {
+			stacked = []*FileTree{final}
+		}
+		efficiency = score
+	} else {
+		var err error
+		stacked, err = stackContext(ctx, layers)
+		if err != nil {
+			return nil, err
+		}
+		aggregated, err = aggregatedTreesContext(ctx, layers)
+		if err != nil {
+			return nil, err
+		}
+		assignNetDeltas(layers, stacked)
 	}
-	aggregated, err := aggregatedTreesContext(ctx, layers)
-	if err != nil {
-		return nil, err
-	}
-	assignNetDeltas(layers, stacked)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -191,6 +207,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		TotalSize:        totalSize,
 		UncompressedSize: uncompressedSize,
 		Platform:         platform,
+		efficiency:       efficiency,
 	}, nil
 }
 

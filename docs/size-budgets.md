@@ -111,21 +111,31 @@ root-level files form their own group. Totals cover changed files only, not
 whole directory sizes. `Esc` clears the directory scope.
 
 Press `1` for layer pairs, `2` for all changed files, or `3` for the overview;
-`Tab` cycles through these views. Files initially rank by growth. `/` searches
-paths, `s` cycles path/growth/shrink ranking, `m` shows metadata, and `Enter`
-opens file details. Binary files, links and files above the text limit retain
+`Tab` cycles through these views. Files initially rank by absolute byte change.
+`/` searches paths, `s` cycles path/growth/shrink/impact ranking, `m` shows metadata, and `Enter`
+opens file details without reading its contents. Press `d` or `v` in the file
+list to request a text diff. Inside a file, `1` selects Diff, `2` Before,
+`3` After and `4` Details. Before and After read only the selected image and
+do not compute a diff. Text already read for the open file is reused when
+switching modes, and released when the file is closed. Use `n`/`N` in a diff
+to jump between changed sections. All text modes use the limits below.
+Binary files, links and files above the text limit retain
 size, ownership and available origin-layer information without requiring a
-text diff. Press `l` from a metadata-only detail view to jump to its origin
+text diff. Metadata can be scrolled with the normal navigation keys.
+Files over the limits, including files with 10,000 lines, show an explanation
+and metadata instead of a truncated diff. Press `l` from a metadata-only detail view to jump to its origin
 layer. The origin layer is provenance, not proof of the cause of growth.
 
 Text inspection accepts regular UTF-8 files up to 5 MiB per side, with at most
 1,500 lines and 4,096 bytes per line. Replaced lines align side by side; narrow
 terminals use a compact view. CRLF and CR line endings are normalized to LF
 for the preview; the 5 MiB limit applies to the original bytes. Layers are
-streamed during extraction rather than buffered in memory.
+streamed during extraction. The first Docker text preview for each side
+exports that image to a temporary file. Later previews reuse the export until
+the session ends. Large images need enough temporary disk space for both exports.
 Diff colours remain stable while navigating.
-Same-size content changes are not detected by the file list. PASS means the
-regression checks and configured budgets pass, not that every file is identical.
+Same-size content changes can be absent from the file list. “Checks passed”
+refers to the regression checks and configured budgets.
 
 Press `?` for contextual help, `Esc` to return from file details, and `q` to
 leave the browser. Exiting preserves the comparison exit code without printing

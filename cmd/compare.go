@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -87,7 +88,9 @@ with --mode, --top, or non-text --format.
 Interactive keys:
   1/2/3, Tab       layers, files, overview; cycle views
   arrows, j/k      move; PgUp/PgDn page; Ctrl+u/d half page; g/G ends
-  Enter, v         inspect files (Enter investigates overview directories)
+  Enter            file details (investigates overview directories)
+  d, v             compare selected file text
+  1/2/3/4          inside file: Diff, Before, After, Details
   /, s, m          filter paths, change file ranking, toggle metadata
   h/l, left/right  scroll text; l opens the origin layer in metadata details
   ?                open/close the comparison guide
@@ -197,7 +200,7 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	var oldDigest, newDigest string
 	var oldAnalysis, newAnalysis *image.Analysis
 	if interactive {
-		pair, runErr := tui.RunCompareAnalysis(ctx, tui.CompareConfig{
+		outcome, runErr := tui.RunCompareAnalysis(ctx, tui.CompareConfig{
 			Inputs:  [2]image.CompareInput{{Ref: oldRef, Resolver: oldResolver}, {Ref: newRef, Resolver: newResolver}},
 			Options: image.CompareRunOptions{NoCache: noCache, Platform: activePlatformDisplay()},
 			Theme:   themeName, Input: cmd.InOrStdin(), Output: out,
@@ -214,17 +217,21 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		if runErr != nil {
 			return runErr
 		}
-		oldDigest, oldAnalysis = pair[0].Digest, pair[0].Analysis
-		newDigest, newAnalysis = pair[1].Digest, pair[1].Analysis
-	} else {
-		oldDigest, oldAnalysis, err = analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
-		if err != nil {
-			return fmt.Errorf("analyzing old image %q: %w", oldRef, err)
+		if outcome.CheckError != nil {
+			return outcome.CheckError
 		}
-		newDigest, newAnalysis, err = analyzeForCompare(ctx, newResolver, newRef, noCache, "new", stderr)
-		if err != nil {
-			return fmt.Errorf("analyzing new image %q: %w", newRef, err)
+		if outcome.Result.IsRegression() || slices.ContainsFunc(outcome.Checks, func(check sizebudget.Result) bool { return !check.Passed }) {
+			return &ErrCompareRegression{}
 		}
+		return nil
+	}
+	oldDigest, oldAnalysis, err = analyzeForCompare(ctx, oldResolver, oldRef, noCache, "old", stderr)
+	if err != nil {
+		return fmt.Errorf("analyzing old image %q: %w", oldRef, err)
+	}
+	newDigest, newAnalysis, err = analyzeForCompare(ctx, newResolver, newRef, noCache, "new", stderr)
+	if err != nil {
+		return fmt.Errorf("analyzing new image %q: %w", newRef, err)
 	}
 
 	if limits.Growth != nil {
@@ -237,7 +244,7 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	result := image.CompareAnalysis(oldAnalysis, newAnalysis)
-	if !interactive && !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
+	if !limits.Enabled() && format == "text" && oldDigest != "" && oldDigest == newDigest && allLayersShared(result) {
 		renderNoOp(out, oldDigest)
 		return nil
 	}
@@ -247,12 +254,6 @@ func runCompareCmdInner(cmd *cobra.Command, args []string) error {
 	report.Before = &before
 	report.Comparison = result
 	report.Passed = report.Passed && !result.IsRegression()
-	if interactive {
-		if !report.Passed {
-			return &ErrCompareRegression{}
-		}
-		return nil
-	}
 	options := terminalCompareOptions(out, themeName)
 	if format != "text" {
 		options.Color = false

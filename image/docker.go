@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/moby/moby/client"
@@ -67,8 +68,12 @@ func WithHostTag(host string) Option {
 }
 
 type DockerResolver struct {
-	cli      client.APIClient
-	platform *ocispec.Platform
+	// Keep the export platform when comparison content is opened by immutable ID.
+	pinnedRef      string
+	pinnedSaveOpts []client.ImageSaveOption
+	pinMu          sync.Mutex
+	cli            client.APIClient
+	platform       *ocispec.Platform
 	// engine is the layerx --engine label ("docker" / "podman" / "") for
 	// user-facing error messages. See WithEngineTag; the field affects
 	// only Error() text, never dispatch.
@@ -186,6 +191,10 @@ func (r *DockerResolver) ImageID(ctx context.Context, imageRef string) (string, 
 				imageRef, FormatPlatform(inspectedPlatform(inspect)), FormatPlatform(native))
 		}
 	}
+	opts := r.imageSaveOpts(ctx, imageRef)
+	r.pinMu.Lock()
+	r.pinnedRef, r.pinnedSaveOpts = inspect.ID, opts
+	r.pinMu.Unlock()
 	return inspect.ID, nil
 }
 
@@ -203,7 +212,15 @@ func (r *DockerResolver) inspectOpts() []client.ImageInspectOption {
 }
 
 func (r *DockerResolver) NewExtractor() Extractor {
-	return &DockerExtractor{cli: r.cli, saveOpts: r.imageSaveOpts}
+	r.pinMu.Lock()
+	ref, opts := r.pinnedRef, r.pinnedSaveOpts
+	r.pinMu.Unlock()
+	return &DockerExtractor{cli: r.cli, saveOpts: func(ctx context.Context, imageRef string) []client.ImageSaveOption {
+		if ref != "" && imageRef == ref {
+			return opts
+		}
+		return r.imageSaveOpts(ctx, imageRef)
+	}}
 }
 
 func (r *DockerResolver) Resolve(ctx context.Context, imageRef string) ([]Layer, error) {
@@ -214,10 +231,21 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 	if err := r.ensureImageWithProgress(ctx, imageRef, progress); err != nil {
 		return nil, err
 	}
+	// Export an immutable daemon identity. Containerd stores can identify images
+	// by manifest/index digest, while the archive config has a different digest.
+	// Pinning before export also prevents a concurrent retag from changing bytes.
+	identity, err := r.ImageID(ctx, imageRef)
+	if err != nil {
+		return nil, err
+	}
+	exportRef := imageRef
+	if identity != "" {
+		exportRef = identity
+	}
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseExporting})
 
-	rc, err := r.cli.ImageSave(ctx, []string{imageRef}, r.imageSaveOpts(ctx, imageRef)...)
+	rc, err := r.cli.ImageSave(ctx, []string{exportRef}, r.imageSaveOpts(ctx, imageRef)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to export image %s: %w", imageRef, err)
 	}
@@ -225,7 +253,16 @@ func (r *DockerResolver) ResolveWithProgress(ctx context.Context, imageRef strin
 
 	emitProgress(progress, ProgressEvent{Phase: PhaseParsing})
 
-	return parseLayers(ctx, rc)
+	layers, err := parseLayers(ctx, rc)
+	if err != nil {
+		return nil, err
+	}
+	if identity != "" {
+		for i := range layers {
+			layers[i].imageID = identity
+		}
+	}
+	return layers, nil
 }
 
 // imageSaveOpts keeps analysis and layer extraction on the same platform.
@@ -673,7 +710,7 @@ func parseLayers(ctx context.Context, r io.Reader) ([]Layer, error) {
 		return nil, &ErrArchiveInfra{Op: "spooling image archive", Cause: err}
 	}
 
-	metadata, err := readImageArchiveMetadata(spool)
+	metadata, err := readImageArchiveMetadataContext(ctx, spool, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +727,11 @@ type imageArchiveMetadata struct {
 // readImageArchiveMetadata gives analysis, metadata, and extraction the same
 // first-image selection for Docker-save and standalone OCI layout archives.
 func readImageArchiveMetadata(spool *os.File) (*imageArchiveMetadata, error) {
-	manifestData, rootJSON, headers, err := scanResolveMetadata(spool)
+	return readImageArchiveMetadataContext(context.Background(), spool, nil)
+}
+
+func readImageArchiveMetadataContext(ctx context.Context, spool *os.File, offsets map[string]int64) (*imageArchiveMetadata, error) {
+	manifestData, rootJSON, headers, err := scanArchiveMetadata(ctx, spool, offsets)
 	if err != nil {
 		return nil, err
 	}
@@ -910,10 +951,14 @@ func ociIndexToDockerManifest(rootJSON map[string][]byte, spool *os.File) (*dock
 // declared sizes for every entry. Layer / blob bodies are streamed past
 // without buffering.
 func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]int64, error) {
+	return scanArchiveMetadata(context.Background(), spool, nil)
+}
+
+func scanArchiveMetadata(ctx context.Context, spool *os.File, offsets map[string]int64) ([]byte, map[string][]byte, map[string]int64, error) {
 	if _, err := spool.Seek(0, io.SeekStart); err != nil {
 		return nil, nil, nil, fmt.Errorf("seek spool: %w", err)
 	}
-	tr := tar.NewReader(bufio.NewReaderSize(spool, archiveReadBufferSize))
+	tr := tar.NewReader(archiveReadSeeker{File: spool, ctx: ctx})
 
 	var manifestData []byte
 	rootJSON := make(map[string][]byte)
@@ -932,7 +977,19 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 		if entries > MaxArchiveEntries {
 			return nil, nil, nil, fmt.Errorf("invalid image archive: too many entries (limit %d)", MaxArchiveEntries)
 		}
+		_, duplicate := headers[hdr.Name]
 		headers[hdr.Name] = hdr.Size
+		if offsets != nil {
+			// Sparse entries have a different physical and logical layout.
+			delete(offsets, hdr.Name)
+			if !duplicate && hdr.Typeflag == tar.TypeReg && hdr.PAXRecords["GNU.sparse.map"] == "" && hdr.PAXRecords["GNU.sparse.major"] == "" && hdr.PAXRecords["GNU.sparse.size"] == "" {
+				offset, err := spool.Seek(0, io.SeekCurrent)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				offsets[hdr.Name] = offset
+			}
+		}
 
 		switch {
 		case hdr.Name == "manifest.json":
@@ -960,6 +1017,18 @@ func scanResolveMetadata(spool *os.File) ([]byte, map[string][]byte, map[string]
 		}
 	}
 	return manifestData, rootJSON, headers, nil
+}
+
+type archiveReadSeeker struct {
+	*os.File
+	ctx context.Context
+}
+
+func (r archiveReadSeeker) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.File.Read(p)
 }
 
 // readMetadataEntry reads a small archive descriptor (manifest.json, config,
