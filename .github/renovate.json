@@ -25,9 +25,26 @@
     {
       "description": "Group all Go module updates into one monthly PR.",
       "matchManagers": ["gomod"],
+      "matchDepTypes": ["!golang"],
       "groupName": "go modules",
       "semanticCommitType": "chore",
       "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Open dedicated Go patch PRs outside the monthly dependency window.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "rangeStrategy": "bump",
+      "separateMinorPatch": true,
+      "schedule": ["at any time"],
+      "automerge": false
+    },
+    {
+      "description": "Keep Go major and minor upgrades manual.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
     },
     {
       "description": "Group all GitHub Actions version bumps into one monthly PR.",

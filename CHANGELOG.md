@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
 ### Fixed
+- Updated to Go 1.27.4 for standard library security fixes.
+- Go patch releases get their own update PRs so security fixes can land between monthly dependency updates.
 - Fix shifted comparison help keys and text line endings, reduce extraction memory use, and improve Windows cache and JSON export reliability.
 - Keep comparison content tied to the analyzed image, accept 1,500-line text files, reject incomplete archives with cached analyses, and restore the terminal on hangup.
 - Keep large interactive comparisons responsive, reuse Docker exports for file previews, and make long paths and preview failures easier to inspect.
