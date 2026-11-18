@@ -72,6 +72,9 @@ type WasteDiff struct {
 	BeforeWasted int64  `json:"beforeWasted"`
 	AfterWasted  int64  `json:"afterWasted"`
 	WastedDelta  int64  `json:"wastedDelta"`
+	// Zero-based layer of the first wasted copy on each side with waste.
+	BeforeFirstLayer int `json:"-"`
+	AfterFirstLayer  int `json:"-"`
 }
 
 type CompareResult struct {
@@ -459,17 +462,19 @@ func buildWasteDiffs(before, after *EfficiencyResult) []WasteDiff {
 
 	var out []WasteDiff
 	for path := range seen {
-		bw := beforeMap[path]
-		aw := afterMap[path]
+		old, next := beforeMap[path], afterMap[path]
+		bw, aw := old.TotalWasted, next.TotalWasted
 		delta := aw - bw
 		if delta == 0 {
 			continue
 		}
 		out = append(out, WasteDiff{
-			Path:         path,
-			BeforeWasted: bw,
-			AfterWasted:  aw,
-			WastedDelta:  delta,
+			Path:             path,
+			BeforeWasted:     bw,
+			AfterWasted:      aw,
+			WastedDelta:      delta,
+			BeforeFirstLayer: old.FirstWastedLayer,
+			AfterFirstLayer:  next.FirstWastedLayer,
 		})
 	}
 
@@ -483,13 +488,13 @@ func buildWasteDiffs(before, after *EfficiencyResult) []WasteDiff {
 	return out
 }
 
-func wastedFilesMap(r *EfficiencyResult) map[string]int64 {
-	m := make(map[string]int64)
+func wastedFilesMap(r *EfficiencyResult) map[string]WastedFile {
+	m := make(map[string]WastedFile)
 	if r == nil {
 		return m
 	}
 	for _, wf := range r.WastedFiles {
-		m[wf.Path] = wf.TotalWasted
+		m[wf.Path] = wf
 	}
 	return m
 }

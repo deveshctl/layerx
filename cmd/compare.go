@@ -88,8 +88,10 @@ with --mode, --top, or non-text --format.
 Interactive keys:
   1/2/3, Tab       layers, files, overview; cycle views
   arrows, j/k      move; PgUp/PgDn page; Ctrl+u/d half page; g/G ends
-  Enter            file details (investigates overview directories)
+  Enter            open file or build step details, or investigate a directory
   d, v             compare selected file text
+  p                compare text at an exact path in Files
+  c, w             inspect checks or waste changes in Overview
   1/2/3/4          inside file: Diff, Before, After, Details
   /, s, m          filter paths, change file ranking, toggle metadata
   h/l, left/right  scroll text; l opens the origin layer in metadata details

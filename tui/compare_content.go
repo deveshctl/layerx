@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"unicode"
@@ -56,10 +57,28 @@ func (m compareModel) openContent() (tea.Model, tea.Cmd) {
 }
 
 func (m compareModel) openContentMode(mode compareContentMode) (tea.Model, tea.Cmd) {
-	if m.fileCount() == 0 || m.fileIndex == nil {
-		return m, nil
+	var results [2]image.CompareImage
+	if m.session != nil {
+		results = m.session.results
 	}
-	d := m.fileDiffAt(m.fileCursor)
+	var d image.FileDiff
+	var before, after *image.FileNode
+	if m.contentPath != "" {
+		d.Path = m.contentPath
+		before = comparePathNode(results[0].Analysis, d.Path)
+		after = comparePathNode(results[1].Analysis, d.Path)
+		if before == nil {
+			d.DiffType = image.Added
+		} else if after == nil {
+			d.DiffType = image.Removed
+		}
+	} else {
+		if m.fileCount() == 0 || m.fileIndex == nil {
+			return m, nil
+		}
+		d = m.fileDiffAt(m.fileCursor)
+		before, after = m.fileIndex.before[d.Path], m.fileIndex.after[d.Path]
+	}
 	cached := m.content
 	m.contentOpen = true
 	m.contentMode = mode
@@ -70,10 +89,10 @@ func (m compareModel) openContentMode(mode compareContentMode) (tea.Model, tea.C
 		m.contentCancel()
 		m.contentCancel = nil
 	}
-	before, after := m.fileIndex.before[d.Path], m.fileIndex.after[d.Path]
-	var results [2]image.CompareImage
-	if m.session != nil {
-		results = m.session.results
+	if m.contentPath != "" && before == nil && after == nil {
+		m.content = newCompareDetails(d.Path, before, after, results)
+		m.content.note = "No file at this path in either image. Enter a full file path."
+		return m, nil
 	}
 	if mode == compareModeDetails {
 		m.content = newCompareDetails(d.Path, before, after, results)
@@ -95,12 +114,56 @@ func (m compareModel) openContentMode(mode compareContentMode) (tea.Model, tea.C
 	}
 }
 
+func (m compareModel) updateComparePath(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.Code {
+	case tea.KeyEscape:
+		m.pathEditing = false
+	case tea.KeyEnter:
+		if m.pathInput != "" {
+			m.pathEditing = false
+			m.contentPath = path.Clean("/" + m.pathInput)
+			return m.openContent()
+		}
+	case tea.KeyBackspace:
+		_, n := utf8.DecodeLastRuneInString(m.pathInput)
+		m.pathInput = m.pathInput[:len(m.pathInput)-n]
+	default:
+		m.pathInput += msg.Text
+	}
+	return m, nil
+}
+
+func comparePathNode(a *image.Analysis, name string) *image.FileNode {
+	if a == nil || len(a.StackedTrees) == 0 {
+		return nil
+	}
+	tree := a.StackedTrees[len(a.StackedTrees)-1]
+	if tree == nil {
+		return nil
+	}
+	n := tree.Root
+	for part := range strings.SplitSeq(strings.TrimPrefix(name, "/"), "/") {
+		if n == nil || !n.IsDir || strings.HasPrefix(part, ".wh.") {
+			return nil
+		}
+		n = n.FindChild(part)
+		if n == nil || n.DiffType == image.Removed {
+			return nil
+		}
+	}
+	if n.IsDir {
+		return nil
+	}
+	return n
+}
+
 func (m *compareModel) closeContent() {
 	if m.contentCancel != nil {
 		m.contentCancel()
 		m.contentCancel = nil
 	}
 	m.contentOpen = false
+	m.contentPath = ""
 	m.content = nil
 	m.contentError = ""
 	m.contentRequest++
@@ -222,6 +285,10 @@ func loadCompareContentCached(ctx context.Context, d image.FileDiff, before, aft
 			rows = append(rows, row)
 		}
 	} else {
+		if before != nil && after != nil && bytes.Equal(data[0], data[1]) {
+			content.note = "File contents are identical. See metadata below."
+			return content, ""
+		}
 		rows, err = compareContentDiff(data[0], data[1])
 	}
 	if err != nil {
@@ -501,7 +568,16 @@ func compareRowChanged(row compareContentRow) bool {
 }
 
 func (m compareModel) contentView() tea.View {
-	lines := []string{"Content inspection", "1 Diff   2 Before   3 After   4 Details", "Loading…"}
+	loading := "Loading file contents… Esc cancels."
+	if m.content == nil && m.session != nil {
+		for _, input := range m.session.previewInputs() {
+			if _, docker := input.Resolver.(comparePreviewResolver); docker {
+				loading = "Loading image data for the preview… Esc cancels."
+				break
+			}
+		}
+	}
+	lines := []string{"Content inspection", "1 Diff   2 Before   3 After   4 Details", loading}
 	if m.contentError != "" {
 		lines[2] = compareTextLine(m.contentError) + " · 4 shows file details"
 	}

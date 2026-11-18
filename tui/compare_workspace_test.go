@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/sizebudget"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -45,4 +46,40 @@ func TestCompareWorkspaceExplainsRegressionAndEscapesRefs(t *testing.T) {
 	assert.Contains(t, out, "old\\x1b[2J")
 	assert.Contains(t, out, "new\\nline")
 	assert.NotContains(t, out, "\x1b[2J")
+}
+
+func TestCompareKeepsEvidenceAvailableAtSplitPaneWidths(t *testing.T) {
+	r := &image.CompareResult{
+		Before:     image.ImageSummary{ImageRef: "/long/common/directory/for/images/old.tar", Platform: "linux/amd64"},
+		After:      image.ImageSummary{ImageRef: "/long/common/directory/for/images/new.tar", Platform: "linux/arm64"},
+		LayerDiffs: []image.LayerDiff{{BeforeCommand: "COPY old app", AfterCommand: "COPY new app"}},
+		WasteDiffs: []image.WasteDiff{{Path: "/build/artifact", AfterWasted: 1024, WastedDelta: 1024, AfterFirstLayer: 2}},
+	}
+	m := compareModel{result: r, overview: true, width: 80, height: 20, theme: themeFor(""), keys: defaultKeys(),
+		checks: []sizebudget.Result{{Name: "image size"}, {Name: "image growth"}}}
+	press := func(code rune) string {
+		next, _ := m.Update(tea.KeyPressMsg{Code: code})
+		m = next.(compareModel)
+		return ansi.Strip(m.View().Content)
+	}
+	out := ansi.Strip(m.View().Content)
+	for _, value := range []string{"old.tar", "new.tar", "linux/amd64", "linux/arm64", "FAIL image size", "FAIL image growth"} {
+		assert.Contains(t, out, value)
+	}
+	assert.Contains(t, press('c'), "FAIL image growth")
+	press(tea.KeyEscape)
+	m.checkError = "select the same --platform"
+	m.checks = nil
+	out = press('c')
+	assert.Contains(t, out, "select the same --platform")
+	assert.NotContains(t, out, "No size budgets configured")
+	press(tea.KeyEscape)
+	out = press('w')
+	assert.Contains(t, out, "/build/artifact")
+	assert.Contains(t, out, "After #3")
+	press(tea.KeyEscape)
+	press('1')
+	out = press(tea.KeyEnter)
+	assert.Contains(t, out, "COPY old app")
+	assert.Contains(t, out, "COPY new app")
 }

@@ -119,6 +119,9 @@ type compareModel struct {
 	overview                         bool
 	guideOpen                        bool
 	guideOffset                      int
+	evidence                         string
+	pathEditing                      bool
+	pathInput, contentPath           string
 	directoryCursor, directoryOffset int
 	session                          *compareSession
 	keys                             keyMap
@@ -169,6 +172,9 @@ func compareTick() tea.Cmd {
 func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.PasteMsg:
+		if m.pathEditing {
+			return m.updateComparePath(tea.KeyPressMsg{Text: msg.Content})
+		}
 		if m.fileView && m.fileFiltering && !m.contentOpen {
 			m.updateFileFilter(tea.KeyPressMsg{Text: msg.Content})
 		}
@@ -189,13 +195,17 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+		if m.pathEditing {
+			return m.updateComparePath(msg)
+		}
 		if m.fileView && m.fileFiltering && !m.contentOpen {
 			m.updateFileFilter(msg)
 			return m, nil
 		}
-		if m.guideOpen {
+		if m.guideOpen || m.evidence != "" {
 			if msg.Code == tea.KeyEscape || key.Matches(msg, m.keys.Help, m.keys.Quit) {
 				m.guideOpen = false
+				m.evidence = ""
 			} else {
 				m.updateCompareGuide(msg)
 			}
@@ -256,16 +266,16 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if msg.Code == '2' {
-				m.fileDirectory = ""
-				m.fileFilter = ""
-				m.rebuildFileFilter()
-				m.adjustFileViewport()
 				m.overview = false
 				m.fileView = true
 				return m, nil
 			}
 			if m.overview {
 				switch {
+				case msg.Code == 'c':
+					m.evidence, m.guideOffset = "Comparison checks", 0
+				case msg.Code == 'w' && len(m.result.WasteDiffs) > 0:
+					m.evidence, m.guideOffset = "Waste changes", 0
 				case msg.Code == tea.KeyEnter:
 					if m.fileIndex != nil && len(m.fileIndex.directories) > 0 {
 						m.fileDirectory = m.fileIndex.directories[m.directoryCursor].path
@@ -299,6 +309,10 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.fileView {
+				if msg.Code == 'p' {
+					m.pathEditing, m.pathInput = true, ""
+					return m, nil
+				}
 				if msg.Code == tea.KeyEnter {
 					return m.openContentMode(compareModeDetails)
 				}
@@ -309,6 +323,8 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			switch {
+			case msg.Code == tea.KeyEnter && len(m.result.LayerDiffs) > 0:
+				m.evidence, m.guideOffset = "Build step details", 0
 			case key.Matches(msg, m.keys.Down):
 				m.cursor++
 			case key.Matches(msg, m.keys.Up):
@@ -379,7 +395,7 @@ func (m compareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // compareSize reserves the same chrome space for rendering and navigation.
 func (m compareModel) compareSize() (int, int) {
 	if !m.inFrame && m.usesCompareWorkspace() {
-		if m.contentOpen || m.guideOpen {
+		if m.contentOpen || m.guideOpen || m.evidence != "" || m.pathEditing {
 			return m.width - 4, m.height - 9
 		}
 		if m.height < 28 {
@@ -421,14 +437,7 @@ func (m compareModel) View() tea.View {
 	if len(body) > 0 {
 		body = body[:len(body)-1]
 	}
-	refs := [2]string{"unknown", "unknown"}
-	if m.session != nil {
-		for side := range refs {
-			refs[side] = m.session.inputs[side].Ref
-		}
-	} else if m.result != nil {
-		refs = [2]string{m.result.Before.ImageRef, m.result.After.ImageRef}
-	}
+	refs := m.compareRefs()
 	tabs := "3 Overview   1 Layers   2 Files"
 	selected := "1 Layers"
 	if m.overview {
@@ -444,6 +453,9 @@ func (m compareModel) View() tea.View {
 	if m.guideOpen {
 		tabs = "Comparison guide · Esc back"
 	}
+	if m.evidence != "" {
+		tabs = m.evidence + " · Esc back"
+	}
 	if m.result != nil {
 		tabs += "   │   " + m.compareStatus(m.comparisonVerdict())
 	}
@@ -451,6 +463,14 @@ func (m compareModel) View() tea.View {
 		styleWithFg(m.theme.FileName).Render("A · Before  " + compareImageRef(refs[0], width-12)),
 		styleWithFg(m.theme.FileName).Render("B · After   " + compareImageRef(refs[1], width-12)),
 		tabs + "   │   ? guide",
+	}
+	if m.result != nil {
+		for i, platform := range []string{m.result.Before.Platform, m.result.After.Platform} {
+			if platform != "" {
+				label := []string{"A · Before  ", "B · After   "}[i]
+				header[i] = label + compareImageRef(refs[i], width-14-ansi.StringWidth(platform)) + "  " + compareTextLine(platform)
+			}
+		}
 	}
 	panelContent := append(header, strings.Repeat("─", width))
 	panelContent = append(panelContent, body...)
@@ -471,7 +491,20 @@ func (m compareModel) finalCompareView(content string) tea.View {
 	return finalizeViewNoMouse(tea.NewView(styleWithFg(m.theme.FileName).Render(content)), m.theme.MainBg)
 }
 
+func (m compareModel) compareRefs() [2]string {
+	if m.session != nil {
+		return [2]string{m.session.inputs[0].Ref, m.session.inputs[1].Ref}
+	}
+	if m.result != nil {
+		return [2]string{m.result.Before.ImageRef, m.result.After.ImageRef}
+	}
+	return [2]string{"unknown", "unknown"}
+}
+
 func compareImageRef(ref string, width int) string {
+	if width <= 0 {
+		return ""
+	}
 	quoted := strconv.Quote(ref)
 	cells := ansi.StringWidth(quoted)
 	if cells > width {
@@ -482,8 +515,15 @@ func compareImageRef(ref string, width int) string {
 
 func (m compareModel) compareBodyView() tea.View {
 	if m.result != nil {
-		if m.guideOpen {
+		if m.guideOpen || m.evidence != "" {
 			return m.compareGuideView()
+		}
+		if m.pathEditing {
+			return m.finalCompareView(strings.Join(fitCompareLines([]string{
+				"Compare exact file path",
+				truncateMid(compareTextLine(m.pathInput)+"▏", max(1, m.width)),
+				"Enter compare · Esc cancel",
+			}, m.height), "\n"))
 		}
 		if m.overview {
 			return m.overviewView()
@@ -740,16 +780,20 @@ func compareColumn(text string, width int) string {
 }
 
 func (m compareModel) compareFooter(width int) string {
-	hints := []statusHint{{"q", "exit"}, {"?", "guide"}}
+	var hints []statusHint
 	right := ""
 	switch {
 	case m.result == nil:
 		hints = []statusHint{{"q", "cancel"}, {"Ctrl+C", "cancel"}}
 		right = "Loading images"
+	case m.evidence != "":
+		hints = []statusHint{{"Esc", "back"}, {"↑↓", "scroll"}, {"PgUp/PgDn", "page"}}
+	case m.pathEditing:
+		hints = []statusHint{{"Enter", "compare"}, {"Esc", "cancel"}}
 	case m.guideOpen:
 		hints = []statusHint{{"Esc", "back"}, {"?", "close guide"}, {"↑↓", "scroll"}, {"PgUp/PgDn", "page"}}
-		_, height := m.compareSize()
-		right = fmt.Sprintf("%d/%d guide", min(m.guideOffset+max(1, height-1), len(m.compareGuideLines())), len(m.compareGuideLines()))
+		count := m.compareOverlayRows()
+		right = fmt.Sprintf("%d/%d guide", min(m.guideOffset+m.compareOverlayPage(), count), count)
 	case m.contentOpen:
 		hints = []statusHint{{"Esc", "files"}, {"1/2/3/4", "views"}, {"?", "guide"}}
 		if m.content == nil {
@@ -774,7 +818,11 @@ func (m compareModel) compareFooter(width int) string {
 			right = fmt.Sprintf("%d/%d · col %d", min(m.contentCursor+1, len(m.content.rows)), len(m.content.rows), m.contentHOffset+1)
 		}
 	case m.overview:
-		hints = append(hints, statusHint{"Enter", "investigate"}, statusHint{"↑↓", "area"}, statusHint{"Tab", "views"})
+		hints = []statusHint{{"q", "exit"}, {"c", "checks"}}
+		if len(m.result.WasteDiffs) > 0 {
+			hints = append(hints, statusHint{"w", "waste"})
+		}
+		hints = append(hints, statusHint{"Enter", "files"}, statusHint{"?", "guide"}, statusHint{"Tab", "views"})
 		count := 0
 		if m.fileIndex != nil {
 			count = len(m.fileIndex.directories)
@@ -784,13 +832,13 @@ func (m compareModel) compareFooter(width int) string {
 		hints = []statusHint{{"Enter", "apply"}, {"Esc", "clear"}, {"Ctrl+C", "exit"}}
 		right = "Editing path filter"
 	case m.fileView:
-		hints = append(hints, statusHint{"Enter", "details"}, statusHint{"d", "text diff"}, statusHint{"/", "filter"}, statusHint{"s", "rank"}, statusHint{"m", "metadata"}, statusHint{"Tab", "views"})
+		hints = []statusHint{{"Enter", "details"}, {"d", "text diff"}, {"p", "exact path"}, {"/", "filter"}, {"?", "guide"}, {"Tab", "views"}}
 		if m.fileDirectory != "" || m.fileFilter != "" {
 			hints = append(hints, statusHint{"Esc", "all files"})
 		}
 		right = fmt.Sprintf("%d/%d files", min(m.fileCursor+1, m.fileCount()), m.fileCount())
 	default:
-		hints = append(hints, statusHint{"↑↓", "move"}, statusHint{"Tab", "views"}, statusHint{"g/G", "ends"})
+		hints = []statusHint{{"Enter", "build step"}, {"↑↓", "move"}, {"?", "guide"}, {"Tab", "views"}}
 		right = fmt.Sprintf("%d/%d pairs", min(m.cursor+1, len(m.result.LayerDiffs)), len(m.result.LayerDiffs))
 	}
 	if width < 40 {
@@ -798,7 +846,9 @@ func (m compareModel) compareFooter(width int) string {
 		switch {
 		case m.fileFiltering && !m.contentOpen:
 			hints = []statusHint{{"Esc", "clear"}, {"Ctrl+C", "exit"}}
-		case m.contentOpen || m.guideOpen:
+		case m.pathEditing:
+			hints = []statusHint{{"Enter", "compare"}, {"Esc", "cancel"}}
+		case m.contentOpen || m.guideOpen || m.evidence != "":
 			hints = []statusHint{{"Esc", "back"}, {"Ctrl+C", "exit"}}
 		case m.result == nil:
 			hints = []statusHint{{"q", "cancel"}, {"Ctrl+C", "cancel"}}

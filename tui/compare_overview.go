@@ -116,7 +116,7 @@ func (m compareModel) overviewView() tea.View {
 		lines = append(lines, "Size check: "+strconv.Quote(m.checkError))
 	}
 	if m.height < 16 {
-		lines = append(lines, styleWithFg(m.theme.Accent).Bold(true).Render("Areas · Enter investigates changed files"))
+		lines = append(lines, styleWithFg(m.theme.Accent).Bold(true).Render("Areas · Enter files · c checks · w waste"))
 	} else {
 		lines = append(lines, "", styleWithFg(m.theme.Accent).Bold(true).Render("Where to investigate"), "Directories ranked by net file-byte change; Enter opens their changed files.", "These are changed-file totals, not total directory sizes.")
 	}
@@ -165,7 +165,7 @@ func (m compareModel) overviewView() tea.View {
 		lines = append(lines, "")
 	}
 	lines = append(lines, "Content is not fully scanned: same-size changes may be absent. Shared layer IDs identify identical layers.")
-	lines = append(lines, "q exit  ? guide  ↑↓ directory  Enter files  1 layers  2 all files")
+	lines = append(lines, "q exit  ? guide  ↑↓ directory  Enter files  1 layers  2 files")
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], max(0, m.width), "…")
 	}
@@ -186,10 +186,12 @@ func (m compareModel) compareGuideLines() []string {
 			{"3 Overview", "Find growth, waste and failed size checks."},
 			{"Enter", "Open the selected directory's files."},
 			{"2 Files", "Browse changes; Enter shows details; d opens a text diff."},
-			{"1 Layers", "Compare build steps and uncompressed layer bytes."},
+			{"1 Layers", "Compare build steps and uncompressed layer bytes. Enter opens details."},
+			{"c / w", "Open comparison checks or investigate waste changes."},
 		}},
 		{title: "Find and inspect", entries: []helpEntry{
-			{"/", "Search paths, such as /usr/lib."},
+			{"/", "Filter paths with size or metadata changes."},
+			{"p", "Compare text at an exact path, including same-size edits."},
 			{"s / m", "Change ranking / show file metadata."},
 			{"1–4", "Inside a file: Diff / Before / After / Details."},
 			{"h / l", "Scroll text left / right."},
@@ -227,14 +229,33 @@ func (m compareModel) compareGuideLines() []string {
 	return strings.Split(ansi.Wrap(intro+body+limits, max(1, width), ""), "\n")
 }
 
-func (m *compareModel) adjustCompareGuide() {
+func (m compareModel) compareOverlayPage() int {
 	_, height := m.compareSize()
-	m.guideOffset = min(max(0, m.guideOffset), max(0, len(m.compareGuideLines())-max(1, height-1)))
+	return max(1, height-1)
+}
+
+func (m compareModel) compareOverlayLines() []string {
+	if m.evidence == "" {
+		return m.compareGuideLines()
+	}
+	return m.compareEvidenceLines()
+}
+
+func (m compareModel) compareOverlayRows() int {
+	if m.evidence == "Waste changes" {
+		return len(m.result.WasteDiffs)
+	}
+	return len(m.compareOverlayLines())
+}
+
+func (m *compareModel) adjustCompareGuide() {
+	if m.guideOpen || m.evidence != "" {
+		m.guideOffset = min(max(0, m.guideOffset), max(0, m.compareOverlayRows()-m.compareOverlayPage()))
+	}
 }
 
 func (m *compareModel) updateCompareGuide(msg tea.KeyPressMsg) {
-	_, height := m.compareSize()
-	page := max(1, height-1)
+	page := m.compareOverlayPage()
 	switch {
 	case key.Matches(msg, m.keys.Down):
 		m.guideOffset++
@@ -251,18 +272,86 @@ func (m *compareModel) updateCompareGuide(msg tea.KeyPressMsg) {
 	case key.Matches(msg, m.keys.Top):
 		m.guideOffset = 0
 	case key.Matches(msg, m.keys.Bottom):
-		m.guideOffset = len(m.compareGuideLines())
+		m.guideOffset = m.compareOverlayRows()
 	}
 	m.adjustCompareGuide()
 }
 
 func (m compareModel) compareGuideView() tea.View {
-	lines := m.compareGuideLines()
-	_, height := m.compareSize()
-	offset := min(m.guideOffset, max(0, len(lines)-max(1, height-1)))
-	end := min(len(lines), offset+max(1, height-1))
-	lines = append(lines[offset:end:end], ansi.Truncate("Esc back  ↑↓ scroll  PgUp/PgDn page", max(0, m.width), "…"))
+	var lines []string
+	count := len(m.result.WasteDiffs)
+	waste := m.evidence == "Waste changes"
+	if !waste {
+		lines = m.compareOverlayLines()
+		count = len(lines)
+	}
+	page := m.compareOverlayPage()
+	offset := min(m.guideOffset, max(0, count-page))
+	end := min(count, offset+page)
+	if waste {
+		lines = m.compareWasteLines(offset, end)
+	} else {
+		lines = lines[offset:end:end]
+	}
+	lines = append(lines, ansi.Truncate("Esc back  ↑↓ scroll  PgUp/PgDn page", max(0, m.width), "…"))
 	return m.finalCompareView(strings.Join(fitCompareLines(lines, m.height), "\n"))
+}
+
+func (m compareModel) compareEvidenceLines() []string {
+	width, _ := m.compareSize()
+	lines := []string{m.evidence}
+	if m.evidence == "Build step details" {
+		d := m.result.LayerDiffs[m.cursor]
+		lines = append(lines, compareLayerNumber(d.BeforeIndex)+" → "+compareLayerNumber(d.AfterIndex)+" · "+compareMatch(d.Match),
+			"Layer size change "+signedBytes(d.SizeDelta),
+			"Filesystem change "+signedBytes(d.BeforeNetDelta)+" → "+signedBytes(d.AfterNetDelta), "",
+			"Before "+compareLayerText(d.BeforeIndex, d.BeforeCommand), "",
+			"After "+compareLayerText(d.AfterIndex, d.AfterCommand))
+	} else {
+		lines = append(lines, m.compareCheckLines()...)
+		refs := m.compareRefs()
+		lines = append(lines, "", "Before: "+compareTextLine(refs[0])+" · "+compareTextLine(m.result.Before.Platform),
+			"After: "+compareTextLine(refs[1])+" · "+compareTextLine(m.result.After.Platform))
+	}
+	return strings.Split(ansi.Wrap(strings.Join(lines, "\n"), max(1, width), ""), "\n")
+}
+
+func (m compareModel) compareCheckLines() []string {
+	if m.checkError != "" {
+		return []string{"Size check error: " + compareTextLine(m.checkError)}
+	}
+	if len(m.checks) == 0 {
+		return []string{"No size budgets configured.", "Efficiency and waste checks are active."}
+	}
+	lines := make([]string, 0, len(m.checks))
+	for _, c := range m.checks {
+		status := "PASS"
+		if !c.Passed {
+			status = "FAIL"
+		}
+		lines = append(lines, m.compareStatus(status)+" "+compareTextLine(c.Name)+" "+sizebudget.Format(c.ActualBytes)+" / "+sizebudget.Format(c.LimitBytes))
+	}
+	return lines
+}
+
+func (m compareModel) compareWasteLines(offset, end int) []string {
+	width, _ := m.compareSize()
+	lines := make([]string, 0, end-offset)
+	for _, d := range m.result.WasteDiffs[offset:end] {
+		prefix := m.compareDelta(d.WastedDelta) + "  "
+		layers := ""
+		if d.BeforeWasted > 0 {
+			layers = fmt.Sprintf("  Before #%d", d.BeforeFirstLayer+1)
+		}
+		if d.AfterWasted > 0 {
+			layers += fmt.Sprintf("  After #%d", d.AfterFirstLayer+1)
+		}
+		if width-ansi.StringWidth(prefix+layers) < 8 {
+			layers = ""
+		}
+		lines = append(lines, prefix+truncateMid(compareTextLine(d.Path), max(1, width-ansi.StringWidth(prefix+layers)))+layers)
+	}
+	return lines
 }
 
 func compareDirectoryPath(file string) string {

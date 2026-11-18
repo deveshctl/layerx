@@ -41,14 +41,18 @@ func (m compareModel) workspaceView() tea.View {
 	r := m.result
 	quiet := styleWithFg(m.theme.MetaDim)
 	strong := styleWithFg(m.theme.FileName).Bold(true)
-	refs := [2]string{r.Before.ImageRef, r.After.ImageRef}
-	if m.session != nil {
-		refs = [2]string{m.session.inputs[0].Ref, m.session.inputs[1].Ref}
+	refs := m.compareRefs()
+	refWidth := (w - 7) / 2
+	showRef := func(ref, platform string) string {
+		if platform == "" {
+			return compareImageRef(ref, refWidth)
+		}
+		return compareImageRef(ref, refWidth-ansi.StringWidth(platform)-2) + "  " + compareTextLine(platform)
 	}
 	lines := []string{
 		renderBrand(m.theme) + quiet.Render("   /   Image comparison"),
 		"",
-		strong.Render(ansi.Truncate(compareTextLine(refs[0]), (w-7)/2, "…")) + quiet.Render("   →   ") + strong.Render(ansi.Truncate(compareTextLine(refs[1]), (w-7)/2, "…")),
+		strong.Render(showRef(refs[0], r.Before.Platform)) + quiet.Render("   →   ") + strong.Render(showRef(refs[1], r.After.Platform)),
 		m.compareStatus(m.comparisonVerdict()) + "   " + m.workspaceReason(),
 		"",
 	}
@@ -73,7 +77,7 @@ func (m compareModel) workspaceView() tea.View {
 			beforeAfter[2] = "−<0.1 percentage points"
 		}
 	}
-	if !m.contentOpen && !m.guideOpen {
+	if !m.contentOpen && !m.guideOpen && m.evidence == "" && !m.pathEditing {
 		if m.height < 28 {
 			lines = append(lines, "Size "+values[0]+"   Waste "+values[1]+"   Efficiency "+values[2])
 		} else {
@@ -117,13 +121,16 @@ func (m compareModel) workspaceView() tea.View {
 	if m.guideOpen {
 		tabs = []string{strong.Render("Comparison guide") + quiet.Render("   Esc back")}
 	}
+	if m.evidence != "" {
+		tabs = []string{strong.Render(m.evidence) + quiet.Render("   Esc back")}
+	}
 	lines = append(lines, strings.Join(tabs, "   "), quiet.Render(strings.Repeat("─", w)))
 	// Use the existing page budgets so selection stays visible across resizing.
 	inner := m
 	inner.width, inner.height, inner.inFrame = w, m.height-len(lines)-2, true
 	var body []string
 	switch {
-	case m.guideOpen || m.contentOpen:
+	case m.guideOpen || m.contentOpen || m.evidence != "" || m.pathEditing:
 		v := inner.compareBodyView()
 		body = strings.Split(v.Content, "\n")
 		if len(body) > 0 {
@@ -156,7 +163,7 @@ func (m compareModel) workspaceFinish(lines []string) tea.View {
 
 func (m compareModel) workspaceReason() string {
 	if m.checkError != "" {
-		return "Size checks could not be completed"
+		return "Size checks could not be completed · c checks in Overview"
 	}
 	for _, c := range m.checks {
 		if !c.Passed {
@@ -164,10 +171,13 @@ func (m compareModel) workspaceReason() string {
 		}
 	}
 	if m.result.AfterEfficiency.WastedBytesDelta > 0 {
-		return "Layer waste increased by " + sizebudget.Format(m.result.AfterEfficiency.WastedBytesDelta)
+		return "Layer waste increased by " + sizebudget.Format(m.result.AfterEfficiency.WastedBytesDelta) + " · w waste in Overview"
 	}
 	if m.result.IsRegression() {
 		return "Layer efficiency decreased"
+	}
+	if before, after := m.result.Before.Platform, m.result.After.Platform; before != "" && after != "" && before != after {
+		return "Different image platforms · compare results with care"
 	}
 	return "No efficiency regression or failed size budgets"
 }
@@ -207,28 +217,9 @@ func (m compareModel) workspaceSelected(text string, selected bool, width int) s
 func (m compareModel) workspaceOverview(page int) []string {
 	s := m.result.FileSummary
 	left := []string{m.workspaceTitle("Where the files changed"), styleWithFg(m.theme.MetaDim).Render(fmt.Sprintf("%d added   %d modified   %d removed", s.AddedCount, s.ModifiedCount, s.RemovedCount)), styleWithFg(m.theme.MetaDim).Render("Size and metadata · Same-size edits may be absent")}
-	right := []string{m.workspaceTitle("Comparison checks"), ""}
-	for _, c := range m.checks {
-		status := "PASS"
-		if !c.Passed {
-			status = "FAIL"
-		}
-		right = append(right, m.compareStatus(status)+"  "+compareTextLine(c.Name), "  "+sizebudget.Format(c.ActualBytes)+" / "+sizebudget.Format(c.LimitBytes), "")
-	}
-	if len(m.checks) == 0 {
-		right = append(right, "No size budgets configured.", "Efficiency and waste checks are active.", "")
-	}
-	if m.width < 96 {
-		for _, c := range m.checks {
-			status := "PASS"
-			if !c.Passed {
-				status = "FAIL"
-			}
-			left[1] = m.compareStatus(status) + " " + compareTextLine(c.Name) + " " + sizebudget.Format(c.ActualBytes) + " / " + sizebudget.Format(c.LimitBytes)
-			if !c.Passed {
-				break
-			}
-		}
+	right := append([]string{m.workspaceTitle("Comparison checks · c details")}, m.compareCheckLines()...)
+	if m.width < 96 && (len(m.checks) > 0 || m.checkError != "") {
+		left = append(left, m.compareCheckLines()...)
 	}
 	if m.fileIndex == nil {
 		return append(left, "Indexing changes…")
@@ -275,7 +266,7 @@ func (m compareModel) workspaceFiles(page int) []string {
 	}
 	left := []string{m.workspaceTitle(title), styleWithFg(m.theme.MetaDim).Render(sortNames[m.fileSort] + "   ·   s change ranking"), ""}
 	if m.fileFiltering || m.fileFilter != "" {
-		left[1] = "/ " + compareTextLine(m.fileFilter) + "   Enter apply · Esc clear"
+		left[1] = m.compareFilterLabel()
 	}
 	if m.fileIndex == nil {
 		left[2] = "Indexing file details…"
@@ -292,13 +283,13 @@ func (m compareModel) workspaceFiles(page int) []string {
 	}
 	if m.width < 96 {
 		if m.fileCount() == 0 {
-			left = append(left, "No matching file changes.", "Esc clears the directory and filter.")
+			left = append(left, "No matching file changes.", "p compares an exact path, including same-size edits.")
 		}
 		return left
 	}
 	right := []string{m.workspaceTitle("File inspector"), styleWithFg(m.theme.MetaDim).Render("Enter details · d text diff"), ""}
 	if m.fileCount() == 0 {
-		left = append(left, "No matching file changes.", "Esc clears the directory and filter.")
+		left = append(left, "No matching file changes.", "p compares an exact path, including same-size edits.")
 	} else {
 		d := m.fileDiffAt(m.fileCursor)
 		rightWidth := m.width - width - 5
@@ -346,7 +337,7 @@ func (m compareModel) workspaceLayers(page int) []string {
 		width = m.width
 	}
 	left := []string{m.workspaceTitle("Build steps"), styleWithFg(m.theme.MetaDim).Render("Before → After  Match           Uncompressed change"), ""}
-	right := []string{m.workspaceTitle("Selected build step"), ""}
+	right := []string{m.workspaceTitle("Selected build step · Enter details"), ""}
 	for i := m.offset; i < min(len(m.result.LayerDiffs), m.offset+page); i++ {
 		d := m.result.LayerDiffs[i]
 		pair := compareLayerNumber(d.BeforeIndex) + " → " + compareLayerNumber(d.AfterIndex)

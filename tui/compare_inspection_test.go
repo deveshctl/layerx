@@ -180,3 +180,36 @@ func TestComparePreviewPreservesSourcePunctuation(t *testing.T) {
 	assert.Equal(t, source, compareTextLine(source))
 	assert.Equal(t, `safe\x1b[2J\n\u202e`, compareTextLine("safe\x1b[2J\n\u202e"))
 }
+
+func TestCompareExactPathFindsSameSizeEditAndKeepsFilter(t *testing.T) {
+	inputs, results := inspectionInputs([2][]byte{[]byte("abc"), []byte("xyz")})
+	for _, result := range results {
+		tree := image.NewFileTree()
+		tree.Root.AddChild(&image.FileNode{Name: "config", Path: "/config", Size: 3})
+		result.Analysis.StackedTrees = []*image.FileTree{tree}
+	}
+	m := compareModel{result: &image.CompareResult{}, fileView: true, fileFilter: "previous-filter", keys: defaultKeys(),
+		session: &compareSession{ctx: t.Context(), inputs: inputs, results: results}, theme: themeFor(""), width: 100, height: 24}
+	press := func(msg tea.Msg) tea.Cmd {
+		next, cmd := m.Update(msg)
+		m = next.(compareModel)
+		return cmd
+	}
+	press(tea.KeyPressMsg{Code: '2'})
+	assert.Equal(t, "previous-filter", m.fileFilter)
+	press(tea.KeyPressMsg{Code: 'p'})
+	press(tea.PasteMsg{Content: "/config"})
+	cmd := press(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	press(cmd())
+	out := ansi.Strip(m.View().Content)
+	assert.Contains(t, out, "abc")
+	assert.Contains(t, out, "xyz")
+	press(tea.KeyPressMsg{Code: tea.KeyEscape})
+	assert.Equal(t, "previous-filter", m.fileFilter)
+	assert.Empty(t, m.contentPath)
+	press(tea.KeyPressMsg{Code: 'p'})
+	press(tea.PasteMsg{Content: "/missing"})
+	assert.Nil(t, press(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	assert.Contains(t, m.content.note, "No file at this path")
+}

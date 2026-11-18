@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional image-size and growth budgets in `.layerx.yaml`, with CI baseline checks and JSON/Markdown check reports.
 
 ### Fixed
+- Interactive Compare now explains waste and platform differences, keeps checks and layer details available in narrow terminals, and supports exact-path text comparisons without clearing filters.
 - Updated to Go 1.27.4 for standard library security fixes.
 - Go patch releases get their own update PRs so security fixes can land between monthly dependency updates.
 - Fix shifted comparison help keys and text line endings, reduce extraction memory use, and improve Windows cache and JSON export reliability.

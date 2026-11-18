@@ -209,13 +209,13 @@ func (m compareModel) fileBrowserView() tea.View {
 		fmt.Sprintf("Added %d   Removed %d   Modified %d   +%s / -%s", sum.AddedCount, sum.RemovedCount, sum.ModifiedCount, sizebudget.Format(sum.BytesAdded), sizebudget.Format(sum.BytesRemoved)),
 		"Sizes and metadata only; same-size content changes may be absent.",
 		"Directory metadata is not compared.",
-		fmt.Sprintf("Order: %s · Enter details · d text diff", sortNames[m.fileSort]),
+		fmt.Sprintf("Order: %s · Enter details · d diff · p exact path", sortNames[m.fileSort]),
 	}
 	if m.fileDirectory != "" {
 		lines = append(lines, "Directory: "+strconv.Quote(m.fileDirectory)+" · Esc shows all files")
 	}
 	if m.fileFiltering || m.fileFilter != "" {
-		lines = append(lines, "Filter /"+strconv.Quote(m.fileFilter)+"  Enter apply; Esc clear")
+		lines = append(lines, m.compareFilterLabel())
 	}
 	if m.fileHelp {
 		lines = append(lines, "Enter details; d/v inspects text; Tab/1/2 switches views; s cycles ranking; m shows metadata; ? closes help.")
@@ -225,7 +225,7 @@ func (m compareModel) fileBrowserView() tea.View {
 	}
 	if m.fileCount() == 0 {
 		if m.fileFilter != "" || m.fileDirectory != "" {
-			lines = append(lines, "No matching paths; Esc clears filter")
+			lines = append(lines, "No matching paths. p compares an exact path.")
 		} else {
 			lines = append(lines, "No file changes")
 		}
@@ -273,6 +273,14 @@ func (m compareModel) fileBrowserView() tea.View {
 	}
 	lines = fitCompareLines(lines, m.height)
 	return m.finalCompareView(strings.Join(lines, "\n"))
+}
+
+func (m compareModel) compareFilterLabel() string {
+	action := "Esc clear"
+	if m.fileFiltering {
+		action = "Enter apply · " + action
+	}
+	return "Filter: " + compareTextLine(m.fileFilter) + "   " + action
 }
 
 func compareFileMeta(n *image.FileNode) string {
