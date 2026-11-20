@@ -76,7 +76,7 @@ func TestBuildOperationalErrorsPrintOnce(t *testing.T) {
 			prepareBuildRoutingTest(t)
 			withFakeResolver(t, okResolver(passingLayers()...))
 			failure := errors.New("inspection unavailable")
-			runBuildCommand = func(*exec.Cmd) error { return nil }
+			runBuildCommand = func(c *exec.Cmd) error { return writeTestBuildIID(t, c) }
 			runBuildTUI = func(tui.Config) error { return nil }
 			switch stage {
 			case "engine-start":

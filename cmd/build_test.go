@@ -157,7 +157,7 @@ func TestEnsureIIDFile_AppendsTempWhenAbsent(t *testing.T) {
 
 func TestEnsureIIDFile_StopsAtDashDash(t *testing.T) {
 	// --iidfile after -- must be treated as a build-context argument, not a
-	// layerx flag. ensureIIDFile must stop scanning at -- (same as firstTagFromArgs).
+	// layerx flag. ensureIIDFile must stop scanning at --.
 	args := []string{"-t", "x", "--", "--iidfile=/tmp/ignored.iid"}
 	path, owns, err := ensureIIDFile(&args)
 	if err != nil {
@@ -318,28 +318,15 @@ func TestErrBuildFailed_IsTyped(t *testing.T) {
 	}
 }
 
-func TestFirstTagFromArgs(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"short flag space form", []string{"-t", "myimage", "."}, "myimage"},
-		{"short flag equals form", []string{"-t=myimage:1.0", "."}, "myimage:1.0"},
-		{"long flag space form", []string{"--tag", "myimage", "."}, "myimage"},
-		{"long flag equals form", []string{"--tag=myimage:dev", "."}, "myimage:dev"},
-		{"first of multiple tags wins", []string{"-t", "first:latest", "-t", "second:1.0", "."}, "first:latest"},
-		{"no tag", []string{"--build-arg", "X=1", "."}, ""},
-		{"trailing -t with no value", []string{"-t"}, ""},
-		{"-- stops parsing", []string{"--", "-t", "tricky", "."}, ""},
-		{"tag-like positional after build-arg is not picked up", []string{"--build-arg", "VERSION=1", "."}, ""},
+func TestBuildDoesNotProduceImage(t *testing.T) {
+	for _, args := range [][]string{{"--check", "."}, {"--check=true", "."}, {"--call", "outline", "."}, {"--call=targets", "."}} {
+		if !buildDoesNotProduceImage(args) {
+			t.Errorf("expected no build output for %v", args)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := firstTagFromArgs(tc.args)
-			if got != tc.want {
-				t.Fatalf("firstTagFromArgs(%v) = %q, want %q", tc.args, got, tc.want)
-			}
-		})
+	for _, args := range [][]string{{"."}, {"--call=build", "."}, {"--check=false", "."}, {"--", "--check"}} {
+		if buildDoesNotProduceImage(args) {
+			t.Errorf("expected an image for %v", args)
+		}
 	}
 }

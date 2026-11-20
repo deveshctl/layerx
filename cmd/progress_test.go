@@ -159,9 +159,9 @@ func TestHumanBytes(t *testing.T) {
 	}{
 		{0, "0 B"},
 		{500, "500 B"},
-		{2048, "2.0 KB"},
-		{5 * 1024 * 1024, "5.0 MB"},
-		{3 * 1024 * 1024 * 1024, "3.0 GB"},
+		{2048, "2.0 KiB"},
+		{5 * 1024 * 1024, "5.0 MiB"},
+		{3 * 1024 * 1024 * 1024, "3.0 GiB"},
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, humanBytes(tc.in))
@@ -227,8 +227,8 @@ func TestStderrProgress_GrowingTotalAllowsProgress(t *testing.T) {
 	out := driveProgress(t, context.Background(), events, tick, true)
 
 	// Must contain at least one intermediate progress line (not just 100%).
-	assert.Contains(t, out, "5.0 MB", "layer-1-only progress line must appear")
-	// Both 5/5 MB (100%) and 13/13 MB (100%) are distinct completion events —
+	assert.Contains(t, out, "5.0 MiB", "layer-1-only progress line must appear")
+	// Both 5/5 MiB (100%) and 13/13 MiB (100%) are distinct completion events —
 	// they have different BytesCurr/BytesTotal keys so both print exactly once.
 	assert.GreaterOrEqual(t, strings.Count(out, "100%"), 2, "both distinct 100%% events must appear: %q", out)
 }

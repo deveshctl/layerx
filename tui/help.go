@@ -58,7 +58,8 @@ func defaultHelpSections() []helpSection {
 		{
 			title: "File Tree",
 			entries: []helpEntry{
-				{"/", "Filter file paths"},
+				{"/", "Filter file paths in the selected layer"},
+				{"F", "Find a file in the final image"},
 				{"Enter", "View file / expand or collapse folder"},
 				{"h / l", "Collapse / expand folder, or move to parent / child"},
 				{"m", "Toggle file metadata columns"},

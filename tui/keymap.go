@@ -22,6 +22,7 @@ type keyMap struct {
 	CopyContent  key.Binding
 	Help         key.Binding
 	Filter       key.Binding
+	FindFinal    key.Binding
 	DiffOnly     key.Binding
 	Sort         key.Binding
 	Aggregate    key.Binding
@@ -104,6 +105,7 @@ func defaultKeys() keyMap {
 			key.WithKeys("/"),
 			key.WithHelp("/", "filter"),
 		),
+		FindFinal: key.NewBinding(key.WithKeys("F")),
 		DiffOnly: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "diff only"),

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/term"
 
 	"github.com/deveshctl/layerx/image"
 	"github.com/deveshctl/layerx/internal/sizebudget"
@@ -205,6 +207,7 @@ type treeCacheSlot struct {
 	valid        bool
 	layerCursor  int
 	filterQuery  string
+	liveFilter   bool
 	diffOnly     bool
 	sortMode     sortMode
 	collapsedGen uint64
@@ -231,6 +234,7 @@ type model struct {
 	layerOffset     int
 	treeCursor      int
 	treeOffset      int
+	analysisErr     error
 	errMsg          string
 	quitting        bool
 	resolver        image.Resolver
@@ -251,6 +255,7 @@ type model struct {
 	errorOffset     int
 	filterActive    bool
 	filterQuery     string
+	liveFilter      bool
 	diffOnly        bool
 	aggregated      bool
 	sortMode        sortMode
@@ -492,6 +497,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case analysisMsg:
 		if msg.err != nil {
 			m.state = stateError
+			m.analysisErr = msg.err
 			m.errMsg = friendlyError(msg.err)
 			m.errorOffset = 0
 			return m, nil
@@ -946,9 +952,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case key.Matches(msg, m.keys.FindFinal):
+			m.layerCursor = max(0, len(m.layers())-1)
+			m.focus, m.diffOnly = focusTree, false
+			m.filterQuery, m.filterActive, m.liveFilter = "", true, true
+			m.treeCursor, m.treeOffset = 0, 0
+			m.aggCursor, m.aggOffset = 0, 0
+			m.clampCursors()
+			return m, nil
+
 		case key.Matches(msg, m.keys.Filter):
 			if m.isTreeFocused() {
-				m.filterActive = true
+				m.filterActive, m.liveFilter = true, false
 				m.clampCursors()
 				return m, nil
 			}
@@ -1389,6 +1404,7 @@ func (m model) displayTreeFor(f focus) []*image.FileNode {
 	if slot.valid &&
 		slot.layerCursor == m.layerCursor &&
 		slot.filterQuery == m.filterQuery &&
+		slot.liveFilter == m.liveFilter &&
 		slot.diffOnly == m.diffOnly &&
 		slot.sortMode == m.sortMode &&
 		slot.collapsedGen == m.collapsedGen &&
@@ -1400,6 +1416,7 @@ func (m model) displayTreeFor(f focus) []*image.FileNode {
 		valid:        true,
 		layerCursor:  m.layerCursor,
 		filterQuery:  m.filterQuery,
+		liveFilter:   m.liveFilter,
 		diffOnly:     m.diffOnly,
 		sortMode:     m.sortMode,
 		collapsedGen: m.collapsedGen,
@@ -1422,6 +1439,9 @@ func (m model) computeDisplayTreeFor(f focus) []*image.FileNode {
 	}
 	if m.filterQuery != "" {
 		files = applySubstringFilter(files, m.filterQuery)
+		if m.liveFilter && m.layerCursor == len(m.layers())-1 {
+			files = slices.DeleteFunc(files, func(f *image.FileNode) bool { return f.DiffType == image.Removed })
+		}
 	}
 	if m.sortMode != sortNone {
 		files = regularFiles(files)
@@ -2037,7 +2057,7 @@ func (m model) viewReady() tea.View {
 	leftWidth := m.leftPanelWidth()
 	rightWidth := m.width - leftWidth - 1
 	// header(1) + panel borders(2) + commandBar(3) + separator(1) + statusBar(1) = 8
-	panelHeight := m.height - chromeRows
+	panelHeight := m.height - chromeRows + 3 - m.commandBarRows()
 	header := m.renderHeader()
 	// The status bar only consumes treeFiles in its non-viewer branch; when the
 	// viewer is open renderStatusBar returns early via renderViewerStatusBar and
@@ -2081,14 +2101,16 @@ func (m model) viewReady() tea.View {
 	if m.layerCursor < len(layers) {
 		cmd = layers[m.layerCursor].Command
 	}
-	commandBar := renderCommandBar(m.styles, cmd, m.width)
-	// Keep the three reserved command rows even when the command is short.
-	commandBar += strings.Repeat("\n", max(3-lipgloss.Height(commandBar), 0))
+	var commandBar string
+	if rows := m.commandBarRows(); rows > 0 {
+		commandBar = renderCommandBar(m.styles, cmd, m.width)
+		commandBar += strings.Repeat("\n", max(rows-lipgloss.Height(commandBar), 0)) + "\n"
+	}
 
 	sep := m.styles.separator.Render(strings.Repeat("─", m.width))
 	status := m.renderStatusBar(treeFiles)
 
-	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar, sep, status)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, panels, commandBar+sep, status)
 
 	if m.showHelp {
 		content = m.overlayHelp()
@@ -2177,6 +2199,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 	if m.focus == focusLayers {
 		hints = []statusHint{
 			{"Tab", "switch"},
+			{"F", "find in image"},
 			{"j/k", "navigate"},
 			{"g/G", "top/bottom"},
 			{"S", "size"},
@@ -2206,7 +2229,7 @@ func (m model) renderStatusBar(treeFiles []*image.FileNode) string {
 			{"Tab", "switch"},
 			{"j/k", "navigate"},
 			{"/", "filter"},
-			{"m", "columns"},
+			{"F", "find"},
 			{"d", "diff"},
 			{"s", "sort"},
 			{"w", "waste + cleanup"},
@@ -2570,8 +2593,15 @@ func (m *model) viewMaxCursorCol() int {
 	return maxW
 }
 
+func (m model) commandBarRows() int {
+	if m.viewState != viewNone && m.height <= 16 {
+		return 0
+	}
+	return 3
+}
+
 func (m *model) viewVisibleHeight() int {
-	h := m.height - 8
+	h := m.height - 5 - m.commandBarRows()
 	if m.viewContent != nil && m.viewContent.Truncated {
 		h--
 	}
@@ -2675,9 +2705,14 @@ func friendlySaveError(err error, name string) string {
 
 // Run starts the TUI program with the given configuration.
 func Run(cfg Config) error {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return fmt.Errorf("image inspection requires terminal input and output; use --json FILE to export analysis")
+	}
 	m := NewModel(cfg)
 	defer m.fetchCancel()
-	p := tea.NewProgram(m)
-	_, err := p.Run()
-	return err
+	final, err := tea.NewProgram(m).Run()
+	if err != nil {
+		return err
+	}
+	return final.(model).analysisErr
 }

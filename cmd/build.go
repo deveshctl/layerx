@@ -40,8 +40,8 @@ Other arguments, including --platform, go to the engine. --no-cache disables
 both build and analysis caches. Set theme in .layerx.yaml for build inspection;
 --theme is not handled by this command. Arguments after -- go to the engine.
 
-With -t or --tag, LayerX inspects the first tag. Without a tag, it uses the
-image ID from --iidfile, creating a temporary ID file if none was supplied.
+LayerX inspects the image ID produced by the build, creating a temporary
+ID file if --iidfile was not supplied. Check-only builds skip inspection.
 Use --json to export analysis instead of opening the interactive viewer.`,
 	Example: `  layerx build -t app:local .
   layerx build --json analysis.json -t app:local .
@@ -77,13 +77,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	firstTag := firstTagFromArgs(engineArgs)
-
+	checkOnly := buildDoesNotProduceImage(engineArgs)
 	var (
 		iidPath     string
+		previousIID os.FileInfo
 		ownsIIDFile bool
 	)
-	if firstTag == "" {
+	if !checkOnly {
 		iidPath, ownsIIDFile, err = ensureIIDFile(&engineArgs)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -91,6 +91,8 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		}
 		if ownsIIDFile {
 			defer os.Remove(iidPath)
+		} else if previousIID, err = os.Stat(iidPath); err != nil && !os.IsNotExist(err) {
+			return presentCLIError(cmd.ErrOrStderr(), fmt.Errorf("checking build image ID file: %w", err))
 		}
 	}
 
@@ -110,14 +112,18 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return presentCLIError(cmd.ErrOrStderr(), fmt.Errorf("failed to invoke %s build: %w", binary, err))
 	}
 
-	imageRef := firstTag
-	if imageRef == "" {
-		id, readErr := readIIDFile(iidPath)
-		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: build succeeded but could not determine image to inspect (%v); pass -t TAG to layerx build to inspect by tag\n", readErr)
-			return nil
+	if checkOnly {
+		return nil
+	}
+	if previousIID != nil {
+		currentIID, statErr := os.Stat(iidPath)
+		if statErr == nil && os.SameFile(previousIID, currentIID) && previousIID.ModTime().Equal(currentIID.ModTime()) && previousIID.Size() == currentIID.Size() {
+			return presentCLIError(cmd.ErrOrStderr(), fmt.Errorf("build completed but did not update the image ID file"))
 		}
-		imageRef = id
+	}
+	imageRef, err := readIIDFile(iidPath)
+	if err != nil {
+		return presentCLIError(cmd.ErrOrStderr(), fmt.Errorf("build completed without an image ID: %w", err))
 	}
 
 	if flagJSON != "" {
@@ -151,31 +157,23 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}))
 }
 
-// firstTagFromArgs returns the first -t / --tag value in args, or "" if none.
-// Both Docker and Podman accept -t and --tag with either a space or = form;
-// only the first occurrence is used because all tags resolve to the same
-// image and "the first one" matches what the engine itself would surface as
-// the canonical reference for output.
-func firstTagFromArgs(args []string) string {
-	for i := range len(args) {
-		a := args[i]
-		if a == "--" {
-			return ""
+// Docker buildx can run a frontend subrequest without building an image.
+func buildDoesNotProduceImage(args []string) bool {
+	for i, arg := range args {
+		if arg == "--" {
+			break
 		}
-		if a == "-t" || a == "--tag" {
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-			return ""
+		if arg == "--check" || arg == "--check=true" {
+			return true
 		}
-		if v, ok := strings.CutPrefix(a, "--tag="); ok {
-			return v
+		if arg == "--call" && i+1 < len(args) {
+			return args[i+1] != "build"
 		}
-		if v, ok := strings.CutPrefix(a, "-t="); ok {
-			return v
+		if call, ok := strings.CutPrefix(arg, "--call="); ok {
+			return call != "build"
 		}
 	}
-	return ""
+	return false
 }
 
 func extractLayerxFlags(args []string) ([]string, error) {

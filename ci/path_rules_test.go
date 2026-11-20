@@ -257,7 +257,7 @@ func TestDenyWastePathRule_LayerCountInDetail(t *testing.T) {
 	assert.Equal(t, "/var/log/big.log", results[0].Actual)
 	assert.Contains(t, results[0].Detail, "4 layers")
 	assert.True(t,
-		strings.Contains(results[0].Detail, "10.0 MB") || strings.Contains(results[0].Detail, "10 MB"),
+		strings.Contains(results[0].Detail, "10.0 MiB"),
 		"detail %q should contain the human-readable size", results[0].Detail)
 }
 

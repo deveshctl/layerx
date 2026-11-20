@@ -94,6 +94,12 @@ func TestLoadConfig_ExplicitPathSkipsDiscovery(t *testing.T) {
 			var stderr bytes.Buffer
 			cmd.SetErr(&stderr)
 			got, err := loadConfig(cmd)
+			if missing {
+				require.ErrorIs(t, err, os.ErrNotExist)
+				assert.Nil(t, got)
+				assert.Contains(t, stderr.String(), flagConfig)
+				return
+			}
 			require.NoError(t, err)
 			assert.Equal(t, want, got)
 			assert.Empty(t, stderr.String())

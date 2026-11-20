@@ -147,7 +147,7 @@ func TestLongQueryKeepsCaretAndTailVisible(t *testing.T) {
 			if viewer {
 				line = renderViewerSearchBar(viewerParams{styles: m.styles}, query, true, 12, 0, width)
 			} else {
-				line = renderFilterBar(m.styles, true, query, 0, width)
+				line = renderFilterBar(m.styles, true, query, 0, width, 0)
 			}
 			assert.LessOrEqual(t, lipgloss.Width(line), width)
 			assert.Contains(t, ansi.Strip(line), "END█")
@@ -157,7 +157,7 @@ func TestLongQueryKeepsCaretAndTailVisible(t *testing.T) {
 	m.filterQuery = query
 	m = send(m, keyPress('Z'))
 	assert.Equal(t, query+"Z", m.filterQuery)
-	assert.Contains(t, ansi.Strip(renderFilterBar(m.styles, true, m.filterQuery, 0, 30)), "ENDZ█")
+	assert.Contains(t, ansi.Strip(renderFilterBar(m.styles, true, m.filterQuery, 0, 30, 0)), "ENDZ█")
 }
 
 func TestCommandWrappingHonoursDisplayWidth(t *testing.T) {

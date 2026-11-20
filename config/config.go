@@ -2,9 +2,7 @@ package config
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -115,15 +113,11 @@ func Load() (*Config, error) {
 }
 
 // LoadFrom reads config from the specified path.
-// Returns default config if the file does not exist, is empty, or contains
-// only whitespace/comments.
+// Returns default config if the file is empty or contains only whitespace/comments.
 func LoadFrom(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return Default(), nil
-		}
-		return nil, err
+		return nil, newLoadError(path, "", err)
 	}
 
 	if !hasYAMLContent(data) {
@@ -136,7 +130,7 @@ func LoadFrom(path string) (*Config, error) {
 	// the receiver could detect after the fact. Catching null requires
 	// inspecting the document AST before the strict struct decode runs;
 	// otherwise `rules: null` silently zeros the user's CI thresholds.
-	if err := rejectNullSections(path, data); err != nil {
+	if err := validateDocument(path, data); err != nil {
 		return nil, err
 	}
 
@@ -184,7 +178,7 @@ func LoadFrom(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// rejectNullSections parses the raw bytes once and rejects any top-level key
+// validateDocument rejects multiple documents and any top-level key
 // whose value is an explicit YAML null when the loader's contract requires a
 // mapping. The strict struct decode that runs afterwards cannot tell `key:`
 // from absent — both surface as a Go nil ast.Node — so a separate pass is
@@ -193,7 +187,7 @@ func LoadFrom(path string) (*Config, error) {
 // Both `rules:` and `size-budget:` require mappings. `path-rules:` accepts null as
 // "no path rules" by design (see normalizePathRules), and other top-level
 // keys are scalars or maps where strict decode catches the malformed shape.
-func rejectNullSections(path string, data []byte) error {
+func validateDocument(path string, data []byte) error {
 	f, err := parser.ParseBytes(data, 0)
 	if err != nil {
 		// Don't shadow the strict decode pass's richer error; just let it
@@ -203,15 +197,10 @@ func rejectNullSections(path string, data []byte) error {
 	if f == nil || len(f.Docs) == 0 {
 		return nil
 	}
-	for _, doc := range f.Docs {
-		if doc == nil || doc.Body == nil {
-			continue
-		}
-		if err := checkRulesNotNull(path, doc.Body); err != nil {
-			return err
-		}
+	if len(f.Docs) > 1 {
+		return newLoadError(path, "", fmt.Errorf("expected one YAML document"))
 	}
-	return nil
+	return checkRulesNotNull(path, f.Docs[0].Body)
 }
 
 func checkRulesNotNull(path string, body ast.Node) error {
