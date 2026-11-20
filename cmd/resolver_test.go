@@ -3,7 +3,9 @@ package cmd
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/deveshctl/layerx/image"
@@ -257,6 +259,14 @@ func TestSelectResolverDefault_RegularFileBypassesEngine(t *testing.T) {
 		if r == nil {
 			t.Fatalf("engine=%s: nil resolver", eng)
 		}
+	}
+}
+
+func TestSelectResolverDefault_MissingExplicitArchive(t *testing.T) {
+	resetEngineState(t)
+	_, err := selectResolverDefault(filepath.Join(t.TempDir(), "missing.tar"))
+	if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "opening image archive") {
+		t.Fatalf("expected archive path error, got %v", err)
 	}
 }
 

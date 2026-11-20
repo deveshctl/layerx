@@ -252,21 +252,22 @@ layerx --json analysis.json nginx:latest
 source <(layerx completion bash)
 ```
 
-`IMAGE_OR_ARCHIVE` is auto-detected: an existing regular file is read directly without contacting any runtime; anything else is resolved through the active container engine. Inspection, `ci`, `compare` and JSON export accept both forms. `layerx build` builds through the engine, then inspects the resulting image.
+`IMAGE_OR_ARCHIVE` is auto-detected: an existing regular file is read directly. Explicit paths such as `./build/app.tar` report filesystem errors directly. Image references use the active container engine. Inspection, `ci`, `compare` and JSON export accept both forms. `layerx build` builds through the engine, then inspects the resulting image.
 
 ### TUI keybindings
 
 | Key         | Action                                                       |
 |-------------|--------------------------------------------------------------|
 | `Tab`       | Cycle Layers → Layer files → Cumulative in split view |
-| `j` / `k`   | Move up / down                                               |
+| `j` / `k`   | Move down / up                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
 | `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
 | `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
 | `h` / `l`   | Scroll left / right (file viewer, long lines)                |
 | `Enter`     | Confirm a filter; open a file; expand or collapse a folder                |
 | `Esc`       | Close help, clear search/filter, or close the viewer. Quits only on loading and error screens. |
-| `/`         | Filter file tree (tree) / search in viewer (viewer)          |
+| `/`         | Filter the selected layer or search within an open file      |
+| `F`         | Find a file in the final image                              |
 | `n` / `N`   | Next / previous search match (viewer)                        |
 | `y`         | Copy file path to clipboard                                  |
 | `Y`         | Copy file content to clipboard (viewer only)                 |
@@ -428,7 +429,7 @@ path-rules:
 # theme: dracula
 ```
 
-CLI flags override config-file values. Setting a threshold to `0` or negative disables that rule.
+CLI flags override config-file values. Set a threshold to `0` to disable that rule. Negative thresholds are rejected.
 
 Full field reference, path-rule semantics, theming, and worked examples: [docs/configuration.md](docs/configuration.md). End-to-end CI/CD recipes (GitHub Actions, GitLab CI, threshold recommendations, exit codes): [docs/ci-integration.md](docs/ci-integration.md).
 

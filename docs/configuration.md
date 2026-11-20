@@ -22,9 +22,9 @@ parents for `.layerx.yaml`, then the user configuration directory for
   directory. `--config FILE` overrides this search.
   The first file found is used; project, parent, and user files are not merged.
   Missing values in that file use built-in defaults. A missing file chosen with
-  `--config` also uses built-in defaults rather than searching for another file.
+  `--config` is an error.
 - **YAML library.** Decoded with `goccy/go-yaml` in **strict mode**: any
-  unknown top-level key fails with a parse error. Empty files (or files
+  unknown top-level key fails with a parse error. Use one YAML document per file. Empty files (or files
   containing only comments and whitespace) silently fall back to built-in
   defaults.
 - **Schema version.** Only schema version `1` is accepted. `version: 0` is

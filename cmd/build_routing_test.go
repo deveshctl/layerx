@@ -51,19 +51,9 @@ func TestBuild_JSONRouting(t *testing.T) {
 				t.Setenv("CI", "true")
 			}
 			var forwarded []string
-			var iidPath string
 			runBuildCommand = func(c *exec.Cmd) error {
 				forwarded = append([]string(nil), c.Args[1:]...)
-				if location == "untagged" {
-					for i, arg := range forwarded {
-						if arg == "--iidfile" && i+1 < len(forwarded) {
-							iidPath = forwarded[i+1]
-							return os.WriteFile(iidPath, []byte("sha256:built-image\n"), 0o600)
-						}
-					}
-					t.Fatal("untagged build must request an image ID")
-				}
-				return nil
+				return writeTestBuildIID(t, c)
 			}
 			tuiCalls := 0
 			runBuildTUI = func(tui.Config) error {
@@ -83,15 +73,11 @@ func TestBuild_JSONRouting(t *testing.T) {
 			require.NoError(t, json.Unmarshal(data, &got))
 			assert.Equal(t, jsonSchemaVersion, got.SchemaVersion)
 			assert.Equal(t, 1, got.LayerCount)
-			wantRef := "app:test"
-			if location == "untagged" {
-				wantRef = "sha256:built-image"
-				_, err := os.Stat(iidPath)
-				assert.True(t, os.IsNotExist(err), "owned image-ID file must be cleaned up")
-			} else {
-				assert.Equal(t, []string{"build", "-t", "app:test", "."}, forwarded)
-			}
-			assert.Equal(t, wantRef, got.ImageRef)
+			assert.Equal(t, "sha256:built-image", got.ImageRef)
+			require.GreaterOrEqual(t, len(forwarded), 3)
+			assert.Equal(t, "--iidfile", forwarded[len(forwarded)-2])
+			_, err = os.Stat(forwarded[len(forwarded)-1])
+			assert.ErrorIs(t, err, os.ErrNotExist, "owned image-ID file must be cleaned up")
 		})
 	}
 }
@@ -104,13 +90,13 @@ func TestBuild_DefaultRoutingRemainsInteractive(t *testing.T) {
 			resolver := okResolver(passingLayers()...)
 			withFakeResolver(t, resolver)
 			runBuildCommand = func(c *exec.Cmd) error {
-				assert.Equal(t, []string{"build", "--no-cache", "-t", "app:test", "--target", "release", "."}, c.Args[1:])
-				return nil
+				assert.Equal(t, []string{"build", "--no-cache", "-t", "app:test", "--target", "release", "."}, c.Args[1:len(c.Args)-2])
+				return writeTestBuildIID(t, c)
 			}
 			tuiCalls := 0
 			runBuildTUI = func(cfg tui.Config) error {
 				tuiCalls++
-				assert.Equal(t, "app:test", cfg.ImageRef)
+				assert.Equal(t, "sha256:built-image", cfg.ImageRef)
 				assert.Same(t, resolver, cfg.Resolver)
 				assert.True(t, cfg.NoCache)
 				return nil
@@ -153,7 +139,7 @@ func TestBuild_EngineFailureSkipsInspection(t *testing.T) {
 func TestBuild_JSONFailureSkipsTUI(t *testing.T) {
 	prepareBuildRoutingTest(t)
 	withFakeResolver(t, okResolver(passingLayers()...))
-	runBuildCommand = func(*exec.Cmd) error { return nil }
+	runBuildCommand = func(c *exec.Cmd) error { return writeTestBuildIID(t, c) }
 	runBuildTUI = func(tui.Config) error {
 		t.Fatal("failed JSON exports must not fall back to the interactive viewer")
 		return nil
@@ -171,7 +157,7 @@ func TestBuild_JSONStillValidatesConfig(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "analysis.json")
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("path-rules:\n  - id: app-policy\n    type: block\n"), 0o600))
-	runBuildCommand = func(*exec.Cmd) error { return nil }
+	runBuildCommand = func(c *exec.Cmd) error { return writeTestBuildIID(t, c) }
 	previous := selectResolver
 	selectResolver = func(string) (image.Resolver, error) {
 		t.Fatal("invalid configuration must stop JSON analysis")
@@ -187,6 +173,41 @@ func TestBuild_JSONStillValidatesConfig(t *testing.T) {
 	require.ErrorContains(t, err, "app-policy")
 	_, statErr := os.Stat(output)
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+func writeTestBuildIID(t *testing.T, c *exec.Cmd) error {
+	t.Helper()
+	require.GreaterOrEqual(t, len(c.Args), 3)
+	require.Equal(t, "--iidfile", c.Args[len(c.Args)-2])
+	return os.WriteFile(c.Args[len(c.Args)-1], []byte("sha256:built-image\n"), 0o600)
+}
+
+func TestBuildCheckDoesNotAnalyzeExistingTag(t *testing.T) {
+	prepareBuildRoutingTest(t)
+	output := filepath.Join(t.TempDir(), "analysis.json")
+	runBuildCommand = func(c *exec.Cmd) error {
+		assert.Equal(t, []string{"build", "--check", "-t", "app:test", "."}, c.Args[1:])
+		return nil
+	}
+	previous := selectResolver
+	selectResolver = func(string) (image.Resolver, error) {
+		t.Fatal("check-only builds must not inspect an existing tag")
+		return nil, nil
+	}
+	t.Cleanup(func() { selectResolver = previous })
+	rootCmd.SetArgs([]string{"build", "--engine", "docker", "--json", output, "--check", "-t", "app:test", "."})
+	require.NoError(t, rootCmd.Execute())
+	_, err := os.Stat(output)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestBuildRejectsUnchangedUserIIDFile(t *testing.T) {
+	prepareBuildRoutingTest(t)
+	iid := filepath.Join(t.TempDir(), "previous.iid")
+	require.NoError(t, os.WriteFile(iid, []byte("sha256:previous"), 0o600))
+	runBuildCommand = func(*exec.Cmd) error { return nil }
+	rootCmd.SetArgs([]string{"build", "--engine", "docker", "--iidfile", iid, "."})
+	require.ErrorContains(t, rootCmd.Execute(), "did not update the image ID file")
 }
 
 func TestBuildEngineExit(t *testing.T) {

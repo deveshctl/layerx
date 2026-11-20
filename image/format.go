@@ -13,11 +13,11 @@ func formatUnsignedBytes(b uint64) string {
 	)
 	switch {
 	case b >= gb:
-		return fmt.Sprintf("%.1f GB", float64(b)/float64(gb))
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gb))
 	case b >= mb:
-		return fmt.Sprintf("%.1f MB", float64(b)/float64(mb))
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(mb))
 	case b >= kb:
-		return fmt.Sprintf("%.1f KB", float64(b)/float64(kb))
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(kb))
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
@@ -31,7 +31,7 @@ func FormatBytes(b int64) string {
 }
 
 // FormatSignedBytes formats b like FormatBytes but with an explicit sign
-// for non-zero values: "+12 MB", "-3.0 MB", "0 B". Used for net deltas.
+// for non-zero values: "+12 MiB", "-3.0 MiB", "0 B". Used for net deltas.
 func FormatSignedBytes(b int64) string {
 	if b == 0 {
 		return "0 B"

@@ -186,7 +186,7 @@ func writeHeartbeat(w io.Writer, ev image.ProgressEvent) {
 	}
 }
 
-// humanBytes formats a byte count as KB/MB/GB to one decimal place. We
+// humanBytes formats a byte count as KiB/MiB/GiB to one decimal place. We
 // don't pull in a third-party library for one helper; the rounding is
 // deliberately coarse — this output goes into a CI log, not a UI.
 func humanBytes(n int64) string {
@@ -197,11 +197,11 @@ func humanBytes(n int64) string {
 	)
 	switch {
 	case n >= gb:
-		return fmt.Sprintf("%.1f GB", float64(n)/float64(gb))
+		return fmt.Sprintf("%.1f GiB", float64(n)/float64(gb))
 	case n >= mb:
-		return fmt.Sprintf("%.1f MB", float64(n)/float64(mb))
+		return fmt.Sprintf("%.1f MiB", float64(n)/float64(mb))
 	case n >= kb:
-		return fmt.Sprintf("%.1f KB", float64(n)/float64(kb))
+		return fmt.Sprintf("%.1f KiB", float64(n)/float64(kb))
 	default:
 		return fmt.Sprintf("%d B", n)
 	}

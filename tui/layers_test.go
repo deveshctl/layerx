@@ -24,9 +24,9 @@ func TestFormatLayerLine_DeltaMode_HasSignedColumn(t *testing.T) {
 	l := makeLayer(1, 5*mb, 3*mb, "RUN apt-get install foo")
 	out := formatLayerLine(CatppuccinMocha(), themeStyles{}, l, false, 60, sizeColDelta, 30*mb)
 	// Should contain the signed delta string somewhere.
-	assert.Contains(t, out, "+3.0 MB")
+	assert.Contains(t, out, "+3.0 MiB")
 	// Should NOT contain the blob value when in delta mode.
-	assert.NotContains(t, out, "5.0 MB")
+	assert.NotContains(t, out, "5.0 MiB")
 }
 
 func TestFormatLayerLine_BlobMode_RegressionGuard(t *testing.T) {
@@ -34,23 +34,23 @@ func TestFormatLayerLine_BlobMode_RegressionGuard(t *testing.T) {
 	l := makeLayer(1, 5*mb, 3*mb, "RUN apt-get install foo")
 	out := formatLayerLine(CatppuccinMocha(), themeStyles{}, l, false, 60, sizeColBlob, 30*mb)
 	// Blob value should appear; signed delta should NOT.
-	assert.Contains(t, out, "5.0 MB")
-	assert.NotContains(t, out, "+3.0 MB")
+	assert.Contains(t, out, "5.0 MiB")
+	assert.NotContains(t, out, "+3.0 MiB")
 }
 
 func TestFormatLayerLine_BothMode_HasBothValues(t *testing.T) {
 	const mb = 1024 * 1024
 	l := makeLayer(1, 5*mb, 3*mb, "RUN apt-get install foo")
 	out := formatLayerLine(CatppuccinMocha(), themeStyles{}, l, false, 80, sizeColBoth, 30*mb)
-	assert.Contains(t, out, "5.0 MB")
-	assert.Contains(t, out, "+3.0 MB")
+	assert.Contains(t, out, "5.0 MiB")
+	assert.Contains(t, out, "+3.0 MiB")
 }
 
 func TestFormatLayerLine_NegativeDeltaRendersWithMinus(t *testing.T) {
 	const mb = 1024 * 1024
 	l := makeLayer(2, 1*mb, -2*mb, "RUN apt-get clean")
 	out := formatLayerLine(CatppuccinMocha(), themeStyles{}, l, false, 60, sizeColDelta, 30*mb)
-	assert.Contains(t, out, "-2.0 MB")
+	assert.Contains(t, out, "-2.0 MiB")
 }
 
 func TestRenderLayers_BothMode_FallsBackToDelta_OnNarrowPanel(t *testing.T) {
@@ -61,10 +61,10 @@ func TestRenderLayers_BothMode_FallsBackToDelta_OnNarrowPanel(t *testing.T) {
 	}
 	// width = 36 → contentWidth = 34, below the < 38 fallback threshold.
 	out := renderLayers(CatppuccinMocha(), themeStyles{}, layers, 0, 0, 36, 10, true, sizeColBoth, 8*mb)
-	// In delta-only fallback the blob value (5.0 MB) must be hidden;
+	// In delta-only fallback the blob value (5.0 MiB) must be hidden;
 	// only the signed delta column is rendered.
-	assert.NotContains(t, out, " 5.0 MB", "blob value (unsigned) must not appear in delta-fallback")
-	assert.Contains(t, out, "+5.0 MB")
+	assert.NotContains(t, out, " 5.0 MiB", "blob value (unsigned) must not appear in delta-fallback")
+	assert.Contains(t, out, "+5.0 MiB")
 }
 
 func TestRenderLayers_FocusedTitle_ReflectsSizeMode(t *testing.T) {

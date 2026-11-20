@@ -156,7 +156,7 @@ func renderTreeBody(in treePaneInput) (body string, hasAbove, hasBelow bool) {
 
 	if in.showFilterBar {
 		sb.WriteString("\n")
-		sb.WriteString(renderFilterBar(in.styles, in.filterActive, in.filterQuery, len(in.files), in.contentWidth))
+		sb.WriteString(renderFilterBar(in.styles, in.filterActive, in.filterQuery, len(in.files), in.contentWidth, in.currentLayer))
 	}
 
 	hasAbove = in.offset > 0
@@ -391,13 +391,15 @@ func renderTreeHeader(st themeStyles, maxWidth int, compact ...bool) string {
 	return st.metaDim.Render(header)
 }
 
-func renderFilterBar(st themeStyles, active bool, query string, matchCount int, maxWidth int) string {
+func renderFilterBar(st themeStyles, active bool, query string, matchCount, maxWidth, layer int) string {
+	scope := fmt.Sprintf("L%d ", layer+1)
+	maxWidth = max(0, maxWidth-ansi.StringWidth(scope))
 	if active {
-		return renderQueryBar(st, query, true, "", "", maxWidth)
+		return scope + renderQueryBar(st, query, true, "", "", maxWidth)
 	}
 	matches := st.statusDimRaw.Render(fmt.Sprintf("  (%d matches)", matchCount))
 	hint := st.unchanged.Render("  [⌫ clear]")
-	return renderQueryBar(st, query, false, matches, hint, maxWidth)
+	return scope + renderQueryBar(st, query, false, matches, hint, maxWidth)
 }
 
 func formatFileNodeLine(t Theme, st themeStyles, f *image.FileNode, selected bool, maxWidth int, treeMode bool, collapsed map[string]bool, currentLayer int, filterQuery string, compact ...bool) string {

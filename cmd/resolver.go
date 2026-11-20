@@ -3,8 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/deveshctl/layerx/image"
 	"github.com/deveshctl/layerx/image/engine"
@@ -59,6 +61,14 @@ func selectResolverDefault(imageRef string) (image.Resolver, error) {
 	}
 	if isRegularFilePath(imageRef) {
 		return image.NewArchiveResolverWithPlatform(imageRef, plat), nil
+	}
+	if filepath.IsAbs(imageRef) ||
+		strings.HasPrefix(imageRef, "./") || strings.HasPrefix(imageRef, "../") ||
+		(runtime.GOOS == "windows" && (strings.HasPrefix(imageRef, `.\`) || strings.HasPrefix(imageRef, `..\`))) {
+		if _, err := os.Lstat(imageRef); err != nil {
+			return nil, fmt.Errorf("opening image archive %q: %w", imageRef, err)
+		}
+		return nil, fmt.Errorf("image archive %q must be a regular file", imageRef)
 	}
 	return selectDockerLikeResolver(engineFlag, plat)
 }

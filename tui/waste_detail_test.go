@@ -152,7 +152,7 @@ func TestWasteCleanupAccessibleAtFullEfficiency(t *testing.T) {
 	out := ansi.Strip(m.renderWasteOverlay())
 	assert.Contains(t, out, "Live files may still offer cleanup")
 	assert.Contains(t, out, "Layer waste:       0 B")
-	assert.Contains(t, out, "Potential cleanup: 1.0 GB")
+	assert.Contains(t, out, "Potential cleanup: 1.0 GiB")
 	assert.Contains(t, out, "Tab Review cleanup")
 	m = send(m, keyPressSpecial(tea.KeyTab))
 	assert.True(t, m.wasteShowCleanup)
@@ -264,7 +264,7 @@ func TestWasteDeletionExplanationFitsAtMinimumSize(t *testing.T) {
 		cursor: 1,
 	}
 	out := ansi.Strip(m.renderWasteDetail())
-	assert.Contains(t, out, "Deleted later; 16.0 MB remains stored.")
+	assert.Contains(t, out, "Deleted later; 16.0 MiB remains stored.")
 	assert.Contains(t, out, "Layer 2 deleted the file")
 	assert.Contains(t, out, "Deleting later keeps earlier layer bytes.")
 	assert.Contains(t, out, "Enter to view layer")

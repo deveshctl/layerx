@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Go patch releases get their own update PRs so security fixes can land between monthly dependency updates.
 - Reject empty YAML size limits instead of silently skipping their checks.
 - Platform-pinned checks can reuse matching locally built images without trying to pull their tags from a registry.
+- Reject missing explicit config files and multi-document YAML so image checks cannot silently skip limits.
+- Analyze the image produced by the current build and skip inspection for check-only builds.
+- Report inspector failures with a nonzero exit, explain when a terminal or archive is missing, and label binary file sizes correctly.
+- Find files in the final image with `F` and see more file content in short terminals.
 
 ### Changed
 - File browsing now offers folder navigation keys, a files-only size list, and a wider names view.

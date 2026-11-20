@@ -102,14 +102,15 @@ in `.layerx.yaml` to use your terminal background.
 | Key         | Action                                                       |
 |-------------|--------------------------------------------------------------|
 | `Tab`       | Cycle panels (Layers → Layer files → Cumulative in split view) |
-| `j` / `k`   | Move up / down                                               |
+| `j` / `k`   | Move down / up                                               |
 | `g` / `G`   | Jump to top / bottom                                         |
 | `Ctrl-d` / `Ctrl-u` | Half page down / up (file tree and layers)           |
 | `Ctrl-f` / `Ctrl-b` | Page down / up — also `PgDn` / `PgUp`                |
 | `h` / `l`   | Navigate folders (tree) or scroll left / right (file viewer) |
 | `Enter`     | Confirm a filter, open a file, or expand/collapse a folder    |
 | `Esc`       | Close help, clear search/filter, or close the viewer. Quits only on loading and error screens. |
-| `/`         | Filter file tree (tree) / search in viewer (viewer)          |
+| `/`         | Filter the selected layer or search within an open file      |
+| `F`         | Find a file in the final image                              |
 | `Backspace` | Clear a confirmed tree filter |
 | `n` / `N`   | Next / previous search match (viewer)                        |
 | `y`         | Copy file path to clipboard                                  |

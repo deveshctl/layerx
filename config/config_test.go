@@ -17,9 +17,16 @@ func TestDefault(t *testing.T) {
 }
 
 func TestLoadFrom_MissingFile(t *testing.T) {
-	cfg, err := LoadFrom("/nonexistent/.layerx.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, Default(), cfg)
+	cfg, err := LoadFrom(filepath.Join(t.TempDir(), "missing.yaml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.Nil(t, cfg)
+}
+
+func TestLoadFrom_RejectsMultipleDocuments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".layerx.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("version: 1\n---\nsize-budget: {max: 1B}\n"), 0o600))
+	_, err := LoadFrom(path)
+	require.ErrorContains(t, err, "expected one YAML document")
 }
 
 func TestLoadFrom_ValidYAML(t *testing.T) {
@@ -182,10 +189,10 @@ func TestLoadFrom_RejectsUnknownTopLevelKey(t *testing.T) {
 // have surfaced as a misleading "parsing" error.
 func TestLoadFrom_EmptyFile_UsesDefaults(t *testing.T) {
 	cases := map[string]string{
-		"empty":             "",
-		"whitespace_only":   "   \n\n\t\n",
-		"comments_only":     "# just a comment\n# another\n",
-		"comments_and_ws":   "\n# placeholder\n\n",
+		"empty":           "",
+		"whitespace_only": "   \n\n\t\n",
+		"comments_only":   "# just a comment\n# another\n",
+		"comments_and_ws": "\n# placeholder\n\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

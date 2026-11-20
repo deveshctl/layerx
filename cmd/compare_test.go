@@ -362,7 +362,7 @@ func TestDrainProgress_RemoteFlow(t *testing.T) {
 
 	assert.Contains(t, out, "[old] resolving nginx:latest", "first event announces side+ref")
 	assert.Contains(t, out, "[old] pulling image", "phase entry line printed once")
-	assert.Contains(t, out, "[old] pulling: 1/3 layers, 10.0 KB / 30.0 KB")
+	assert.Contains(t, out, "[old] pulling: 1/3 layers, 10.0 KiB / 30.0 KiB")
 	assert.Contains(t, out, "[old] exporting image")
 	assert.Contains(t, out, "[old] parsing layers")
 }

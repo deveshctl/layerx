@@ -413,13 +413,13 @@ func TestViewLoadingPullProgressFitsInBox(t *testing.T) {
 	m.loadPhase = image.PhasePulling
 	m.pullLayers = 1
 	m.pullTotal = 3
-	m.pullBytes = 254 * 1024 * 1024         // "254.0 MB"
-	m.pullBytesMax = 4 * 1024 * 1024 * 1024 // "4.0 GB"
+	m.pullBytes = 254 * 1024 * 1024         // "254.0 MiB"
+	m.pullBytesMax = 4 * 1024 * 1024 * 1024 // "4.0 GiB"
 
 	content := viewContent(m.View())
 
-	assert.Contains(t, content, "254.0 MB", "current bytes must render in full")
-	assert.Contains(t, content, "4.0 GB", "total bytes must render in full")
+	assert.Contains(t, content, "254.0 MiB", "current bytes must render in full")
+	assert.Contains(t, content, "4.0 GiB", "total bytes must render in full")
 	assert.Contains(t, content, "Layer 1/3", "layer counter must render in full")
 }
 
@@ -490,7 +490,7 @@ func TestViewLoadingPullProgressNoBytesTotal(t *testing.T) {
 // TestViewLoadingPullProgressShrinksBarOnNarrowTerminal asserts the progress
 // bar shrinks (rather than overflowing or being truncated) when the terminal
 // is too narrow for the default 20-cell bar plus counter and bytes.
-// Regression: the bytes-total ("4.7 GB") was being clipped mid-value because
+// Regression: the bytes-total ("4.7 GiB") was being clipped mid-value because
 // the bar was hard-coded to 20 cells regardless of terminal width.
 func TestViewLoadingPullProgressShrinksBarOnNarrowTerminal(t *testing.T) {
 	m := NewModel(Config{ImageRef: "ai/qwen3"})
@@ -500,11 +500,11 @@ func TestViewLoadingPullProgressShrinksBarOnNarrowTerminal(t *testing.T) {
 	m.pullLayers = 1
 	m.pullTotal = 3
 	m.pullBytes = 69 * 1024 * 1024
-	m.pullBytesMax = 5046586573 // ~4.7 GB
+	m.pullBytesMax = 5046586573 // ~4.7 GiB
 
 	content := viewContent(m.View())
 
-	assert.Contains(t, content, "4.7 GB", "bytes-total must not be truncated on narrow terminal")
+	assert.Contains(t, content, "4.7 GiB", "bytes-total must not be truncated on narrow terminal")
 	assert.Contains(t, content, "Layer 1/3")
 	require.LessOrEqual(t, maxPanelLineWidth(content), 50,
 		"panel must not exceed terminal width")
@@ -521,11 +521,11 @@ func TestViewLoadingPullProgressDropsBarWhenTooNarrow(t *testing.T) {
 	m.pullLayers = 1
 	m.pullTotal = 3
 	m.pullBytes = 69 * 1024 * 1024
-	m.pullBytesMax = 5046586573 // ~4.7 GB
+	m.pullBytesMax = 5046586573 // ~4.7 GiB
 
 	content := viewContent(m.View())
 
-	assert.Contains(t, content, "4.7 GB")
+	assert.Contains(t, content, "4.7 GiB")
 	assert.Contains(t, content, "Layer 1/3")
 	assert.NotContains(t, content, "━", "bar should be omitted when terminal cannot fit ≥4 cells")
 	require.LessOrEqual(t, maxPanelLineWidth(content), 40)
@@ -543,9 +543,9 @@ func TestViewLoadingPullProgressBytesTotalNotClipped(t *testing.T) {
 		bytesMax  int64
 		expectMax string
 	}{
-		{"MB-range", 81920000, 361 * 1024 * 1024, "361.0 MB"},
-		{"GB-range", 2 * 1024 * 1024 * 1024, 4*1024*1024*1024 + 700*1024*1024, "4.7 GB"},
-		{"large-GB", 8 * 1024 * 1024 * 1024, 12 * 1024 * 1024 * 1024, "12.0 GB"},
+		{"MB-range", 81920000, 361 * 1024 * 1024, "361.0 MiB"},
+		{"GB-range", 2 * 1024 * 1024 * 1024, 4*1024*1024*1024 + 700*1024*1024, "4.7 GiB"},
+		{"large-GB", 8 * 1024 * 1024 * 1024, 12 * 1024 * 1024 * 1024, "12.0 GiB"},
 	}
 	for _, tc := range cases {
 		for w := 40; w <= 120; w++ {
@@ -953,6 +953,17 @@ func TestDiffToggleResetsCursor(t *testing.T) {
 }
 
 // --- Filter ------------------------------------------------------------------
+
+func TestFindInFinalImageMovesFromLayersToFilteredTree(t *testing.T) {
+	m := setupModelWithDiffs()
+	m.focus, m.diffOnly = focusLayers, true
+	m = send(m, keyPress('F'))
+	assert.Equal(t, len(m.layers())-1, m.layerCursor)
+	assert.Equal(t, focusTree, m.focus)
+	assert.True(t, m.filterActive)
+	assert.True(t, m.liveFilter)
+	assert.False(t, m.diffOnly)
+}
 
 func TestFilterActivation(t *testing.T) {
 	m := setupModelWithDiffs()
