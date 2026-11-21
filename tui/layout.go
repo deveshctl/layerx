@@ -53,7 +53,7 @@ func renderStatusLine(st themeStyles, hints []statusHint, right string, width in
 	if lipgloss.Width(left) > budget {
 		left = render(true)
 		for i := len(hints) - 1; i >= 0 && lipgloss.Width(left) > budget; i-- {
-			if hints[i].key == "?" || hints[i].key == "q" || hints[i].key == "Esc" {
+			if hints[i].key == "?" || hints[i].key == "q" || hints[i].key == "Esc" || hints[i].key == "Ctrl+C" {
 				continue
 			}
 			hints = append(hints[:i:i], hints[i+1:]...)

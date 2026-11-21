@@ -95,6 +95,12 @@ func styleWithFg(c color.Color) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c)
 }
 
+// Shared by the inspector and comparison headers so the brand cannot drift.
+func renderBrand(t Theme) string {
+	accent := styleWithFg(t.Accent).Background(t.StatusBg)
+	return accent.Render("◆") + accent.Bold(true).Render(" layerx")
+}
+
 // themeStyles holds lipgloss.Style values derived solely from the session
 // Theme. The theme is fixed at NewModel time and never changes, so these
 // styles are built once and reused for every frame instead of being

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/deveshctl/layerx/image"
+	"github.com/deveshctl/layerx/internal/atomicfile"
 )
 
 // jsonExport is the on-disk shape of `layerx --json`. SchemaVersion is the
@@ -37,7 +38,8 @@ type jsonExport struct {
 //
 // 1.0.2 — adds uncompressedLayerBytes and the observed measuredPlatform.
 // 1.0.1 — added optional "platform" field (omitempty); existing consumers
-//         that don't read it are unaffected, so this is a patch bump.
+//
+//	that don't read it are unaffected, so this is a patch bump.
 const jsonSchemaVersion = "1.0.2"
 
 type jsonEfficiency struct {
@@ -204,7 +206,7 @@ func writeJSONAtomic(targetPath string, data []byte) error {
 		os.Remove(tmp)
 		return cleanDiskWriteErr(targetPath, err)
 	}
-	if err := os.Rename(tmp, targetPath); err != nil {
+	if err := atomicfile.Rename(tmp, targetPath); err != nil {
 		os.Remove(tmp)
 		return cleanDiskWriteErr(targetPath, err)
 	}

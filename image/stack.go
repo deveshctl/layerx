@@ -1,40 +1,55 @@
 package image
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // Stack takes layers with populated Trees and returns one FileTree per layer,
 // each representing the cumulative filesystem state at that layer with DiffType
 // set on every node to indicate what the current layer changed.
 func Stack(layers []Layer) []*FileTree {
+	result, _ := stackContext(context.Background(), layers)
+	return result
+}
+
+// Check cancellation between layers. Individual tree merges remain atomic.
+func stackContext(ctx context.Context, layers []Layer) ([]*FileTree, error) {
 	result := make([]*FileTree, len(layers))
+	if err := stackEach(ctx, layers, func(i int, tree *FileTree) { result[i] = tree }); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func stackEach(ctx context.Context, layers []Layer, visit func(int, *FileTree)) error {
 	var cumulative *FileNode
 
 	for i, layer := range layers {
-		if layer.Tree == nil || layer.Tree.Root == nil || len(layer.Tree.Root.Children) == 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var tree *FileTree
+		hasFiles := layer.Tree != nil && layer.Tree.Root != nil && len(layer.Tree.Root.Children) > 0
+		if !hasFiles {
 			if cumulative == nil {
-				result[i] = NewFileTree()
+				tree = NewFileTree()
 			} else {
-				stacked := cloneAsUnchanged(cumulative)
-				result[i] = &FileTree{Root: stacked}
-				result[i].computeEffectiveSizes()
+				tree = &FileTree{Root: cloneAsUnchanged(cumulative)}
 			}
-			continue
-		}
-
-		if cumulative == nil {
-			stacked := cloneAsAdded(layer.Tree.Root, i)
-			result[i] = &FileTree{Root: stacked}
-			result[i].computeEffectiveSizes()
-			cumulative = cloneStructure(stacked)
+		} else if cumulative == nil {
+			tree = &FileTree{Root: cloneAsAdded(layer.Tree.Root, i)}
 		} else {
-			stacked := mergeLayer(cumulative, layer.Tree.Root, i)
-			result[i] = &FileTree{Root: stacked}
-			result[i].computeEffectiveSizes()
-			cumulative = cloneStructure(stacked)
+			tree = &FileTree{Root: mergeLayer(cumulative, layer.Tree.Root, i)}
 		}
+		tree.computeEffectiveSizes()
+		if hasFiles {
+			cumulative = cloneStructure(tree.Root)
+		}
+		visit(i, tree)
 	}
 
-	return result
+	return ctx.Err()
 }
 
 // carryForward names the function used to clone a cumulative-side node when
@@ -369,9 +384,17 @@ func cloneWithDiffType(node *FileNode) *FileNode {
 // tree size (baseline + final snapshot) plus ΣN intermediate snapshots,
 // comparable to Stack(layers)'s footprint.
 func BuildAggregatedTrees(layers []Layer) []*FileTree {
+	result, _ := aggregatedTreesContext(context.Background(), layers)
+	return result
+}
+
+func aggregatedTreesContext(ctx context.Context, layers []Layer) ([]*FileTree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result := make([]*FileTree, len(layers))
 	if len(layers) == 0 {
-		return result
+		return result, nil
 	}
 
 	var baseline *FileNode
@@ -385,6 +408,9 @@ func BuildAggregatedTrees(layers []Layer) []*FileTree {
 	result[0].computeEffectiveSizes()
 
 	for i := 1; i < len(layers); i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		layer := layers[i]
 		if layer.Tree == nil || layer.Tree.Root == nil || len(layer.Tree.Root.Children) == 0 {
 			result[i] = &FileTree{Root: cloneWithDiffType(baseline)}
@@ -396,7 +422,7 @@ func BuildAggregatedTrees(layers []Layer) []*FileTree {
 		result[i].computeEffectiveSizes()
 	}
 
-	return result
+	return result, ctx.Err()
 }
 
 func hasChangedChildren(node *FileNode) bool {

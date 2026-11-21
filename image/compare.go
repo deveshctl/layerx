@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"io/fs"
 	"sort"
 	"strings"
@@ -71,6 +72,9 @@ type WasteDiff struct {
 	BeforeWasted int64  `json:"beforeWasted"`
 	AfterWasted  int64  `json:"afterWasted"`
 	WastedDelta  int64  `json:"wastedDelta"`
+	// Zero-based layer of the first wasted copy on each side with waste.
+	BeforeFirstLayer int `json:"-"`
+	AfterFirstLayer  int `json:"-"`
 }
 
 type CompareResult struct {
@@ -101,8 +105,18 @@ type CompareResult struct {
 // either side has no layers — the diff still surfaces every Added/Removed
 // file, but score/waste deltas only carry meaning when both sides are real.
 func CompareAnalysis(before, after *Analysis) *CompareResult {
+	result, _ := CompareAnalysisContext(context.Background(), before, after)
+	return result
+}
+
+// CompareAnalysisContext computes a comparison and stops file traversal when
+// the interactive session is cancelled.
+func CompareAnalysisContext(ctx context.Context, before, after *Analysis) (*CompareResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if before == nil && after == nil {
-		return nil
+		return nil, nil
 	}
 	if before == nil {
 		before = &Analysis{}
@@ -140,11 +154,14 @@ func CompareAnalysis(before, after *Analysis) *CompareResult {
 	}
 
 	r.LayerDiffs = buildLayerDiffs(before.Layers, after.Layers)
-	r.FileDiffs, r.FileSummary = buildFileDiffs(finalStacked(before), finalStacked(after))
+	r.FileDiffs, r.FileSummary = buildFileDiffs(ctx, finalStacked(before), finalStacked(after))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.WasteDiffs = buildWasteDiffs(beforeEff, afterEff)
 	r.Warnings = buildWarnings(before.Layers, after.Layers, r.LayerDiffs)
 
-	return r
+	return r, ctx.Err()
 }
 
 // IsRegression reports whether `after` is materially worse than `before`:
@@ -300,6 +317,10 @@ func finalStacked(a *Analysis) *FileTree {
 // real entries), and Removed clones (the stacked tree retains those for TUI
 // visibility but they are not part of the live filesystem).
 func collectLiveFiles(tree *FileTree) map[string]fileSnapshot {
+	return collectLiveFilesContext(context.Background(), tree)
+}
+
+func collectLiveFilesContext(ctx context.Context, tree *FileTree) map[string]fileSnapshot {
 	out := make(map[string]fileSnapshot)
 	if tree == nil || tree.Root == nil {
 		return out
@@ -307,6 +328,9 @@ func collectLiveFiles(tree *FileTree) map[string]fileSnapshot {
 	var walk func(n *FileNode)
 	walk = func(n *FileNode) {
 		for _, c := range n.Children {
+			if ctx.Err() != nil {
+				return
+			}
 			if isWhiteoutName(c.Name) {
 				continue
 			}
@@ -331,14 +355,17 @@ func collectLiveFiles(tree *FileTree) map[string]fileSnapshot {
 	return out
 }
 
-func buildFileDiffs(before, after *FileTree) ([]FileDiff, FileDiffSummary) {
-	beforeMap := collectLiveFiles(before)
-	afterMap := collectLiveFiles(after)
+func buildFileDiffs(ctx context.Context, before, after *FileTree) ([]FileDiff, FileDiffSummary) {
+	beforeMap := collectLiveFilesContext(ctx, before)
+	afterMap := collectLiveFilesContext(ctx, after)
 
 	var diffs []FileDiff
 	var sum FileDiffSummary
 
 	for path, b := range beforeMap {
+		if ctx.Err() != nil {
+			return nil, FileDiffSummary{}
+		}
 		a, ok := afterMap[path]
 		if !ok {
 			diffs = append(diffs, FileDiff{
@@ -373,6 +400,9 @@ func buildFileDiffs(before, after *FileTree) ([]FileDiff, FileDiffSummary) {
 	}
 
 	for path, a := range afterMap {
+		if ctx.Err() != nil {
+			return nil, FileDiffSummary{}
+		}
 		if _, ok := beforeMap[path]; ok {
 			continue
 		}
@@ -432,17 +462,19 @@ func buildWasteDiffs(before, after *EfficiencyResult) []WasteDiff {
 
 	var out []WasteDiff
 	for path := range seen {
-		bw := beforeMap[path]
-		aw := afterMap[path]
+		old, next := beforeMap[path], afterMap[path]
+		bw, aw := old.TotalWasted, next.TotalWasted
 		delta := aw - bw
 		if delta == 0 {
 			continue
 		}
 		out = append(out, WasteDiff{
-			Path:         path,
-			BeforeWasted: bw,
-			AfterWasted:  aw,
-			WastedDelta:  delta,
+			Path:             path,
+			BeforeWasted:     bw,
+			AfterWasted:      aw,
+			WastedDelta:      delta,
+			BeforeFirstLayer: old.FirstWastedLayer,
+			AfterFirstLayer:  next.FirstWastedLayer,
 		})
 	}
 
@@ -456,13 +488,13 @@ func buildWasteDiffs(before, after *EfficiencyResult) []WasteDiff {
 	return out
 }
 
-func wastedFilesMap(r *EfficiencyResult) map[string]int64 {
-	m := make(map[string]int64)
+func wastedFilesMap(r *EfficiencyResult) map[string]WastedFile {
+	m := make(map[string]WastedFile)
 	if r == nil {
 		return m
 	}
 	for _, wf := range r.WastedFiles {
-		m[wf.Path] = wf.TotalWasted
+		m[wf.Path] = wf
 	}
 	return m
 }

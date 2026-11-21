@@ -1,0 +1,2 @@
+# Golden JSON is compared byte-for-byte with Go's LF output on every OS.
+/cmd/testdata/golden/*.json text eol=lf

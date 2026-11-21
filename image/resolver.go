@@ -70,4 +70,5 @@ type Layer struct {
 	// [i>0] = live bytes in stacked[i] minus stacked[i-1]. Negative when
 	// a layer net-removes more than it adds (cleanup, whiteout deletes).
 	NetDelta int64
+	imageID  string // Config digest from the same export as this layer; not persisted.
 }

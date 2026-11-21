@@ -1,6 +1,9 @@
 package image
 
-import "sort"
+import (
+	"context"
+	"sort"
+)
 
 type WastedFile struct {
 	Path        string
@@ -46,6 +49,9 @@ func EfficiencyFromAnalysis(a *Analysis) *EfficiencyResult {
 	if a == nil || len(a.Layers) == 0 {
 		return &EfficiencyResult{Score: 1.0}
 	}
+	if a.efficiency != nil {
+		return a.efficiency
+	}
 	stacked := a.StackedTrees
 	if len(stacked) != len(a.Layers) {
 		stacked = Stack(a.Layers)
@@ -87,9 +93,17 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	// Track stored payload identity, not just a hardlink's target pathname:
 	// an alias can retain an older copy after that name is rewritten/deleted.
 	livePayloads := survivingPayloads(indices)
+	return scoreEfficiency(context.Background(), layers, livePayloads, func(path string) []pathRun {
+		return pathRuns(path, indices)
+	})
+}
 
+func scoreEfficiency(ctx context.Context, layers []Layer, livePayloads map[payloadRef]int64, runsFor func(string) []pathRun) *EfficiencyResult {
 	paths := make(map[string]struct{})
 	for _, layer := range layers {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if layer.Tree == nil || layer.Tree.Root == nil {
 			continue
 		}
@@ -102,7 +116,10 @@ func computeEfficiency(layers []Layer, stacked []*FileTree) *EfficiencyResult {
 	var wastedFiles []WastedFile
 
 	for path := range paths {
-		runs := pathRuns(path, indices)
+		if ctx.Err() != nil {
+			return nil
+		}
+		runs := runsFor(path)
 		var pathWaste int64
 		var occurrenceCount int
 		firstWastedLayer := -1

@@ -7,6 +7,8 @@ import (
 )
 
 type Analysis struct {
+	// Digest identifies the analyzed export or cache entry, not a later tag lookup.
+	Digest           string
 	ImageRef         string
 	Layers           []Layer
 	StackedTrees     []*FileTree // per-layer delta view: filesystem changes introduced by each layer only.
@@ -14,6 +16,7 @@ type Analysis struct {
 	TotalSize        int64       // stored layer blobs; retained for export compatibility
 	UncompressedSize int64
 	Platform         string
+	efficiency       *EfficiencyResult // Precomputed for comparison-only analyses.
 }
 
 // AnalyzeOptions controls the analyze pipeline. Zero value is valid: caching
@@ -35,7 +38,8 @@ type AnalyzeOptions struct {
 	// appended to the cache key so that analyses for different platforms of
 	// the same image digest never share a cache entry. Empty = no platform
 	// pin; the behaviour is identical to before this field was added.
-	Platform string
+	Platform    string
+	compareOnly bool
 }
 
 func Analyze(ctx context.Context, resolver Resolver, imageRef string) (*Analysis, error) {
@@ -65,9 +69,12 @@ func AnalyzeWithProgress(ctx context.Context, resolver Resolver, imageRef string
 // either way. ImageRef is taken from imageRef (the current arg), never from
 // the envelope.
 func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string, opts AnalyzeOptions) (*Analysis, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cacheRoot := opts.CacheRoot
 	if cacheRoot == "" {
-		root, err := CacheDir()
+		root, err := cacheDir(func(message string) { emitCacheWarn(opts.Progress, message) })
 		if err == nil {
 			cacheRoot = root
 		}
@@ -76,11 +83,15 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 	}
 
 	digest, digestErr := resolver.ImageID(ctx, imageRef)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	canCache := digestErr == nil && digest != "" && cacheRoot != ""
 
 	var (
-		layers    []Layer
-		fromCache bool
+		layers         []Layer
+		fromCache      bool
+		analyzedDigest string
 	)
 	if canCache && !opts.NoCache {
 		cached, ok, loadErr := loadCacheWithPlatform(cacheRoot, digest, opts.Platform)
@@ -90,16 +101,23 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		if ok {
 			layers = cached
 			fromCache = true
+			analyzedDigest = digest
 			emitProgress(opts.Progress, ProgressEvent{Phase: PhaseCacheLoad})
 		}
 	}
 
 	if !fromCache {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fresh, err := resolver.ResolveWithProgress(ctx, imageRef, opts.Progress)
 		if err != nil {
 			return nil, err
 		}
 		layers = fresh
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
 		// Re-read ImageID after the resolve. Two reasons:
 		//  1. The image may not have been local before; ResolveWithProgress
@@ -109,33 +127,58 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		//     digest disagrees with pre-resolve, we don't know which set
 		//     of layers we actually exported, so refuse to cache.
 		postDigest, postErr := resolver.ImageID(ctx, imageRef)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if len(layers) > 0 && layers[0].imageID != "" {
+			analyzedDigest = layers[0].imageID
+		} else if digestErr == nil && postErr == nil && digest == postDigest {
+			analyzedDigest = digest
+		}
 		if cacheRoot != "" {
 			switch {
 			case postErr != nil || postDigest == "":
 				// Cannot verify; skip cache write. Surface the gap so users
 				// know cold cost will repeat.
 				emitCacheWarn(opts.Progress, "cache write skipped: post-resolve image digest unavailable")
-			case digestErr != nil:
-				// Pre-resolve digest was unknown (image was not local); use
-				// the post-resolve digest as the authoritative cache key.
-				if err := saveCacheWithPlatform(cacheRoot, postDigest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
-					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
-				}
-			case postDigest != digest:
-				// Tag flipped underneath us. Refuse to cache either way.
+			case (analyzedDigest != "" && analyzedDigest != postDigest) || (digestErr == nil && postDigest != digest):
+				// A later tag lookup must not authenticate a different export.
 				emitCacheWarn(opts.Progress,
 					"cache write skipped: image digest changed during analysis (concurrent pull?)")
 			default:
-				if err := saveCacheWithPlatform(cacheRoot, digest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
+				if err := saveCacheWithPlatform(cacheRoot, postDigest, opts.Platform, imageRef, layers, opts.Progress); err != nil {
 					emitCacheWarn(opts.Progress, fmt.Sprintf("cache write failed: %v", err))
 				}
 			}
 		}
 	}
 
-	stacked := Stack(layers)
-	aggregated := BuildAggregatedTrees(layers)
-	assignNetDeltas(layers, stacked)
+	var stacked, aggregated []*FileTree
+	var efficiency *EfficiencyResult
+	if opts.compareOnly {
+		final, score, err := compareFilesystem(ctx, layers)
+		if err != nil {
+			return nil, err
+		}
+		if final != nil {
+			stacked = []*FileTree{final}
+		}
+		efficiency = score
+	} else {
+		var err error
+		stacked, err = stackContext(ctx, layers)
+		if err != nil {
+			return nil, err
+		}
+		aggregated, err = aggregatedTreesContext(ctx, layers)
+		if err != nil {
+			return nil, err
+		}
+		assignNetDeltas(layers, stacked)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	var totalSize, uncompressedSize int64
 	var platform string
@@ -152,7 +195,11 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 			platform = meta.Platform
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return &Analysis{
+		Digest:           analyzedDigest,
 		ImageRef:         imageRef,
 		Layers:           layers,
 		StackedTrees:     stacked,
@@ -160,6 +207,7 @@ func AnalyzeWithOptions(ctx context.Context, resolver Resolver, imageRef string,
 		TotalSize:        totalSize,
 		UncompressedSize: uncompressedSize,
 		Platform:         platform,
+		efficiency:       efficiency,
 	}, nil
 }
 

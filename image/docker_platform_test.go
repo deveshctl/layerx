@@ -85,7 +85,7 @@ func TestResolve_DefaultPlatform(t *testing.T) {
 					fmt.Fprintln(w, `{"status":"Download complete"}`)
 				case "/images/get":
 					saves++
-					assert.Equal(t, []string{imageRef}, req.URL.Query()["names"])
+					assert.Equal(t, []string{"sha256:" + localArch}, req.URL.Query()["names"], "export must pin the inspected daemon identity")
 					if tc.wantSave == "" {
 						assert.Empty(t, req.URL.Query().Get("platform"))
 					} else {

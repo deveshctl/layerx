@@ -202,6 +202,43 @@ func TestArchiveResolver_ImageIDStableAcrossPaths(t *testing.T) {
 	assert.Equal(t, idA, idB)
 }
 
+func TestAnalyzeRejectsIncompleteArchiveWithWarmCache(t *testing.T) {
+	manifest, err := json.Marshal([]dockerManifest{{Config: "config.json", Layers: []string{"layer.tar"}}})
+	require.NoError(t, err)
+	config := buildConfig(t, []string{"COPY file"})
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, entry := range []struct {
+		name string
+		data []byte
+	}{
+		{"manifest.json", manifest},
+		{"config.json", config},
+	} {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: entry.name, Size: int64(len(entry.data)), Mode: 0600}))
+		_, err := tw.Write(entry.data)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Flush())
+	cutoff := buf.Len()
+	layer := buildSimpleLayerTar(t, map[string][]byte{"file": []byte("content")})
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "layer.tar", Size: int64(len(layer)), Mode: 0600}))
+	_, err = tw.Write(layer)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	path := filepath.Join(t.TempDir(), "image.tar")
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0600))
+	cache := t.TempDir()
+	_, err = AnalyzeWithOptions(t.Context(), NewArchiveResolver(path), path, AnalyzeOptions{CacheRoot: cache})
+	require.NoError(t, err)
+	for _, end := range []int{cutoff, cutoff + 512 + 1} {
+		require.NoError(t, os.WriteFile(path, buf.Bytes()[:end], 0600))
+		_, err := AnalyzeWithOptions(t.Context(), NewArchiveResolver(path), path, AnalyzeOptions{CacheRoot: cache})
+		var invalid *ErrInvalidArchive
+		require.ErrorAs(t, err, &invalid)
+	}
+}
+
 func TestArchiveResolver_ImageIDIsContentAddressed(t *testing.T) {
 	// Same config bytes referenced via two different filename stems must
 	// produce the same ImageID — proves the digest is derived from content,

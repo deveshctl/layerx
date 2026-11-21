@@ -23,10 +23,10 @@ type flatPathRules struct {
 
 // listPathRule mirrors one entry of the list YAML form:
 //
-//	- id: foo
-//	  type: block
-//	  paths: [...]
-//	  threshold: 3
+//   - id: foo
+//     type: block
+//     paths: [...]
+//     threshold: 3
 type listPathRule struct {
 	ID        string   `yaml:"id"`
 	Type      string   `yaml:"type"`
